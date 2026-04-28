@@ -89,6 +89,200 @@ const SALMON_SPOTS = [
   {name:"Waukegan Harbor Pier",addr:"Waukegan, IL",dist:"~40 mi",lat:42.359,lng:-87.829,season:"Coho: Apr–May & Oct",tag:"IL North",color:"#5a9fd4",tip:"Coho Capital of IL. Fish lake side only. Cleaning station on site.",apple:"maps://maps.apple.com/?daddr=42.359,-87.829",google:"https://maps.google.com/?daddr=42.359,-87.829"},
 ];
 
+// ─── PRIVATE SPOTS + STORAGE (device-local; aligns with Private_Spots schema) ───
+var PROFILE_STORAGE_KEY = "rfc_fishing_profile_v2";
+var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
+
+var CLUB_ROSTER = [
+  { id:"roster_1", name:"Jim K." },
+  { id:"roster_2", name:"Sarah M." },
+  { id:"roster_3", name:"Bob T." },
+  { id:"roster_4", name:"Maria G." },
+];
+
+var MOCK_CLUB_SHARED_SPOTS = [
+  { id:"club_demo_busse", name:"Busse Lake — south cove", lat:42.018, lng:-88.045, credit:"Jim K.", species_present:["Largemouth Bass","Crappie"], isDemo:true },
+];
+
+function sanitizeStr(s, maxLen) {
+  var m = maxLen != null ? maxLen : 4000;
+  if (typeof s !== "string") return "";
+  return s.replace(/\s+/g, " ").trim().slice(0, m);
+}
+
+function parseCoordNum(v) {
+  var n = parseFloat(String(v).trim());
+  return isFinite(n) ? n : NaN;
+}
+
+function loadLocationTrail() {
+  try {
+    var raw = localStorage.getItem(LOCATION_TRAIL_KEY);
+    if (!raw) return [];
+    var arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLocationTrail(points) {
+  try {
+    localStorage.setItem(LOCATION_TRAIL_KEY, JSON.stringify(points));
+  } catch (e) {}
+}
+
+function pruneTrailPoints(points, nowMs) {
+  var cutoff = nowMs - 48 * 60 * 60 * 1000;
+  return points.filter(function(p) {
+    return p && typeof p.t === "number" && p.t >= cutoff && typeof p.lat === "number" && typeof p.lng === "number";
+  });
+}
+
+function clusterTrailPoints(points, decimals) {
+  var d = decimals == null ? 3 : decimals;
+  var map = {};
+  points.forEach(function(p) {
+    var key = p.lat.toFixed(d) + "," + p.lng.toFixed(d);
+    if (!map[key]) map[key] = { lat:p.lat, lng:p.lng, count:0, lastT:p.t };
+    map[key].count += 1;
+    if (p.t > map[key].lastT) map[key].lastT = p.t;
+  });
+  return Object.keys(map).map(function(k) { return map[k]; }).sort(function(a, b) { return b.lastT - a.lastT; });
+}
+
+function loadStoredProfile() {
+  try {
+    var raw = localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    var o = JSON.parse(raw);
+    return o && typeof o === "object" ? o : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function persistProfileToStorage(profile) {
+  try {
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+  } catch (e) {}
+}
+
+function normalizeProfile(raw) {
+  var p = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  out.name = typeof p.name === "string" ? p.name : "";
+  out.email = typeof p.email === "string" ? p.email : "";
+  out.level = p.level || "Beginner";
+  out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
+  out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
+  out.gear = Array.isArray(p.gear) ? p.gear : [];
+  out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
+  out.spotActivityLog = Array.isArray(p.spotActivityLog) ? p.spotActivityLog : [];
+  out.memberId = typeof p.memberId === "string" && p.memberId ? p.memberId : "";
+  return out;
+}
+
+function appendSpotActivity(setProfile, message) {
+  var msg = sanitizeStr(message, 500);
+  if (!msg) return;
+  setProfile(function(p) {
+    var base = normalizeProfile(p);
+    var log = (base.spotActivityLog || []).slice();
+    log.unshift({ id:String(Date.now()), at:new Date().toISOString(), message:msg });
+    return Object.assign({}, base, { spotActivityLog:log.slice(0, 60) });
+  });
+}
+
+function patchPrivateSpot(setProfile, id, patch) {
+  setProfile(function(p) {
+    var base = normalizeProfile(p);
+    if (!base.memberId) base = Object.assign({}, base, { memberId:"mem_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10) });
+    var list = (base.privateSpots || []).map(function(s) {
+      if (s.id !== id) return s;
+      var merged = Object.assign({}, s, patch, { updated_at:new Date().toISOString() });
+      merged.is_shared = !!(merged.shareClub || (merged.sharedWith && merged.sharedWith.length > 0));
+      return merged;
+    });
+    return Object.assign({}, base, { privateSpots:list });
+  });
+}
+
+function deletePrivateSpotById(setProfile, id) {
+  setProfile(function(p) {
+    var base = normalizeProfile(p);
+    return Object.assign({}, base, { privateSpots:(base.privateSpots || []).filter(function(s) { return s.id !== id; }) });
+  });
+}
+
+function savePrivateSpotFull(setProfile, draft, editId) {
+  var lat = parseCoordNum(draft.lat);
+  var lng = parseCoordNum(draft.lng);
+  if (!draft.name || !sanitizeStr(draft.name, 1)) return { error:"Add a spot name." };
+  if (!isFinite(lat) || lat < -90 || lat > 90) return { error:"Latitude must be between -90 and 90." };
+  if (!isFinite(lng) || lng < -180 || lng > 180) return { error:"Longitude must be between -180 and 180." };
+  var nowIso = new Date().toISOString();
+  var id = editId || ("ps_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9));
+  var species = Array.isArray(draft.species_present) ? draft.species_present.filter(function(x) { return typeof x === "string"; }) : [];
+  var spot = {
+    id:id,
+    member_id:null,
+    name:sanitizeStr(draft.name, 200),
+    lat:lat,
+    lng:lng,
+    notes:sanitizeStr(draft.notes || "", 2000),
+    species_present:species,
+    access_info:sanitizeStr(draft.access_info || "", 2000),
+    is_shared:!!(draft.shareClub || (draft.sharedWith && draft.sharedWith.length)),
+    shareClub:!!draft.shareClub,
+    sharedWith:Array.isArray(draft.sharedWith) ? draft.sharedWith : [],
+    created_at:nowIso,
+    updated_at:nowIso,
+  };
+  setProfile(function(p) {
+    var base = normalizeProfile(p);
+    if (!base.memberId) base = Object.assign({}, base, { memberId:"mem_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10) });
+    var existing = (base.privateSpots || []).find(function(s) { return s.id === id; });
+    if (existing) {
+      spot.created_at = existing.created_at || nowIso;
+      spot.member_id = existing.member_id || base.memberId;
+      spot.is_shared = !!(spot.shareClub || (spot.sharedWith && spot.sharedWith.length > 0));
+    } else {
+      spot.member_id = base.memberId;
+      spot.is_shared = !!(spot.shareClub || (spot.sharedWith && spot.sharedWith.length > 0));
+    }
+    var list = (base.privateSpots || []).filter(function(s) { return s.id !== id; });
+    list.unshift(spot);
+    return Object.assign({}, base, { privateSpots:list });
+  });
+  return { ok:true };
+}
+
+function memberCreditFromProfile(profile) {
+  var n = (profile && profile.name && profile.name.trim()) || "Member";
+  var parts = n.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || "Member";
+  return parts[0] + " " + parts[parts.length - 1].charAt(0).toUpperCase() + ".";
+}
+
+function formatShortDate(iso) {
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month:"short", day:"numeric", year:"numeric" });
+  } catch (e) {
+    return "";
+  }
+}
+
+function formatLongShareDate(iso) {
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month:"long", day:"numeric", year:"numeric" });
+  } catch (e) {
+    return "";
+  }
+}
+
 // ─── LAKES DATABASE ───────────────────────────────────────────────────────────
 const LAKES = [
   {id:"sag_east",name:"Sag Quarry East",aka:"Trout Lake",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,maxDepth:45,avgDepth:22,species:["Rainbow Trout","Largemouth Bass","Bluegill"],primary:"Rainbow Trout",alert:"Trout Stamp required",
@@ -488,15 +682,174 @@ function SpeciesTab({ T }) {
 }
 
 // ─── SPOTS TAB ────────────────────────────────────────────────────────────────
-function SpotsTab({ profile, setProfile, T }) {
+function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
   const [mapSpot, setMapSpot] = useState(null);
-  var favSpots = (profile && profile.favSpots) || [];
+  const [privView, setPrivView] = useState("main");
+  const [privSpotId, setPrivSpotId] = useState(null);
+  const [saveDraft, setSaveDraft] = useState(null);
+  const [saveErr, setSaveErr] = useState("");
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoErr, setGeoErr] = useState("");
+  const [pastManualLat, setPastManualLat] = useState("");
+  const [pastManualLng, setPastManualLng] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const favSpots = (profile && profile.favSpots) || [];
+  const mySpots = (profile && profile.privateSpots) || [];
+
+  useEffect(function() {
+    if (spotsOpenSection === "my_spots") {
+      setPrivView("my");
+      setPrivSpotId(null);
+      if (typeof clearSpotsOpenSection === "function") clearSpotsOpenSection();
+    }
+  }, [spotsOpenSection, clearSpotsOpenSection]);
+
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        var now = Date.now();
+        var pts = pruneTrailPoints(loadLocationTrail(), now);
+        pts.push({ t:now, lat:pos.coords.latitude, lng:pos.coords.longitude });
+        if (pts.length > 200) pts = pts.slice(-200);
+        saveLocationTrail(pts);
+      },
+      function() {},
+      { enableHighAccuracy:false, maximumAge:120000, timeout:15000 }
+    );
+  }, []);
 
   function toggleFav(name) {
     var updated = favSpots.includes(name) ? favSpots.filter(function(s) { return s !== name; }) : favSpots.concat([name]);
-    setProfile(function(p) { return Object.assign({}, p, { favSpots: updated }); });
+    setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
+  }
+
+  function openSaveWithCoords(lat, lng) {
+    setSaveErr("");
+    setSaveDraft({
+      name:"",
+      lat:lat,
+      lng:lng,
+      notes:"",
+      species_present:[],
+      access_info:"",
+      shareClub:false,
+      sharedWith:[],
+    });
+    setPrivSpotId(null);
+    setPrivView("save");
+  }
+
+  function startSaveCurrentGps() {
+    setGeoErr("");
+    setGeoLoading(true);
+    if (!navigator.geolocation) {
+      setGeoLoading(false);
+      setGeoErr("GPS not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setGeoLoading(false);
+        openSaveWithCoords(pos.coords.latitude, pos.coords.longitude);
+      },
+      function() {
+        setGeoLoading(false);
+        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+      },
+      { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
+    );
+  }
+
+  function getPastClusters() {
+    var now = Date.now();
+    var pts = pruneTrailPoints(loadLocationTrail(), now);
+    return clusterTrailPoints(pts, 3);
+  }
+
+  function submitSaveForm() {
+    setSaveErr("");
+    var res = savePrivateSpotFull(setProfile, saveDraft, privSpotId);
+    if (res.error) {
+      setSaveErr(res.error);
+      return;
+    }
+    setPrivView("my");
+    setPrivSpotId(null);
+    setSaveDraft(null);
+  }
+
+  function setDraftField(k, v) {
+    setSaveDraft(function(d) {
+      if (!d) return d;
+      var n = Object.assign({}, d);
+      n[k] = v;
+      return n;
+    });
+  }
+
+  function toggleSpeciesSpecies(name) {
+    setSaveDraft(function(d) {
+      if (!d) return d;
+      var arr = (d.species_present || []).slice();
+      var i = arr.indexOf(name);
+      if (i >= 0) arr.splice(i, 1);
+      else arr.push(name);
+      return Object.assign({}, d, { species_present:arr });
+    });
+  }
+
+  function openEditSpot(id) {
+    var s = mySpots.find(function(x) { return x.id === id; });
+    if (!s) return;
+    setSaveDraft({
+      name:s.name,
+      lat:s.lat,
+      lng:s.lng,
+      notes:s.notes || "",
+      species_present:(s.species_present || []).slice(),
+      access_info:s.access_info || "",
+      shareClub:!!s.shareClub,
+      sharedWith:(s.sharedWith || []).slice(),
+    });
+    setPrivSpotId(s.id);
+    setSaveErr("");
+    setPrivView("save");
+  }
+
+  var selectedSpot = privSpotId ? mySpots.find(function(s) { return s.id === privSpotId; }) : null;
+
+  function toggleShareClub() {
+    if (!selectedSpot) return;
+    var next = !selectedSpot.shareClub;
+    var d = formatLongShareDate(new Date().toISOString());
+    patchPrivateSpot(setProfile, selectedSpot.id, { shareClub:next });
+    appendSpotActivity(
+      setProfile,
+      next
+        ? ("Shared " + sanitizeStr(selectedSpot.name, 120) + " with the club on " + d)
+        : ("Removed " + sanitizeStr(selectedSpot.name, 120) + " from the club map on " + d)
+    );
+  }
+
+  function toggleShareMember(mem) {
+    if (!selectedSpot) return;
+    var sw = (selectedSpot.sharedWith || []).slice();
+    var ix = sw.findIndex(function(m) { return m.id === mem.id; });
+    var nextList;
+    var msg;
+    var d = formatLongShareDate(new Date().toISOString());
+    if (ix >= 0) {
+      nextList = sw.filter(function(m) { return m.id !== mem.id; });
+      msg = ("Stopped sharing " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
+    } else {
+      nextList = sw.concat([{ id:mem.id, name:mem.name }]);
+      msg = ("Shared " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
+    }
+    patchPrivateSpot(setProfile, selectedSpot.id, { sharedWith:nextList });
+    appendSpotActivity(setProfile, msg);
   }
 
   if (mapSpot) {
@@ -519,6 +872,300 @@ function SpotsTab({ profile, setProfile, T }) {
     );
   }
 
+  if (privView === "save" && saveDraft) {
+    var inp = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setSaveErr(""); if (privSpotId) setPrivView("detail"); else setPrivView("main"); setSaveDraft(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>{privSpotId ? "Edit spot" : "Save private spot"}</div>
+        <Card T={T}>
+          <SecLabel text="Basics" T={T} />
+          <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Spot name</div>
+          <input value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div>
+              <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Latitude</div>
+              <input value={String(saveDraft.lat)} onChange={function(e) { setDraftField("lat", e.target.value); }} style={inp} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Longitude</div>
+              <input value={String(saveDraft.lng)} onChange={function(e) { setDraftField("lng", e.target.value); }} style={inp} />
+            </div>
+          </div>
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Species present" T={T} />
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {SPECIES.map(function(sp) {
+              var on = (saveDraft.species_present || []).indexOf(sp.name) >= 0;
+              return (
+                <button key={sp.id} type="button" onClick={function() { toggleSpeciesSpecies(sp.name); }} style={{ background:on ? sp.color + "33" : "transparent", border:"1px solid " + (on ? sp.color : th.border), borderRadius:20, color:on ? sp.color : th.muted, padding:"5px 10px", cursor:"pointer", fontSize:11 }}>
+                  {sp.emoji} {sp.name}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Notes" T={T} />
+          <textarea value={saveDraft.notes} onChange={function(e) { setDraftField("notes", e.target.value); }} placeholder="What worked, structure, depth…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Access (parking, trail, shore vs boat)" T={T} />
+          <textarea value={saveDraft.access_info} onChange={function(e) { setDraftField("access_info", e.target.value); }} placeholder="Where to park, path in, bank vs wading…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
+        </Card>
+        {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
+        <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"12px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
+          {privSpotId ? "Save changes" : "Save to My Private Spots"}
+        </button>
+        <div style={{ fontSize:10, color:th.muted, marginTop:10, lineHeight:1.5 }}>Saved spots stay private until you share them. Data is stored on this device.</div>
+      </div>
+    );
+  }
+
+  if (privView === "past") {
+    var clusters = getPastClusters();
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:8 }}>Save Past Location</div>
+        <Card T={T} borderColor={th.blue + "44"}>
+          <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>
+            iPhone Significant Locations and Google Location History are not available to websites. This app only reads <strong style={{ color:th.green }}>a simple trail you collect here</strong> (GPS points while you use Spots) — it stays on your phone until you save a spot.
+          </div>
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Recent clusters (last 48h, this device)" T={T} />
+          {clusters.length === 0 ? (
+            <div style={{ fontSize:12, color:th.muted }}>No trail yet. Move with the app open to build points, or use manual entry below.</div>
+          ) : (
+            clusters.map(function(c, i) {
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={function() {
+                    if (window.confirm("Save a spot at " + c.lat.toFixed(5) + ", " + c.lng.toFixed(5) + "?")) openSaveWithCoords(c.lat, c.lng);
+                  }}
+                  style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:8, cursor:"pointer", color:th.white }}
+                >
+                  <div style={{ fontSize:13, fontWeight:700 }}>📍 Area · {c.count} point{c.count !== 1 ? "s" : ""}</div>
+                  <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", marginTop:2 }}>{c.lat.toFixed(5)}, {c.lng.toFixed(5)}</div>
+                  <div style={{ fontSize:10, color:th.green, marginTop:4 }}>Tap to use these coordinates →</div>
+                </button>
+              );
+            })
+          )}
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Or enter coordinates manually" T={T} />
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <input value={pastManualLat} onChange={function(e) { setPastManualLat(e.target.value); }} placeholder="Latitude" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", color:th.white, fontSize:13, boxSizing:"border-box" }} />
+            <input value={pastManualLng} onChange={function(e) { setPastManualLng(e.target.value); }} placeholder="Longitude" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", color:th.white, fontSize:13, boxSizing:"border-box" }} />
+          </div>
+          <button
+            type="button"
+            onClick={function() {
+              var la = parseCoordNum(pastManualLat);
+              var ln = parseCoordNum(pastManualLng);
+              if (!isFinite(la) || !isFinite(ln)) {
+                alert("Enter valid latitude and longitude numbers.");
+                return;
+              }
+              openSaveWithCoords(la, ln);
+            }}
+            style={{ width:"100%", marginTop:10, background:th.blue, color:"#fff", border:"none", borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, fontWeight:700 }}
+          >
+            Use these coordinates
+          </button>
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Pick from a map" T={T} />
+          <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", textDecoration:"none", color:th.blue, fontWeight:700, fontSize:13 }}>
+            Open Google Maps — long-press to copy coords, paste above
+          </a>
+        </Card>
+      </div>
+    );
+  }
+
+  if (privView === "detail" && selectedSpot) {
+    var rosterF = CLUB_ROSTER.filter(function(m) {
+      return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
+    });
+    var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
+    var shareLabel = selectedSpot.shareClub ? "Shared with Club" : (selectedSpot.sharedWith && selectedSpot.sharedWith.length ? "Shared with " + selectedSpot.sharedWith.map(function(m) { return m.name; }).join(", ") : "Private");
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setPrivView("my"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>{selectedSpot.name}</div>
+        <div style={{ fontSize:11, color:th.gold, marginBottom:12 }}>{shareLabel}</div>
+        <img src={mapImg} alt="" style={{ width:"100%", borderRadius:10, border:"1px solid " + th.border, marginBottom:12 }} />
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <a href={"https://maps.google.com/?q=" + selectedSpot.lat + "," + selectedSpot.lng} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
+          <a href={"maps://maps.apple.com/?daddr=" + selectedSpot.lat + "," + selectedSpot.lng} style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
+        </div>
+        <Card T={T}>
+          <SecLabel text="Coordinates" T={T} />
+          <div style={{ fontSize:12, color:th.white, fontFamily:"monospace" }}>{selectedSpot.lat.toFixed(6)}, {selectedSpot.lng.toFixed(6)}</div>
+        </Card>
+        {selectedSpot.species_present && selectedSpot.species_present.length ? (
+          <Card T={T}>
+            <SecLabel text="Species" T={T} />
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {selectedSpot.species_present.map(function(nm) { return <Pill key={nm} label={nm} color={th.green} />; })}
+            </div>
+          </Card>
+        ) : null}
+        {selectedSpot.notes ? (
+          <Card T={T}><SecLabel text="Notes" T={T} /><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{selectedSpot.notes}</div></Card>
+        ) : null}
+        {selectedSpot.access_info ? (
+          <Card T={T}><SecLabel text="Access" T={T} /><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{selectedSpot.access_info}</div></Card>
+        ) : null}
+        <Card T={T}>
+          <SecLabel text="Sharing" T={T} />
+          <label style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, cursor:"pointer" }}>
+            <input type="checkbox" checked={!!selectedSpot.shareClub} onChange={toggleShareClub} />
+            <span style={{ fontSize:13, color:th.white }}>Share with Club (club map)</span>
+          </label>
+          <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members</div>
+          <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search roster…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {rosterF.map(function(m) {
+              var on = (selectedSpot.sharedWith || []).some(function(x) { return x.id === m.id; });
+              return (
+                <button key={m.id} type="button" onClick={function() { toggleShareMember(m); }} style={{ textAlign:"left", background:on ? th.green + "22" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12 }}>
+                  {on ? "✓ " : ""}{m.name}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+        <button type="button" onClick={function() { openEditSpot(selectedSpot.id); }} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, color:th.white, borderRadius:8, padding:10, cursor:"pointer", fontWeight:700, marginBottom:8 }}>
+          Edit spot
+        </button>
+        <button
+          type="button"
+          onClick={function() {
+            if (window.confirm("Delete this spot permanently?")) {
+              deletePrivateSpotById(setProfile, selectedSpot.id);
+              setPrivView("my");
+              setPrivSpotId(null);
+            }
+          }}
+          style={{ width:"100%", background:"transparent", border:"1px solid " + th.red, color:th.red, borderRadius:8, padding:10, cursor:"pointer", fontWeight:700 }}
+        >
+          Delete spot
+        </button>
+      </div>
+    );
+  }
+
+  if (privView === "mymap") {
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setPrivView("my"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>My spots on the map</div>
+        {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No private spots saved yet.</div></Card> : null}
+        {mySpots.map(function(s) {
+          var img = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
+          return (
+            <Card key={s.id} T={T}>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <img src={img} alt="" style={{ width:"100%", borderRadius:8, border:"1px solid " + th.border }} />
+              <OBtn label="Open in maps" onClick={function() { window.open("https://maps.google.com/?q=" + s.lat + "," + s.lng, "_blank"); }} color={th.blue} style={{ marginTop:8, fontSize:11 }} />
+            </Card>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (privView === "club") {
+    var myShared = mySpots.filter(function(s) { return s.shareClub; });
+    var credit = memberCreditFromProfile(profile);
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:8 }}>Club map (shared pins)</div>
+        <Card T={T} borderColor={th.gold + "44"}>
+          <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>Turning off &quot;Share with Club&quot; removes your pin from this list immediately. A full club sync would use the Private_Spots table on the server.</div>
+        </Card>
+        {MOCK_CLUB_SHARED_SPOTS.map(function(s) {
+          var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=14&size=400x160&markers=" + s.lat + "," + s.lng + ",blue-pushpin";
+          return (
+            <Card key={s.id} T={T}>
+              <div style={{ fontSize:10, color:th.gold, marginBottom:4 }}>Spotted by {s.credit}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <img src={im} alt="" style={{ width:"100%", borderRadius:8 }} />
+              <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
+            </Card>
+          );
+        })}
+        {myShared.map(function(s) {
+          var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
+          return (
+            <Card key={s.id} T={T} borderColor={th.green + "44"}>
+              <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {credit}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <img src={im} alt="" style={{ width:"100%", borderRadius:8 }} />
+              <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
+            </Card>
+          );
+        })}
+        {myShared.length === 0 && MOCK_CLUB_SHARED_SPOTS.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No shared pins yet.</div></Card> : null}
+      </div>
+    );
+  }
+
+  if (privView === "my") {
+    var log = (profile && profile.spotActivityLog) || [];
+    return (
+      <div>
+        <OBtn label="Back" onClick={function() { setPrivView("main"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>My Private Spots</div>
+        <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
+          <OBtn label="Club map" onClick={function() { setPrivView("club"); }} color={th.gold} />
+          <OBtn label="My map" onClick={function() { setPrivView("mymap"); }} color={th.blue} />
+        </div>
+        {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No spots yet. Use Save This Spot on the map list.</div></Card> : null}
+        {mySpots.map(function(s) {
+          var st = s.shareClub ? "Shared w/ Club" : (s.sharedWith && s.sharedWith.length ? "Shared w/ " + s.sharedWith[0].name + (s.sharedWith.length > 1 ? " +" + (s.sharedWith.length - 1) : "") : "Private");
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={function() {
+                setPrivSpotId(s.id);
+                setMemberSearch("");
+                setPrivView("detail");
+              }}
+              style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, marginBottom:8, cursor:"pointer", color:th.white }}
+            >
+              <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
+              <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Saved {formatShortDate(s.created_at)} · {st}</div>
+              <div style={{ fontSize:11, color:th.green, marginTop:4 }}>{(s.species_present || []).slice(0, 4).join(", ")}{(s.species_present && s.species_present.length > 4 ? "…" : "")}</div>
+            </button>
+          );
+        })}
+        <Card T={T}>
+          <SecLabel text="Sharing activity" T={T} />
+          {log.length === 0 ? <div style={{ fontSize:12, color:th.muted }}>No sharing activity yet.</div> : null}
+          {log.slice(0, 20).map(function(row) {
+            return (
+              <div key={row.id} style={{ fontSize:11, color:th.white, borderBottom:"1px solid " + th.border, paddingBottom:8, marginBottom:8 }}>
+                <span style={{ color:th.muted }}>{formatShortDate(row.at)}</span>
+                <br />
+                {row.message}
+              </div>
+            );
+          })}
+        </Card>
+      </div>
+    );
+  }
+
   function SpotCard(props) {
     var s = props.s;
     return (
@@ -532,7 +1179,7 @@ function SpotsTab({ profile, setProfile, T }) {
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
             <Pill label={s.tag} color={s.color} />
             <span style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
-            <button onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:18 }}>
+            <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:18 }}>
               {favSpots.includes(s.name) ? "⭐" : "☆"}
             </button>
           </div>
@@ -551,10 +1198,25 @@ function SpotsTab({ profile, setProfile, T }) {
 
   return (
     <div>
-      <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
+      <Card T={T} borderColor={th.green + "33"}>
+        <div style={{ fontSize:12, color:th.white, lineHeight:1.65, marginBottom:10 }}>
+          <strong style={{ color:th.green }}>Privacy:</strong> Your location history stays on your phone. Only spots you save are stored. Nothing is uploaded unless you add a backend.
+        </div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+          <button type="button" disabled={geoLoading} onClick={startSaveCurrentGps} style={{ flex:1, minWidth:120, background:th.green + "33", border:"1px solid " + th.green, borderRadius:8, padding:"10px 8px", color:th.green, fontWeight:700, fontSize:12, cursor:"pointer" }}>
+            {geoLoading ? "Locating…" : "Save This Spot"}
+          </button>
+          <button type="button" onClick={function() { setPrivView("past"); }} style={{ flex:1, minWidth:120, background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, padding:"10px 8px", color:th.blue, fontWeight:700, fontSize:12, cursor:"pointer" }}>Save Past Location</button>
+          <button type="button" onClick={function() { setPrivView("my"); }} style={{ flex:1, minWidth:120, background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 8px", color:th.white, fontWeight:700, fontSize:12, cursor:"pointer" }}>My Private Spots</button>
+        </div>
+        {geoErr ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>{geoErr}</div> : null}
+      </Card>
+
+      <div style={{ display:"flex", gap:8, margin:"12px 0", flexWrap:"wrap" }}>
         <OBtn label="Local" onClick={function() { setView("local"); }} color={view==="local" ? th.green : th.muted} />
         <OBtn label="Salmon Trail" onClick={function() { setView("salmon"); }} color={view==="salmon" ? th.blue : th.muted} />
         {favSpots.length > 0 ? <OBtn label="Saved" onClick={function() { setView("fav"); }} color={view==="fav" ? th.gold : th.muted} /> : null}
+        <OBtn label="Club map" onClick={function() { setPrivView("club"); }} color={th.gold} />
       </div>
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
       {view === "salmon" && (
@@ -1103,16 +1765,23 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
-  const [form, setForm] = useState(profile || { name:"", email:"", level:"Beginner", favSpecies:[], favSpots:[], gear:[] });
+  const [form, setForm] = useState(normalizeProfile(profile));
   const [saved, setSaved] = useState(false);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function setG(k, v) { setNewGear(function(g) { return Object.assign({}, g, { [k]: v }); }); }
-  function save() { setProfile(form); setSaved(true); setTimeout(function() { setSaved(false); }, 2000); }
+  function save() {
+    setProfile(function(p) {
+      var prev = normalizeProfile(p);
+      return normalizeProfile(Object.assign({}, prev, form, { privateSpots:prev.privateSpots, spotActivityLog:prev.spotActivityLog, memberId:prev.memberId }));
+    });
+    setSaved(true);
+    setTimeout(function() { setSaved(false); }, 2000);
+  }
   function toggleSp(s) {
     var favSp = form.favSpecies || [];
     setF("favSpecies", favSp.includes(s) ? favSp.filter(function(x) { return x !== s; }) : favSp.concat([s]));
@@ -1203,6 +1872,14 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T }) {
         <span style={{ color:th.green, fontSize:20 }}>›</span>
       </button>
 
+      <button type="button" onClick={function() { if (typeof goMyPrivateSpots === "function") goMyPrivateSpots(); }} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:14, cursor:"pointer", textAlign:"left", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>My Private Spots</div>
+          <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{(profile && profile.privateSpots && profile.privateSpots.length) || 0} saved · sharing controls</div>
+        </div>
+        <span style={{ color:th.green, fontSize:20 }}>›</span>
+      </button>
+
       <Card T={T}>
         <SecLabel text="Favorite Species (for home feed)" T={T} />
         <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
@@ -1267,20 +1944,33 @@ var NAV = [
 export default function App() {
   const [tab, setTab] = useState("home");
   const [theme, setTheme] = useState("dark");
-  const [profile, setProfile] = useState({ name:"", email:"", level:"Beginner", favSpecies:[], favSpots:[], gear:[] });
+  const [spotsOpenSection, setSpotsOpenSection] = useState(null);
+  const [profile, setProfile] = useState(function() {
+    var stored = loadStoredProfile();
+    var n = normalizeProfile(stored);
+    if (!n.memberId) n.memberId = "mem_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+    return n;
+  });
   var th = THEMES[theme];
+
+  var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
+  var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
+
+  useEffect(function() {
+    persistProfileToStorage(profile);
+  }, [profile]);
 
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
       <div style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
-        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} />}
+        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
