@@ -1,5 +1,15 @@
+# Dependencies & build
+node_modules/
 dist/
-node_modules/
+
+# OS / editor
 .DS_Store
-node_modules/
-node_modules/
+
+# Cursor / Claude — local AI rules & IDE state (keep off public repos)
+.cursor/
+.claude/
+
+# Secrets & local env (never commit real keys)
+.env
+.env.*
+!.env.example
