@@ -877,10 +877,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     return (
       <div>
         <OBtn label="Back" onClick={function() { setSaveErr(""); if (privSpotId) setPrivView("detail"); else setPrivView("main"); setSaveDraft(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>{privSpotId ? "Edit spot" : "Save private spot"}</div>
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>{privSpotId ? "Edit your spot" : "Name your fishing spot"}</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Give it a name you will recognize later. Coordinates fill in automatically — you can adjust them if needed.</p>
         <Card T={T}>
           <SecLabel text="Basics" T={T} />
-          <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Spot name</div>
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Spot name</div>
           <input value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
             <div>
@@ -915,10 +916,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           <textarea value={saveDraft.access_info} onChange={function(e) { setDraftField("access_info", e.target.value); }} placeholder="Where to park, path in, bank vs wading…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
-        <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"12px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
-          {privSpotId ? "Save changes" : "Save to My Private Spots"}
+        <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
+          {privSpotId ? "Save changes" : "Save to my spots"}
         </button>
-        <div style={{ fontSize:10, color:th.muted, marginTop:10, lineHeight:1.5 }}>Saved spots stay private until you share them. Data is stored on this device.</div>
+        <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>Stays private until you choose sharing from your spot details.</div>
       </div>
     );
   }
@@ -927,8 +928,9 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var clusters = getPastClusters();
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:8 }}>Save Past Location</div>
+        <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Save without GPS here</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Pick a recent point from this device or type numbers — good when GPS is off or you are entering an old spot.</p>
         <Card T={T} borderColor={th.blue + "44"}>
           <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>
             iPhone Significant Locations and Google Location History are not available to websites. This app only reads <strong style={{ color:th.green }}>a simple trail you collect here</strong> (GPS points while you use Spots) — it stays on your phone until you save a spot.
@@ -1065,8 +1067,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   if (privView === "mymap") {
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setPrivView("my"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>My spots on the map</div>
+        <OBtn label="← Back to my spots" onClick={function() { setPrivView("my"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:10 }}>Pictures of each save</div>
         {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No private spots saved yet.</div></Card> : null}
         {mySpots.map(function(s) {
           var img = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
@@ -1087,8 +1089,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var credit = memberCreditFromProfile(profile);
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:8 }}>Club map (shared pins)</div>
+        <OBtn label="← Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Club shared map</div>
         <Card T={T} borderColor={th.gold + "44"}>
           <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>Turning off &quot;Share with Club&quot; removes your pin from this list immediately. A full club sync would use the Private_Spots table on the server.</div>
         </Card>
@@ -1123,13 +1125,30 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var log = (profile && profile.spotActivityLog) || [];
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setPrivView("main"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>My Private Spots</div>
-        <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
-          <OBtn label="Club map" onClick={function() { setPrivView("club"); }} color={th.gold} />
-          <OBtn label="My map" onClick={function() { setPrivView("mymap"); }} color={th.blue} />
+        <GuideMyToggle modeGuide={false} />
+
+        <PrimarySaveStrip />
+
+        <div style={{ fontSize:20, color:th.white, fontWeight:800, marginBottom:10 }}>My fishing spots</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 14px", lineHeight:1.55 }}>Everything here is yours. Names, notes, and map pins stay on this device until you share.</p>
+
+        <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
+          <button type="button" onClick={function() { setPrivView("mymap"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.blue, background:th.blue + "15", color:th.blue, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            🗺️ Map of my saves
+          </button>
+          <button type="button" onClick={function() { setPrivView("club"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.gold, background:th.gold + "12", color:th.gold, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+            👥 Club map
+          </button>
         </div>
-        {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No spots yet. Use Save This Spot on the map list.</div></Card> : null}
+
+        <OBtn label="← Back to fishing guide list" onClick={function() { setPrivView("main"); setPrivSpotId(null); }} color={th.green} style={{ margin:"0 0 14px", fontSize:13 }} />
+
+        {mySpots.length === 0 ? (
+          <Card T={T}>
+            <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
+            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Save my fishing spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
+          </Card>
+        ) : null}
         {mySpots.map(function(s) {
           var st = s.shareClub ? "Shared w/ Club" : (s.sharedWith && s.sharedWith.length ? "Shared w/ " + s.sharedWith[0].name + (s.sharedWith.length > 1 ? " +" + (s.sharedWith.length - 1) : "") : "Private");
           return (
@@ -1172,14 +1191,14 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <Card T={T} borderColor={s.color + "44"} style={{ borderLeft:"3px solid " + s.color }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
           <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{s.name}</div>
-            <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", marginTop:1 }}>{s.addr}</div>
-            {props.salmon ? <div style={{ fontSize:10, color:th.gold, marginTop:2 }}>📅 {s.season}</div> : null}
+            <div style={{ fontWeight:700, color:th.white, fontSize:15 }}>{s.name}</div>
+            <div style={{ fontSize:12, color:th.muted, fontFamily:"monospace", marginTop:2 }}>{s.addr}</div>
+            {props.salmon ? <div style={{ fontSize:11, color:th.gold, marginTop:3 }}>📅 {s.season}</div> : null}
           </div>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
             <Pill label={s.tag} color={s.color} />
-            <span style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
-            <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:18 }}>
+            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
+            <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:22, minWidth:44, minHeight:44 }}>
               {favSpots.includes(s.name) ? "⭐" : "☆"}
             </button>
           </div>
@@ -1189,45 +1208,266 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             {s.species.map(function(sp) { return <Pill key={sp} label={sp} color={th.green} />; })}
           </div>
         ) : null}
-        <div style={{ fontSize:12, color:th.white, marginBottom:6 }}>💡 {s.tip}</div>
-        {s.alert ? <div style={{ fontSize:10, color:th.orange, marginBottom:6 }}>⚠️ {s.alert}</div> : null}
-        <OBtn label="Get Directions" onClick={function() { setMapSpot(s); }} color={th.blue} style={{ fontSize:11, padding:"5px 10px" }} />
+        <div style={{ fontSize:13, color:th.white, marginBottom:8, lineHeight:1.55 }}>💡 {s.tip}</div>
+        {s.alert ? <div style={{ fontSize:11, color:th.orange, marginBottom:8 }}>⚠️ {s.alert}</div> : null}
+        <OBtn label="Open directions" onClick={function() { setMapSpot(s); }} color={th.blue} style={{ fontSize:13, padding:"8px 14px" }} />
       </Card>
+    );
+  }
+
+  function GuideMyToggle(props) {
+    var modeGuide = props.modeGuide;
+    return (
+      <div style={{ display:"flex", gap:10, marginBottom:14 }} role="tablist" aria-label="Choose guide or your spots">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={modeGuide}
+          onClick={function() { setPrivView("main"); setPrivSpotId(null); }}
+          style={{
+            flex:1,
+            minHeight:72,
+            padding:"12px 10px",
+            borderRadius:14,
+            border:"3px solid " + (modeGuide ? th.green : th.border),
+            background:modeGuide ? th.green + "40" : th.card,
+            color:th.white,
+            fontWeight:800,
+            fontSize:15,
+            lineHeight:1.25,
+            cursor:"pointer",
+            textAlign:"center",
+          }}
+        >
+          Fishing areas<br />
+          <span style={{ fontSize:12, fontWeight:600, color:modeGuide ? th.white : th.muted }}>(in this app)</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!modeGuide}
+          onClick={function() { setPrivView("my"); setPrivSpotId(null); }}
+          style={{
+            flex:1,
+            minHeight:72,
+            padding:"12px 10px",
+            borderRadius:14,
+            border:"3px solid " + (!modeGuide ? th.green : th.border),
+            background:!modeGuide ? th.green + "40" : th.card,
+            color:th.white,
+            fontWeight:800,
+            fontSize:15,
+            lineHeight:1.25,
+            cursor:"pointer",
+            textAlign:"center",
+          }}
+        >
+          My fishing spots<br />
+          <span style={{ fontSize:12, fontWeight:600, color:!modeGuide ? th.white : th.muted }}>(your saves)</span>
+        </button>
+      </div>
+    );
+  }
+
+  function PrimarySaveStrip() {
+    return (
+      <div style={{ marginBottom:14 }}>
+        <button
+          type="button"
+          disabled={geoLoading}
+          onClick={startSaveCurrentGps}
+          style={{
+            width:"100%",
+            background:th.green,
+            color:"#081208",
+            border:"none",
+            borderRadius:14,
+            padding:"18px 16px",
+            cursor:geoLoading ? "wait" : "pointer",
+            fontSize:18,
+            fontWeight:800,
+            boxShadow:"0 6px 22px rgba(0,0,0,0.45)",
+            display:"flex",
+            alignItems:"center",
+            justifyContent:"center",
+            gap:12,
+            minHeight:56,
+          }}
+        >
+          <span style={{ fontSize:28 }} aria-hidden>📍</span>
+          <span>{geoLoading ? "Finding where you are…" : "Save my fishing spot"}</span>
+        </button>
+        <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
+          Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
+        </p>
+      </div>
+    );
+  }
+
+  function StickySaveBar() {
+    return (
+      <div
+        style={{
+          position:"sticky",
+          bottom:76,
+          zIndex:15,
+          marginTop:20,
+          paddingTop:12,
+          paddingBottom:6,
+          background:"linear-gradient(180deg, transparent 0%, " + th.bg + " 35%)",
+        }}
+      >
+        <button
+          type="button"
+          disabled={geoLoading}
+          onClick={startSaveCurrentGps}
+          style={{
+            width:"100%",
+            background:th.green,
+            color:"#081208",
+            border:"2px solid " + th.dim,
+            borderRadius:12,
+            padding:"14px 12px",
+            cursor:geoLoading ? "wait" : "pointer",
+            fontSize:16,
+            fontWeight:800,
+            display:"flex",
+            alignItems:"center",
+            justifyContent:"center",
+            gap:8,
+            minHeight:52,
+            boxShadow:"0 -2px 12px rgba(0,0,0,0.35)",
+          }}
+        >
+          <span style={{ fontSize:22 }} aria-hidden>📍</span>
+          {geoLoading ? "Working…" : "Save my spot"}
+        </button>
+        <div style={{ fontSize:11, color:th.muted, textAlign:"center", marginTop:6 }}>Tap here anytime while you scroll the list</div>
+      </div>
     );
   }
 
   return (
     <div>
-      <Card T={T} borderColor={th.green + "33"}>
-        <div style={{ fontSize:12, color:th.white, lineHeight:1.65, marginBottom:10 }}>
-          <strong style={{ color:th.green }}>Privacy:</strong> Your location history stays on your phone. Only spots you save are stored. Nothing is uploaded unless you add a backend.
-        </div>
-        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-          <button type="button" disabled={geoLoading} onClick={startSaveCurrentGps} style={{ flex:1, minWidth:120, background:th.green + "33", border:"1px solid " + th.green, borderRadius:8, padding:"10px 8px", color:th.green, fontWeight:700, fontSize:12, cursor:"pointer" }}>
-            {geoLoading ? "Locating…" : "Save This Spot"}
-          </button>
-          <button type="button" onClick={function() { setPrivView("past"); }} style={{ flex:1, minWidth:120, background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, padding:"10px 8px", color:th.blue, fontWeight:700, fontSize:12, cursor:"pointer" }}>Save Past Location</button>
-          <button type="button" onClick={function() { setPrivView("my"); }} style={{ flex:1, minWidth:120, background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 8px", color:th.white, fontWeight:700, fontSize:12, cursor:"pointer" }}>My Private Spots</button>
-        </div>
-        {geoErr ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>{geoErr}</div> : null}
-      </Card>
+      <GuideMyToggle modeGuide={true} />
 
-      <div style={{ display:"flex", gap:8, margin:"12px 0", flexWrap:"wrap" }}>
-        <OBtn label="Local" onClick={function() { setView("local"); }} color={view==="local" ? th.green : th.muted} />
-        <OBtn label="Salmon Trail" onClick={function() { setView("salmon"); }} color={view==="salmon" ? th.blue : th.muted} />
-        {favSpots.length > 0 ? <OBtn label="Saved" onClick={function() { setView("fav"); }} color={view==="fav" ? th.gold : th.muted} /> : null}
-        <OBtn label="Club map" onClick={function() { setPrivView("club"); }} color={th.gold} />
+      <PrimarySaveStrip />
+      {geoErr ? (
+        <div style={{ fontSize:13, color:th.orange, marginBottom:12, padding:10, background:th.orange + "15", borderRadius:10, border:"1px solid " + th.orange + "55" }}>
+          {geoErr}
+        </div>
+      ) : null}
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+        <button
+          type="button"
+          onClick={function() { setPrivView("past"); }}
+          style={{
+            minHeight:64,
+            padding:12,
+            borderRadius:12,
+            border:"2px solid " + th.blue,
+            background:th.blue + "18",
+            color:th.blue,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+            lineHeight:1.35,
+          }}
+        >
+          🗺️ Save another way<br />
+          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
+        </button>
+        <button
+          type="button"
+          onClick={function() { setPrivView("club"); }}
+          style={{
+            minHeight:64,
+            padding:12,
+            borderRadius:12,
+            border:"2px solid " + th.gold,
+            background:th.gold + "12",
+            color:th.gold,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+            lineHeight:1.35,
+          }}
+        >
+          👥 Club shared map<br />
+          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>optional</span>
+        </button>
       </div>
+
+      <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
+      <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Nearby &amp; regional ideas</div>
+      <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
+        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
+      </p>
+
+      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+        <button
+          type="button"
+          onClick={function() { setView("local"); }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="local" ? th.green : th.border),
+            background:view==="local" ? th.green + "35" : "transparent",
+            color:view==="local" ? th.green : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Nearby picks
+        </button>
+        <button
+          type="button"
+          onClick={function() { setView("salmon"); }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="salmon" ? th.blue : th.border),
+            background:view==="salmon" ? th.blue + "35" : "transparent",
+            color:view==="salmon" ? th.blue : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Salmon trail
+        </button>
+        {favSpots.length > 0 ? (
+          <button
+            type="button"
+            onClick={function() { setView("fav"); }}
+            style={{
+              padding:"10px 14px",
+              borderRadius:10,
+              border:"2px solid " + (view==="fav" ? th.gold : th.border),
+              background:view==="fav" ? th.gold + "35" : "transparent",
+              color:view==="fav" ? th.gold : th.muted,
+              fontWeight:700,
+              fontSize:14,
+              cursor:"pointer",
+            }}
+          >
+            My favorites ⭐
+          </button>
+        ) : null}
+      </div>
+
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
             <div style={{ fontSize:11, color:th.blue, fontFamily:"monospace", marginBottom:5 }}>SOUTH TO NORTH CORRIDOR</div>
-            <div style={{ fontSize:12, color:th.white, lineHeight:1.6 }}>Spring run: Indiana first, Waukegan last. Fall run reverses. NW winds = go day on any pier.</div>
+            <div style={{ fontSize:13, color:th.white, lineHeight:1.6 }}>Spring run: Indiana first, Waukegan last. Fall run reverses. NW winds = go day on any pier.</div>
           </div>
           <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "44", borderRadius:8, padding:10, marginBottom:10 }}>
-            <div style={{ fontSize:11, color:th.orange, marginBottom:3 }}>⚠️ Indiana License Warning</div>
-            <div style={{ fontSize:11, color:th.white }}>Your IL VA exemption does NOT apply across state lines. Indiana spots require an Indiana fishing license.</div>
+            <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
+            <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
           </div>
           {SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
         </div>
@@ -1237,6 +1477,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
         </div>
       )}
+
+      <StickySaveBar />
     </div>
   );
 }
