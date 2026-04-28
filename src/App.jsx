@@ -115,6 +115,38 @@ function parseCoordNum(v) {
   return isFinite(n) ? n : NaN;
 }
 
+function isValidLatLng(lat, lng) {
+  return isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+/** Pull lat,lng from pasted Google Maps URLs or plain "lat, lng" text. Short goo.gl links are not expanded here. */
+function extractLatLngFromMapsText(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  var t = raw.trim().slice(0, 8000);
+  var plain = t.match(/^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/);
+  if (plain) {
+    var a = parseFloat(plain[1]), b = parseFloat(plain[2]);
+    if (isValidLatLng(a, b)) return { lat:a, lng:b };
+  }
+  var patterns = [
+    /@(-?\d+\.?\d*),\s*(-?\d+\.?\d*)(?:[,/]|\s|$)/,
+    /[?&]q=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
+    /[?&]ll=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
+    /[?&]center=(-?\d+\.?\d*)[%2c,]\s*(-?\d+\.?\d*)/i,
+    /3d(-?\d+\.?\d*)[!]4d(-?\d+\.?\d*)/,
+  ];
+  var i;
+  var m;
+  for (i = 0; i < patterns.length; i++) {
+    m = t.match(patterns[i]);
+    if (m) {
+      var la = parseFloat(m[1]), ln = parseFloat(m[2]);
+      if (isValidLatLng(la, ln)) return { lat:la, lng:ln };
+    }
+  }
+  return null;
+}
+
 function loadLocationTrail() {
   try {
     var raw = localStorage.getItem(LOCATION_TRAIL_KEY);
@@ -694,6 +726,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [geoErr, setGeoErr] = useState("");
   const [pastManualLat, setPastManualLat] = useState("");
   const [pastManualLng, setPastManualLng] = useState("");
+  const [pastMapsPaste, setPastMapsPaste] = useState("");
+  const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
@@ -931,6 +965,43 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Save without GPS here</div>
         <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Pick a recent point from this device or type numbers — good when GPS is off or you are entering an old spot.</p>
+        <Card T={T} borderColor={th.green + "44"}>
+          <SecLabel text="Paste Google Maps link or coordinates" T={T} />
+          <input
+            value={pastMapsPaste}
+            onChange={function(e) {
+              setPastMapsPaste(e.target.value);
+              setPastMapsParseMsg("");
+            }}
+            placeholder="Paste long Maps URL or two numbers: 41.826, -87.845"
+            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"11px 12px", color:th.white, fontSize:14, boxSizing:"border-box", marginBottom:10 }}
+          />
+          <button
+            type="button"
+            onClick={function() {
+              setPastMapsParseMsg("");
+              var ex = extractLatLngFromMapsText(pastMapsPaste);
+              if (ex) {
+                setPastManualLat(String(ex.lat));
+                setPastManualLng(String(ex.lng));
+                setPastMapsParseMsg("Coordinates filled below. Tap “Use these coordinates”.");
+                return;
+              }
+              if (/goo\.gl|maps\.app\.goo\.gl/i.test(pastMapsPaste)) {
+                setPastMapsParseMsg("Short links cannot be read here. Open the link in your browser, copy the long URL from the address bar, paste again.");
+                return;
+              }
+              setPastMapsParseMsg("Could not find latitude and longitude. Use a Maps URL that contains @lat,lng or paste two numbers with a comma.");
+            }}
+            style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800, marginBottom:8 }}
+          >
+            Fill latitude &amp; longitude from paste
+          </button>
+          {pastMapsParseMsg ? <div style={{ fontSize:13, color:pastMapsParseMsg.indexOf("filled") >= 0 ? th.green : th.orange, lineHeight:1.45 }}>{pastMapsParseMsg}</div> : null}
+          <div style={{ fontSize:12, color:th.muted, marginTop:10, lineHeight:1.5 }}>
+            Tip: Short share links often need one open in the browser — then paste the full URL from the address bar.
+          </div>
+        </Card>
         <Card T={T} borderColor={th.blue + "44"}>
           <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>
             iPhone Significant Locations and Google Location History are not available to websites. This app only reads <strong style={{ color:th.green }}>a simple trail you collect here</strong> (GPS points while you use Spots) — it stays on your phone until you save a spot.
@@ -1125,9 +1196,9 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var log = (profile && profile.spotActivityLog) || [];
     return (
       <div>
-        <GuideMyToggle modeGuide={false} />
-
         <PrimarySaveStrip />
+
+        <GuideMyToggle modeGuide={false} />
 
         <div style={{ fontSize:20, color:th.white, fontWeight:800, marginBottom:10 }}>My fishing spots</div>
         <p style={{ fontSize:13, color:th.muted, margin:"0 0 14px", lineHeight:1.55 }}>Everything here is yours. Names, notes, and map pins stay on this device until you share.</p>
@@ -1349,9 +1420,9 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   return (
     <div>
-      <GuideMyToggle modeGuide={true} />
-
       <PrimarySaveStrip />
+
+      <GuideMyToggle modeGuide={true} />
       {geoErr ? (
         <div style={{ fontSize:13, color:th.orange, marginBottom:12, padding:10, background:th.orange + "15", borderRadius:10, border:"1px solid " + th.orange + "55" }}>
           {geoErr}
@@ -1400,7 +1471,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       </div>
 
       <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
-      <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Nearby &amp; regional ideas</div>
+      <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Places in this app</div>
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
         These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
       </p>
@@ -1420,7 +1491,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             cursor:"pointer",
           }}
         >
-          Nearby picks
+          Local
         </button>
         <button
           type="button"
