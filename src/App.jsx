@@ -65,7 +65,172 @@ const SPECIES = [
     hookSet:"Set with a firm sweep then KEEP ROD UP. When they jump — lower the tip slightly so line stays flexible. Never hold stiff during a jump.",
     tips:"Spring (Mar–May): Indiana shore first — Hammond, Portage, Michigan City. Fall (Sep–Nov): all piers fire. NW winds push fish to shore — that is your go day."
   },
+  { id:"chinook", name:"Chinook Salmon", emoji:"👑", color:"#8b7fd4", season:"Spring–Fall (lake-run peaks vary)", bestTime:"Dawn & low light", habitat:"Lake Michigan harbors, piers, offshore when staging", level:"Big Water",
+    alert:"Same licensing as other salmon — check IL / IN / WI rules for where you stand.",
+    rigs:[{name:"Flashers + Fly / Spoon",setup:"Lake trolling setup — dodger or flasher ahead of spoon or fly"},{name:" Pier Spawn / Plug",setup:"Spawn sac under float or crankbait parallel to pier"}],
+    bait:["Spawn sacs","Large spoons — silver, blue, glow","Crankbaits — deep diving","Cut alewife strips"],
+    line:{main:"25–40 lb braid",leader:"15–20 lb fluorocarbon"},
+    hookSet:"Hard strike — kings pull like freight trains. Keep drag smooth; chase down the pier if needed.",
+    tips:"Often deeper than coho midsummer. Pier anglers watch for netting boats — fish push near shore after storms."
+  },
+  { id:"steelhead", name:"Steelhead", emoji:"🌊", color:"#7ec8e8", season:"Late fall–spring (trib runs)", bestTime:"Morning after rain", habitat:"Lake Michigan tributaries — snag-prone stretches", level:"River Trophy",
+    alert:"Many streams have gear restrictions / closed seasons — verify IDNR / WI regs before fishing.",
+    rigs:[{name:"Float + Spawn",setup:"Centrepin or long float, spawn bag on small hook"},{name:"Spawn Sac + Split Shot",setup:"Touch bottom in pocket water"}],
+    bait:["Spawn sacs — pink, orange","Small beads","Woolly buggers / egg flies"],
+    line:{main:"8–12 lb mono or 15 lb braid",leader:"6–10 lb fluorocarbon"},
+    hookSet:"Soft lifts — trout bite can be shy. Pin slack fast when the float dives.",
+    tips:"Within ~200 mi of Cook County you chase runs in IN / MI / WI creeks after lake storms. Dress for cold."
+  },
+  { id:"lake_trout", name:"Lake Trout", emoji:"🏔️", color:"#5a7a9a", season:"Year-round (deep in summer)", bestTime:"Low light", habitat:"Lake Michigan cold water — 80–120+ ft summer", level:"Boat / Pier Specialty",
+    rigs:[{name:"Wire Line + Spoon",setup:"Downrigger or wire with Silver Streak / Sutton"},{name:"Jigging Rap",setup:"Heavy blade bait near bottom marks"}],
+    bait:["Large spoons — white, glow","Smelt-imitation plastics","Cut bait legal where allowed"],
+    line:{main:"20–30 lb braid",leader:"20 lb fluoro"},
+    hookSet:"Often feels like grinding weight until it shakes its head — don’t confuse with zebra mussels.",
+    tips:"Summer: boat anglers target thermocline breaks. Shore anglers occasionally hook lakers casting deep spoons off northern piers in spring."
+  },
+  { id:"brown_trout", name:"Brown Trout", emoji:"🟤", color:"#a07040", season:"Spring & Fall", bestTime:"Low light", habitat:"Lake Michigan shore, stocked inland lakes, some creeks", level:"Intermediate",
+    rigs:[{name:"Spawn Under Float",setup:"Same as stocked rainbow — slightly larger hooks"},{name:"Crank / Jerkbait",setup:"Shallow runners near harbor walls"}],
+    bait:["Spawn sacs","Minnow plugs","Nightcrawlers — tail hooked"],
+    line:{main:"8–12 lb mono",leader:"8 lb fluorocarbon"},
+    hookSet:"Brown hit like a freight train compared to stocked rainbow — strip slack fast.",
+    tips:"Harbor walls at Waukegan / Wisconsin ports hold browns prowling for gobies. Follow stocking lists for inland puts-and-takes."
+  },
+  { id:"brook_trout", name:"Brook Trout", emoji:"💎", color:"#6ab0ff", season:"April–Oct (cold water)", bestTime:"Morning", habitat:"Northern WI / UP cold streams — driftless spring creeks", level:"Light Tackle",
+    rigs:[{name:"Tiny Spinner",setup:"1/16 oz Panther Martin — cast upstream, drift through pocket"},{name:"Dry Fly",setup:"Size 14–18 Adams / elk hair — match hatch"}],
+    bait:["Small worms","Panther Martin — gold","Terrestrial dries — ants, beetles"],
+    line:{main:"4 lb mono",leader:"4 lb fluoro"},
+    hookSet:"Quick strip — brookies slash fast in skinny water.",
+    tips:"Within a few hours’ drive of Cook County: spring-fed creeks up toward Wisconsin driftless. Catch-and-release ethics keep fisheries healthy."
+  },
+  { id:"smallmouth", name:"Smallmouth Bass", emoji:"🪨", color:"#c9a227", season:"May–Oct", bestTime:"Morning & evening", habitat:"Rocky Lake Michigan shores, river current, quarry walls", level:"Regional Favorite",
+    rigs:[{name:"Ned Rig",setup:"Mushroom head + TRD on 6 lb fluoro — finesse smallie standard"},{name:"Tube Jig",setup:"3/16 oz tube on rocky dropoffs"},{name:"Drop Shot",setup:"Small minnow imitation hovering off bottom"}],
+    bait:["3 inch tubes — green pumpkin, smoke","Small jerkbaits — suspending","Live crayfish where legal"],
+    line:{main:"8–15 lb braid",leader:"8–12 lb fluorocarbon"},
+    hookSet:"Sweep sideways — bronzebacks have harder mouths than crappie but less jaw spread than largemouth.",
+    tips:"Riprap harbors (Montrose, northern lakefront) and Fox Chain rocks hold football smallies. Wind stacks bait — fish windy sides."
+  },
+  { id:"walleye", name:"Walleye", emoji:"👁️", color:"#e8d060", season:"Spring & Fall peaks", bestTime:"Dusk & night", habitat:"Fox Chain, Heidecke, Illinois River, Mississippi pools", level:"Table Fare",
+    rigs:[{name:"Lindy Rig",setup:"Walking sinker, 18–36 inch snell, hook + nightcrawler or minnow"},{name:"Jig + Minnow",setup:"1/8–1/4 oz jig tipped with fathead"}],
+    bait:["Nightcrawlers — slow drag","Minnows — hooked through lips","Deep crankbaits — perch pattern"],
+    line:{main:"10–15 lb braid",leader:"10 lb fluorocarbon"},
+    hookSet:"Often a mushy tap — drop back slightly then sweep when weight loads.",
+    tips:"Spring: river wing dams and gravel runs. Summer: deeper channel edges on big rivers. Check IL / WI slot rules where they apply."
+  },
+  { id:"sauger", name:"Sauger", emoji:"🌫️", color:"#9a8a70", season:"Fall–Spring", bestTime:"Low light", habitat:"Illinois / Mississippi River turbid holes", level:"River Bag Fish",
+    rigs:[{name:"Vertical Jig",setup:"3/8 oz jig + twister tail — lift-drop in scour holes"},{name:"Three-Way Rig",setup:"River current — leader to jig or minnow"}],
+    bait:["Twister tails — chartreuse, orange","Minnows","Rip rap crankbaits bumped along bottom"],
+    line:{main:"10–14 lb braid",leader:"8–10 lb fluorocarbon"},
+    hookSet:"Harder tick than walleye sometimes — don’t confuse with snag in rock.",
+    tips:"Looks like small walleye with spotted dorsal and no white tail tip. Excellent eating — handle sizes per daily limits."
+  },
+  { id:"pike", name:"Northern Pike", emoji:"🐊", color:"#50b070", season:"Cool months best", bestTime:"Any (active predators)", habitat:"Weedy lakes, Fox Chain, scattered Cook forest preserves", level:"Toothy Fun",
+    rigs:[{name:"Steel Leader + Spoon",setup:"12 inch wire, 3/4 oz weedless spoon — burn over cabbage"},{name:"Spinnerbait",setup:"White/chartreuse — slow roll edges"}],
+    bait:["Large spoons — red/white","Sucker sections — legal where baitfish rules allow","Soft swimbaits — white pearl"],
+    line:{main:"20–30 lb braid",leader:"Wire or heavy fluoro bite guard"},
+    hookSet:"Sweep hard — long jaws need solid iron. Watch fingers at boat side.",
+    tips:"Chain lakes and shallow bays after ice-out. Pike slash sideways — sudden slack means missed hook — reel fast."
+  },
+  { id:"musky", name:"Muskellunge", emoji:"🐉", color:"#406848", season:"Fall best", bestTime:"Figure-8 next to boat", habitat:"Sparse — Fox Chain, northern WI lakes within drive", level:"Fish of 10,000 Casts",
+    rigs:[{name:"Bucktail",setup:"Double 10 blades — steady retrieve over weeds"},{name:"Jerkbaits — dive & rise",setup:"Suick-style — twitch/pause rhythm"}],
+    bait:["Large bucktails","Rubber baits — slow roll","Live suckers — where regulations allow"],
+    line:{main:"65–80 lb braid",leader:"Heavy wire or fluoro shock"},
+    hookSet:"Figure-8 converts lazy follows — deep bend rod through figure next to hull.",
+    tips:"Rare compared to pike locally but trophy hunters chase Chain muskies. Release giants quickly — revive boat-side."
+  },
+  { id:"bluegill", name:"Bluegill", emoji:"☀️", color:"#6fcfef", season:"May–Sept", bestTime:"Mid-morning & evening", habitat:"Every pond, lake margin, dock posts", level:"Perfect for Kids",
+    rigs:[{name:"Bobber + Worm",setup:"Small float, split shot, #8 hook — chunk of worm"},{name:"Tungsten Jig + Plastics",setup:"1/64 oz ice-style jig under float for big gills"}],
+    bait:["Red worms pieces","Cricket","Bread dough"],
+    line:{main:"4–6 lb mono",leader:"Not needed"},
+    hookSet:"Lift gentle — aggressive sets tear small mouths.",
+    tips:"Fish bedding arcs late spring — visible shallow circles. Catch big gills on deeper weed edges midsummer."
+  },
+  { id:"rockbass", name:"Rock Bass", emoji:"🪨", color:"#b04040", season:"Year-Round", bestTime:"Whenever sunfish bite", habitat:"Rocky shores, pier pilings, river rip-rap", level:"Easy",
+    rigs:[{name:"Same as Bluegill",setup:"Small hook + worm under bobber"}],
+    bait:["Worms","Tiny tube jigs","Spinners"],
+    line:{main:"6 lb mono",leader:"Not needed"},
+    hookSet:"Quick hook — aggressive little guys.",
+    tips:"Red eyes distinguish them. Often mixed with perch and bluegill packs near structure."
+  },
+  { id:"whitebass", name:"White Bass", emoji:"⚡", color:"#e0e080", season:"Spring spawn runs", bestTime:"Mid-day during run", habitat:"River mouths, Fox, Illinois tribs — open-water schools", level:"Fast Action",
+    rigs:[{name:"Blade Bait / Slab",setup:"Lift drop on sonar marks"},{name:"Inline Spinner",setup:"1/4 oz — cast into breaking schools"}],
+    bait:["Small jigs — white, chartreuse","Tiny crankbaits","Pieces of minnow"],
+    line:{main:"8–12 lb mono",leader:"Optional light fluoro"},
+    hookSet:"Strip sets when the school boils — chaotic fun.",
+    tips:"When gulls dive, cast into the frenzy. Runs are short windows — watch DNR fishing reports."
+  },
+  { id:"freshwater_drum", name:"Freshwater Drum", emoji:"🥁", color:"#9b8b7a", season:"Warm months", bestTime:"Bottom oriented", habitat:"Lake Michigan nearshore, large river holes", level:"Oddball Eater",
+    rigs:[{name:"Bottom Rig + Worm",setup:"3/4 oz sinker, crawler on circle hook"},{name:"Heavy Jig",setup:"Drag sand breaks in harbors"}],
+    bait:["Nightcrawlers","Cut shrimp","Zebra mussel-sized goby imitations"],
+    line:{main:"15–20 lb mono",leader:"12 lb fluorocarbon"},
+    hookSet:"Rod loads slow — don't confuse with snag. Reel steady on circle hooks.",
+    tips:"Confusingly called “sheepshead” locally — not salt fish. Firm white flesh if you keep legal size fish."
+  },
+  { id:"gar", name:"Longnose Gar", emoji:"🦴", color:"#889977", season:"Warm months", bestTime:"Surface slicks", habitat:"Backwaters, muddy bayous, slow Illinois back-channels", level:"Niche",
+    rigs:[{name:"Rope Lure / Nylon fray",setup:"Gar teeth tangle in fibers — no hook swallowed"},{name:"Small Jighead",setup:"Tip with minnow — lip hook for jaw corner"}],
+    bait:["Live minnows floated under bobber","Rope flies — local gar angler specialty"],
+    line:{main:"20 lb mono",leader:"Wire if using trebles"},
+    hookSet:"Side jaw hooksets — mouth is mostly bone.",
+    tips:"Primitive fighters — explosive surface rolls. Practice catch-and-release for most."
+  },
+  { id:"bowfin", name:"Bowfin", emoji:"🐲", color:"#558866", season:"Summer", bestTime:"Night", habitat:"Vegetated sloughs, backwaters — rare but present regionally", level:"Tough Fighter",
+    rigs:[{name:"Texas Worm",setup:"Heavy weedless through pads"},{name:"Topwater Frog",setup:"Walk the dog across muck bays"}],
+    bait:["Large nightcrawlers","Chunk plastics — black/blue","Frogs"],
+    line:{main:"30–50 lb braid",leader:"30 lb mono"},
+    hookSet:"Bowfin gulps — delay half second then haul — don’t trout-set.",
+    tips:"If you hook one in a Chicagoland backwater, you earned a story. Jaw is armored — use pliers."
+  },
+  { id:"flathead", name:"Flathead Catfish", emoji:"🐱", season:"Summer nights", bestTime:"Dark hours", habitat:"Deep timbered holes — Illinois / Mississippi navigation pools", level:"Heavy Tackle",
+    rigs:[{name:"Live Bait Slip Rig",setup:"4–8 oz sinker, live bluegill or bullhead — check baitfish regs"},{name:"Drag Cut Bait",setup:"Heavy rod in anchored current"}],
+    bait:["Live sunfish where legal","12 inch bullheads","Large cut shad"],
+    line:{main:"40–65 lb braid",leader:"40–50 lb mono"},
+    hookSet:"Let circle hook load — flatheads inhale baits.",
+    tips:"Plan big nets and gloves — fish over 30 lb happen in big river pools. Know legal baitfish rules cold."
+  },
+  { id:"blue_cat", name:"Blue Catfish", emoji:"💙", season:"Summer–Fall", bestTime:"Night", habitat:"Lower Illinois / Mississippi — expanding range", level:"Heavy River",
+    rigs:[{name:"Knocker Rig",setup:"Heavy sinker bumping structure in scour holes"},{name:"Drag Santee",setup:"Float pegged above chunk bait in flow"}],
+    bait:["Fresh cut skipjack / shad","Chicken breast strips — channel-style","Large nightcrawlers"],
+    line:{main:"50–80 lb braid",leader:"50 lb mono"},
+    hookSet:"Load the rod then lift — blues bulldoze.",
+    tips:"Filleted correctly they eat well. Trophy fish may be regulation-protected — measure fast and release giants."
+  },
+  { id:"bullhead", name:"Bullhead", emoji:"🐂", season:"Spring–Fall", bestTime:"Evening & mud-bottom days", habitat:"Farm ponds, river cuts, sluggish bays", level:"Kid Friendly",
+    rigs:[{name:"Split Shot + Hook",setup:"Small hook, worm on mud line — wait for pull"}],
+    bait:["Nightcrawlers","Stink baits","Corn"],
+    line:{main:"8–10 lb mono",leader:"Not needed"},
+    hookSet:"Don’t overset — pull steady into soft mouth.",
+    tips:"Brown / yellow / black bullheads — whiskered cousins of channel cats. Perfect camp fish — watch fin spines."
+  },
 ];
+
+/** Real fish photos (Wikimedia Commons — free licenses; link in UI for attribution). */
+var SPECIES_PHOTO_BY_ID = {
+  crappie:"https://upload.wikimedia.org/wikipedia/commons/4/4e/Pomoxis_nigromaculatus1.jpg",
+  bass:"https://upload.wikimedia.org/wikipedia/commons/9/96/Largemouth_bass_fish_underwater_micropterus_salmoides.jpg",
+  perch:"https://upload.wikimedia.org/wikipedia/commons/0/07/Yellow_Perch_%28Perca_flavescens%29.jpg",
+  trout:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
+  catfish:"https://upload.wikimedia.org/wikipedia/commons/5/5f/Channel_Catfish.jpg",
+  carp:"https://upload.wikimedia.org/wikipedia/commons/a/a8/Common_carp.jpg",
+  coho:"https://upload.wikimedia.org/wikipedia/commons/0/03/Oncorhynchus_kisutch.jpg",
+  chinook:"https://upload.wikimedia.org/wikipedia/commons/1/14/Oncorhynchus_tshawytscha.jpg",
+  steelhead:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
+  lake_trout:"https://upload.wikimedia.org/wikipedia/commons/b/ba/Lake_trout_fishes_salvelinus_namaycush.jpg",
+  brown_trout:"https://upload.wikimedia.org/wikipedia/commons/2/2e/Salmo_trutta.jpg",
+  brook_trout:"https://upload.wikimedia.org/wikipedia/commons/f/f9/Salvelinus_fontinalis.jpg",
+  smallmouth:"https://upload.wikimedia.org/wikipedia/commons/9/9d/Micropterus_dolomieu2.jpg",
+  walleye:"https://upload.wikimedia.org/wikipedia/commons/9/96/Sander_vitreus.jpg",
+  sauger:"https://upload.wikimedia.org/wikipedia/commons/f/f6/Sander_canadensis_115635868.jpg",
+  pike:"https://upload.wikimedia.org/wikipedia/commons/c/c6/Esox_lucius.jpg",
+  musky:"https://upload.wikimedia.org/wikipedia/commons/b/b3/Esox_masquinongy.jpg",
+  bluegill:"https://upload.wikimedia.org/wikipedia/commons/f/fa/Lepomis_macrochirus.jpg",
+  rockbass:"https://upload.wikimedia.org/wikipedia/commons/9/9a/Ambloplites_rupestris.jpg",
+  whitebass:"https://upload.wikimedia.org/wikipedia/commons/3/3b/Morone_chrysops.jpg",
+  freshwater_drum:"https://upload.wikimedia.org/wikipedia/commons/f/fb/Aplodinotus_grunniens.jpg",
+  gar:"https://upload.wikimedia.org/wikipedia/commons/4/47/Longnose_Gar_%28Lepisosteus_osseus%29.jpg",
+  bowfin:"https://upload.wikimedia.org/wikipedia/commons/5/5a/Amia_calva.jpg",
+  flathead:"https://upload.wikimedia.org/wikipedia/commons/8/84/Pylodictis_olivaris.jpg",
+  blue_cat:"https://upload.wikimedia.org/wikipedia/commons/1/17/Ictalurus_furcatus.jpg",
+  bullhead:"https://upload.wikimedia.org/wikipedia/commons/b/b4/Ameiurus_nebulosus.jpg",
+};
 
 // ─── LOCAL SPOTS ──────────────────────────────────────────────────────────────
 const LOCAL_SPOTS = [
@@ -509,7 +674,7 @@ function Pill({ label, color }) {
 }
 
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ profile, T }) {
+function HomeTab({ profile, T, onOpenSpots }) {
   const th = THEMES[T];
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
@@ -555,6 +720,35 @@ function HomeTab({ profile, T }) {
         <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
         <div style={{ fontSize:12, color:th.muted }}>North Riverside · Lake Michigan Corridor</div>
       </div>
+
+      <button
+        type="button"
+        onClick={function() { if (typeof onOpenSpots === "function") onOpenSpots(); }}
+        style={{
+          width:"100%",
+          background:th.green,
+          color:"#081208",
+          border:"none",
+          borderRadius:14,
+          padding:"16px 14px",
+          cursor:"pointer",
+          fontSize:17,
+          fontWeight:800,
+          marginBottom:8,
+          display:"flex",
+          alignItems:"center",
+          justifyContent:"center",
+          gap:10,
+          minHeight:54,
+          boxShadow:"0 6px 22px rgba(0,0,0,0.45)",
+        }}
+      >
+        <span style={{ fontSize:26 }} aria-hidden>📍</span>
+        <span>Add my fishing spot</span>
+      </button>
+      <p style={{ fontSize:12, color:th.muted, textAlign:"center", marginBottom:14, lineHeight:1.45 }}>
+        Saved only on this device. From here you can use GPS or paste a map link.
+      </p>
 
       {showRefresh && (
         <div style={{ background:th.green + "22", border:"1px solid " + th.green + "55", borderRadius:10, padding:12, marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -631,12 +825,37 @@ function SpeciesTab({ T }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
+  const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
+
+  useEffect(function() {
+    setSpeciesPhotoFailed(false);
+  }, [sel && sel.id]);
 
   if (sel) {
     var sp = sel;
+    var speciesPhotoUrl = SPECIES_PHOTO_BY_ID[sp.id];
     return (
       <div>
         <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
+        {speciesPhotoUrl && !speciesPhotoFailed ? (
+          <div style={{ marginBottom:14 }}>
+            <img
+              src={speciesPhotoUrl}
+              alt={sp.name}
+              loading="lazy"
+              decoding="async"
+              onError={function() { setSpeciesPhotoFailed(true); }}
+              style={{ width:"100%", maxHeight:240, objectFit:"cover", borderRadius:12, border:"1px solid " + th.border, display:"block", background:th.card }}
+            />
+            <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.45 }}>
+              Photo:{" "}
+              <a href={speciesPhotoUrl} target="_blank" rel="noopener noreferrer" style={{ color:th.blue }}>
+                Wikimedia Commons
+              </a>
+              {" "}(species ID photo — compare to your catch before keeping fish).
+            </div>
+          </div>
+        ) : null}
         <div style={{ borderLeft:"3px solid " + sp.color, paddingLeft:12, marginBottom:14 }}>
           <div style={{ fontSize:36 }}>{sp.emoji}</div>
           <div style={{ fontSize:21, color:th.white, fontWeight:700, marginTop:4 }}>{sp.name}</div>
@@ -2267,6 +2486,11 @@ export default function App() {
   var th = THEMES[theme];
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
+  /** Opens Spots tab on the main screen (big green save / save another way). */
+  var goSpotsMain = useCallback(function() {
+    setTab("spots");
+    setSpotsOpenSection(null);
+  }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
 
   useEffect(function() {
@@ -2276,7 +2500,7 @@ export default function App() {
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
       <div style={{ padding:"0 14px" }}>
-        {tab==="home"      && <HomeTab profile={profile} T={theme} />}
+        {tab==="home"      && <HomeTab profile={profile} T={theme} onOpenSpots={goSpotsMain} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
@@ -2290,7 +2514,7 @@ export default function App() {
           return (
             <button key={n.id} onClick={function() { setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
               <span style={{ fontSize:16 }}>{n.emoji}</span>
-              <span style={{ fontSize:8, color:tab===n.id ? th.green : th.muted, fontFamily:"monospace" }}>{n.label}</span>
+              <span style={{ fontSize:9, color:tab===n.id ? th.green : th.muted, fontFamily:"monospace", letterSpacing:0.2 }}>{n.label}</span>
             </button>
           );
         })}
