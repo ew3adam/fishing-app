@@ -2091,22 +2091,70 @@ function CatalogueTab({ T }) {
 function CatchTab({ profile, T }) {
   const th = THEMES[T];
   const [view, setView] = useState("feed");
-  const fileRef = useRef();
+  const fileCameraRef = useRef();
+  const fileLibraryRef = useRef();
   const [catches, setCatches] = useState([
     { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
     { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
   ]);
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
+  const [photoSource, setPhotoSource] = useState("");
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showRuler, setShowRuler] = useState(true);
+  const [rulerInches, setRulerInches] = useState(18);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
 
-  function handlePhoto(e) {
+  function openPhotoPicker(refObj) {
+    if (!refObj || !refObj.current) return;
+    // Clear previous value so selecting the same image again still triggers onChange.
+    refObj.current.value = "";
+    refObj.current.click();
+  }
+
+  function choosePresetLength(inches) {
+    // Quick options to speed up logging for common fish sizes.
+    setF("length", String(inches) + " inches");
+  }
+
+  function setLengthNotMeasured() {
+    // Keep posting possible even when no reliable measurement is available.
+    setF("length", "Length not measured");
+  }
+
+  function renderPhotoWithRuler(maxHeightPx) {
+    if (!photo) return null;
+    var ticks = [];
+    var i;
+    for (i = 0; i <= rulerInches; i++) ticks.push(i);
+    return (
+      <div style={{ position:"relative", marginBottom:12 }}>
+        <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, maxHeight:maxHeightPx, objectFit:"cover", display:"block" }} />
+        {showRuler ? (
+          <div style={{ position:"absolute", left:8, right:8, bottom:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:8, padding:"8px 10px 6px" }}>
+            <div style={{ position:"relative", height:16, borderTop:"2px solid #ffffff" }}>
+              {ticks.map(function(tick) {
+                return (
+                  <div key={tick} style={{ position:"absolute", left:(tick / rulerInches * 100) + "%", top:-2, transform:"translateX(-0.5px)" }}>
+                    <div style={{ width:1, height:tick % 2 === 0 ? 10 : 6, background:"#ffffff" }} />
+                    {tick % 2 === 0 ? <div style={{ fontSize:8, color:"#ffffff", marginTop:1 }}>{tick}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:10, color:"#ffffff", marginTop:2 }}>Ruler overlay ({rulerInches} in)</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function handlePhoto(e, sourceType) {
     var file = e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
@@ -2115,6 +2163,7 @@ function CatchTab({ profile, T }) {
       var b64 = full.split(",")[1];
       setPhoto(full);
       setPhotoB64(b64);
+      setPhotoSource(sourceType || "library");
       setStep(2);
       setAiLoading(true);
       fetch("https://api.anthropic.com/v1/messages", {
@@ -2140,10 +2189,19 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var userName = sanitizeStr(((profile && profile.name) || "Angler"), 120);
+    var species = sanitizeStr(form.species, 120);
+    var length = sanitizeStr(form.length, 120) || "Length not measured";
+    var bait = sanitizeStr(form.bait, 200);
+    var rod = sanitizeStr(form.rod, 200);
+    var spot = sanitizeStr(form.spot, 200);
+    var notes = sanitizeStr(form.notes, 1200);
+    var date = sanitizeStr(form.date, 80);
+    var anglerEmail = sanitizeStr(((profile && profile.email) || "not provided"), 160);
+    var entry = { id:Date.now(), user:userName, species:species, length:length, bait:bait, rod:rod, spot:spot, notes:notes, date:date, photo:photo };
     setCatches(function(c) { return [entry].concat(c); });
-    var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
-    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
+    var subj = encodeURIComponent("RFC Catch Report — " + species + " · " + length + " · " + userName);
+    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + userName + "\nEmail: " + anglerEmail + "\nDate: " + date + "\n\nFish: " + species + "\nLength: " + length + "\nBait: " + bait + "\nRod: " + rod + "\nSpot: " + spot + "\nNotes: " + notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
     setStep(6);
   }
@@ -2191,10 +2249,12 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
-              <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
-                <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
+              <input type="file" accept="image/*" capture="environment" ref={fileCameraRef} onChange={function(e) { handlePhoto(e, "camera"); }} style={{ display:"none" }} />
+              <input type="file" accept="image/*" ref={fileLibraryRef} onChange={function(e) { handlePhoto(e, "library"); }} style={{ display:"none" }} />
+              <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:10, marginBottom:12 }}>
+                <button onClick={function() { openPhotoPicker(fileCameraRef); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
+                <button onClick={function() { openPhotoPicker(fileLibraryRef); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>🖼️ Choose from Photos</button>
+                <button onClick={function() { setStep(3); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, cursor:"pointer", color:th.white, fontSize:13, fontWeight:700 }}>📝 Log Without Photo</button>
               </div>
             </div>
           )}
@@ -2202,7 +2262,20 @@ function CatchTab({ profile, T }) {
           {step === 2 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:200, objectFit:"cover" }} /> : null}
+              {renderPhotoWithRuler(220)}
+              {photo ? <div style={{ fontSize:11, color:th.muted, marginTop:-4, marginBottom:10 }}>Photo source: {photoSource === "camera" ? "Camera" : "Photo library"}</div> : null}
+              <Card T={T}>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Photo ruler in inches</div>
+                <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                  <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:th.white }}>
+                    <input type="checkbox" checked={showRuler} onChange={function(e) { setShowRuler(!!e.target.checked); }} />
+                    Show ruler overlay
+                  </label>
+                  <select value={rulerInches} onChange={function(e) { setRulerInches(parseInt(e.target.value, 10) || 18); }} style={{ background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"6px 8px", fontSize:12 }}>
+                    {[12,18,24,30].map(function(n) { return <option key={n} value={n}>{n} in</option>; })}
+                  </select>
+                </div>
+              </Card>
               {aiLoading ? <div style={{ textAlign:"center", color:th.muted, padding:"20px 0" }}>Identifying fish...</div> : null}
               {aiResult && !aiLoading ? (
                 <Card T={T} borderColor={th.green + "44"}>
@@ -2213,8 +2286,22 @@ function CatchTab({ profile, T }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
               <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
-              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length options (inches or custom):</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                {[8,10,12,14,16,18,20,22,24].map(function(n) {
+                  var label = n + " in";
+                  var on = (form.length || "").toLowerCase() === (n + " inches");
+                  return (
+                    <button key={n} type="button" onClick={function() { choosePresetLength(n); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:16, color:on ? th.green : th.muted, padding:"4px 10px", cursor:"pointer", fontSize:11 }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='Freeform: e.g. 17.5 inches or 45 cm' style={inputStyle} />
+              <button type="button" onClick={setLengthNotMeasured} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, color:th.muted, padding:"8px 0", cursor:"pointer", fontSize:12, marginBottom:10 }}>
+                Use "Length not measured"
+              </button>
               <button onClick={function() { setStep(3); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
             </div>
           )}
@@ -2222,7 +2309,7 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
+              {["species","bait","spot","date"].map(function(k) {
                 return (
                   <div key={k}>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
@@ -2230,6 +2317,21 @@ function CatchTab({ profile, T }) {
                   </div>
                 );
               })}
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length (quick options or freeform)</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                {[8,10,12,14,16,18,20,22,24].map(function(n) {
+                  var on = (form.length || "").toLowerCase() === (n + " inches");
+                  return (
+                    <button key={n} type="button" onClick={function() { choosePresetLength(n); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:16, color:on ? th.green : th.muted, padding:"4px 10px", cursor:"pointer", fontSize:11 }}>
+                      {n} in
+                    </button>
+                  );
+                })}
+              </div>
+              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder="e.g. 13 inches, 17.5 in, 45 cm" style={inputStyle} />
+              <button type="button" onClick={setLengthNotMeasured} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, color:th.muted, padding:"8px 0", cursor:"pointer", fontSize:12, marginBottom:10 }}>
+                Use "Length not measured"
+              </button>
               {gear.length > 0 ? (
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
@@ -2248,7 +2350,7 @@ function CatchTab({ profile, T }) {
           {step === 4 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
+              {renderPhotoWithRuler(200)}
               <Card T={T}>
                 {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
@@ -2274,7 +2376,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoSource(""); setPhotoB64(null); setAiResult(null); setShowRuler(true); setRulerInches(18); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
