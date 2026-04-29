@@ -1,7 +1,7 @@
 {
-  "name": "North Riverside Fishing Guide",
-  "short_name": "Fish Guide",
-  "description": "Shore fishing guide for North Riverside, Cook County, and Lake Michigan corridor",
+  "name": "Riverside Fishing Club",
+  "short_name": "RFC",
+  "description": "Riverside Fishing Club app",
   "start_url": "/fishing-app/",
   "display": "standalone",
   "background_color": "#0d1a0d",
