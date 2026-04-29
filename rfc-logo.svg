@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="RFC Riverside Fishing Club Since 1968 logo">
+  <rect width="1024" height="1024" fill="#f6f6f6"/>
+  <!-- Left fish body curve -->
+  <path d="M135 555 C220 495, 332 470, 470 470" fill="none" stroke="#101015" stroke-width="16" stroke-linecap="round"/>
+  <!-- Left tail -->
+  <path d="M120 560 L38 548 L12 565 L40 585 L110 598 L88 625 L114 635 L188 620 L162 662 L184 675 L238 638" fill="none" stroke="#101015" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right fish body curve -->
+  <path d="M890 555 C810 498, 700 470, 556 470" fill="none" stroke="#101015" stroke-width="16" stroke-linecap="round"/>
+  <!-- Right head and mouth -->
+  <path d="M875 558 C940 570, 986 602, 986 640 C986 676, 944 706, 882 717" fill="none" stroke="#101015" stroke-width="16" stroke-linecap="round"/>
+  <path d="M858 642 C902 640, 936 654, 956 682" fill="none" stroke="#101015" stroke-width="10" stroke-linecap="round"/>
+  <!-- Top fin accents -->
+  <path d="M320 340 C398 276, 510 268, 584 312 C654 352, 720 346, 770 294" fill="none" stroke="#101015" stroke-width="12" stroke-linecap="round"/>
+  <path d="M320 340 C346 332, 364 314, 376 286 C401 323, 428 334, 454 334 C470 302, 494 284, 517 278 C533 312, 553 325, 578 330 C595 300, 618 285, 640 280 C657 311, 678 323, 705 328 C722 301, 744 287, 770 294" fill="none" stroke="#101015" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Main text -->
+  <text x="512" y="600" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="250" fill="#101015">RFC</text>
+  <text x="512" y="686" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="64" fill="#101015">Riverside Fishing Club</text>
+  <text x="512" y="748" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="62" fill="#101015">Since 1968</text>
+</svg>
