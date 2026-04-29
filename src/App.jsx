@@ -699,12 +699,17 @@ function HomeTab({ profile, T, onOpenSpots }) {
   const [loading, setLoading] = useState(true);
   const [showRefresh, setShowRefresh] = useState(false);
   const [expandArticles, setExpandArticles] = useState(false);
+  const [nearbySpots, setNearbySpots] = useState([]);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
     function doLoad(la, ln) {
+      var rankedSpots = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
+        return { spot:s, miles:milesBetween(la, ln, s.lat, s.lng) };
+      }).sort(function(a, b) { return a.miles - b.miles; });
+      setNearbySpots(rankedSpots.slice(0, 3));
       loadWeather(la, ln).then(function(w) {
         setWx(w);
         setLoading(false);
@@ -815,6 +820,31 @@ function HomeTab({ profile, T, onOpenSpots }) {
             Weather unavailable. <span style={{ color:th.green, cursor:"pointer" }} onClick={load}>Retry</span>
           </div>
         )}
+      </Card>
+
+      <Card T={T}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <SecLabel text="Nearby fishing spots" T={T} />
+          <OBtn label="Open Spots" onClick={function() { if (typeof onOpenSpots === "function") onOpenSpots(); }} color={th.teal} style={{ fontSize:10, padding:"3px 8px" }} />
+        </div>
+        {nearbySpots.length === 0 ? <div style={{ fontSize:12, color:th.muted }}>Loading nearby spots…</div> : null}
+        {nearbySpots.map(function(row) {
+          var s = row.spot;
+          return (
+            <div key={"home_near_" + s.name} style={{ borderBottom:"1px solid " + th.border, paddingBottom:8, marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                <div>
+                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <div style={{ fontSize:11, color:th.muted }}>{s.addr}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:11, color:th.teal, fontFamily:"monospace" }}>{row.miles.toFixed(1)} mi</div>
+                  <a href={s.google} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:th.blue, textDecoration:"none" }}>Directions</a>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </Card>
 
       <Card T={T}>
