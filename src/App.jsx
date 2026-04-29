@@ -2154,23 +2154,56 @@ function CatchTab({ profile, T }) {
     );
   }
 
-  function handlePhoto(e, sourceType) {
-    var file = e.target.files[0];
-    if (!file) return;
+  function downscaleImageToWeb72(file, onDone) {
+    // Convert to web-sized image so uploads are lightweight (72 DPI equivalent for screen use).
     var reader = new FileReader();
     reader.onload = function(ev) {
       var full = ev.target.result;
-      var b64 = full.split(",")[1];
+      var img = new Image();
+      img.onload = function() {
+        var maxW = 1600;
+        var maxH = 1600;
+        var srcW = img.width || maxW;
+        var srcH = img.height || maxH;
+        var scale = Math.min(1, maxW / srcW, maxH / srcH);
+        var outW = Math.max(1, Math.round(srcW * scale));
+        var outH = Math.max(1, Math.round(srcH * scale));
+        var canvas = document.createElement("canvas");
+        canvas.width = outW;
+        canvas.height = outH;
+        var ctx = canvas.getContext("2d");
+        if (!ctx) {
+          onDone(full, full.split(",")[1] || "", file.type || "image/jpeg");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, outW, outH);
+        var outType = "image/jpeg";
+        var compressed = canvas.toDataURL(outType, 0.86);
+        onDone(compressed, compressed.split(",")[1] || "", outType);
+      };
+      img.onerror = function() {
+        onDone(full, full.split(",")[1] || "", file.type || "image/jpeg");
+      };
+      img.src = full;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handlePhoto(e, sourceType) {
+    var file = e.target.files[0];
+    if (!file) return;
+    setAiResult(null);
+    setAiLoading(true);
+    setStep(2);
+    downscaleImageToWeb72(file, function(full, b64, mediaType) {
       setPhoto(full);
       setPhotoB64(b64);
       setPhotoSource(sourceType || "library");
-      setStep(2);
-      setAiLoading(true);
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
           messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},
+            {type:"image",source:{type:"base64",media_type:mediaType || "image/jpeg",data:b64}},
             {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
           ]}]
         })
@@ -2184,8 +2217,7 @@ function CatchTab({ profile, T }) {
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function submitCatch() {
@@ -2253,7 +2285,7 @@ function CatchTab({ profile, T }) {
               <input type="file" accept="image/*" ref={fileLibraryRef} onChange={function(e) { handlePhoto(e, "library"); }} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:10, marginBottom:12 }}>
                 <button onClick={function() { openPhotoPicker(fileCameraRef); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
-                <button onClick={function() { openPhotoPicker(fileLibraryRef); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>🖼️ Choose from Photos</button>
+                <button onClick={function() { openPhotoPicker(fileLibraryRef); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>🖼️ Upload from Device</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, cursor:"pointer", color:th.white, fontSize:13, fontWeight:700 }}>📝 Log Without Photo</button>
               </div>
             </div>
