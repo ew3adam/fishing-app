@@ -290,6 +290,18 @@ function isValidLatLng(lat, lng) {
   return isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
+function milesBetween(lat1, lng1, lat2, lng2) {
+  // Haversine distance in miles for nearest-spot ranking.
+  var R = 3958.8;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLng = (lng2 - lng1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 /** Pull lat,lng from pasted Google Maps URLs or plain "lat, lng" text. Short goo.gl links are not expanded here. */
 function extractLatLngFromMapsText(raw) {
   if (!raw || typeof raw !== "string") return null;
@@ -954,6 +966,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [closestLoading, setClosestLoading] = useState(false);
+  const [closestErr, setClosestErr] = useState("");
+  const [memberLocation, setMemberLocation] = useState(null);
+  const [closestSpots, setClosestSpots] = useState([]);
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
   // Keep invite/share targets restricted to known club emails.
@@ -1130,6 +1146,36 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var subj = encodeURIComponent("Join me on the Riverside Fishing Club app");
     var body = encodeURIComponent("Hi " + firstName + ",\n\n" + inviter + " invited you to try the Riverside Fishing Club app.\n\nOpen app: " + appUrl + "\n\nSee you on the water!");
     window.location.href = "mailto:" + memEmail + "?subject=" + subj + "&body=" + body;
+  }
+
+  function findClosestSpotsForMember() {
+    setClosestErr("");
+    setClosestLoading(true);
+    if (!navigator.geolocation) {
+      setClosestLoading(false);
+      setClosestErr("Location is not available in this browser.");
+      setView("closest");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
+        var ranked = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
+          return { spot:s, miles:milesBetween(lat, lng, s.lat, s.lng) };
+        }).sort(function(a, b) { return a.miles - b.miles; });
+        setMemberLocation({ lat:lat, lng:lng });
+        setClosestSpots(ranked.slice(0, 5));
+        setClosestLoading(false);
+        setView("closest");
+      },
+      function() {
+        setClosestLoading(false);
+        setClosestErr("Could not read your location. Check location permissions and try again.");
+        setView("closest");
+      },
+      { enableHighAccuracy:true, maximumAge:60000, timeout:20000 }
+    );
   }
 
   if (mapSpot) {
@@ -1514,6 +1560,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   function SpotCard(props) {
     var s = props.s;
+    var distLabel = props.distanceLabel || s.dist;
     return (
       <Card T={T} borderColor={s.color + "44"} style={{ borderLeft:"3px solid " + s.color }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -1524,7 +1571,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           </div>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
             <Pill label={s.tag} color={s.color} />
-            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
+            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{distLabel}</span>
             <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:22, minWidth:44, minHeight:44 }}>
               {favSpots.includes(s.name) ? "⭐" : "☆"}
             </button>
@@ -1783,6 +1830,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             My favorites ⭐
           </button>
         ) : null}
+        <button
+          type="button"
+          onClick={findClosestSpotsForMember}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="closest" ? th.teal : th.border),
+            background:view==="closest" ? th.teal + "35" : "transparent",
+            color:view==="closest" ? th.teal : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Closest spot 📍
+        </button>
       </div>
 
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
@@ -1802,6 +1865,28 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       {view === "fav" && (
         <div>
           {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+        </div>
+      )}
+      {view === "closest" && (
+        <div>
+          <Card T={T} borderColor={th.teal + "55"}>
+            <SecLabel text="Closest spots for member location" T={T} />
+            {closestLoading ? <div style={{ fontSize:12, color:th.muted }}>Finding your location and ranking spots...</div> : null}
+            {closestErr ? <div style={{ fontSize:12, color:th.orange }}>{closestErr}</div> : null}
+            {memberLocation ? (
+              <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>
+                Member location: <span style={{ fontFamily:"monospace" }}>{memberLocation.lat.toFixed(5)}, {memberLocation.lng.toFixed(5)}</span>
+              </div>
+            ) : null}
+            {!closestLoading ? (
+              <button type="button" onClick={findClosestSpotsForMember} style={{ background:th.teal + "22", border:"1px solid " + th.teal, borderRadius:8, padding:"8px 12px", color:th.teal, cursor:"pointer", fontWeight:700, fontSize:12 }}>
+                Refresh closest spots
+              </button>
+            ) : null}
+          </Card>
+          {closestSpots.map(function(row) {
+            return <SpotCard key={"closest_" + row.spot.name} s={row.spot} distanceLabel={row.miles.toFixed(1) + " mi away"} />;
+          })}
         </div>
       )}
 
