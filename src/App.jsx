@@ -259,10 +259,10 @@ var PROFILE_STORAGE_KEY = "rfc_fishing_profile_v2";
 var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
 
 var CLUB_ROSTER = [
-  { id:"roster_1", name:"Jim K." },
-  { id:"roster_2", name:"Sarah M." },
-  { id:"roster_3", name:"Bob T." },
-  { id:"roster_4", name:"Maria G." },
+  { id:"roster_1", name:"Jim K.", email:"jim.k@riversidefishingclub.com" },
+  { id:"roster_2", name:"Sarah M.", email:"sarah.m@riversidefishingclub.com" },
+  { id:"roster_3", name:"Bob T.", email:"bob.t@riversidefishingclub.com" },
+  { id:"roster_4", name:"Maria G.", email:"maria.g@riversidefishingclub.com" },
 ];
 
 var MOCK_CLUB_SHARED_SPOTS = [
@@ -273,6 +273,12 @@ function sanitizeStr(s, maxLen) {
   var m = maxLen != null ? maxLen : 4000;
   if (typeof s !== "string") return "";
   return s.replace(/\s+/g, " ").trim().slice(0, m);
+}
+
+function firstNameFromName(name) {
+  var clean = sanitizeStr(name, 120);
+  if (!clean) return "Member";
+  return clean.split(/\s+/).filter(Boolean)[0] || "Member";
 }
 
 function parseCoordNum(v) {
@@ -950,6 +956,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [memberSearch, setMemberSearch] = useState("");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
+  // Keep invite/share targets restricted to known club emails.
+  const allowedShareEmails = CLUB_ROSTER.map(function(m) { return sanitizeStr(m.email || "", 200).toLowerCase(); }).filter(Boolean);
 
   useEffect(function() {
     if (spotsOpenSection === "my_spots") {
@@ -1089,6 +1097,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   function toggleShareMember(mem) {
     if (!selectedSpot) return;
+    var memEmail = sanitizeStr(mem.email || "", 200).toLowerCase();
+    if (!memEmail || allowedShareEmails.indexOf(memEmail) === -1) {
+      alert("This member does not have an allowed club email yet.");
+      return;
+    }
     var sw = (selectedSpot.sharedWith || []).slice();
     var ix = sw.findIndex(function(m) { return m.id === mem.id; });
     var nextList;
@@ -1098,11 +1111,25 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       nextList = sw.filter(function(m) { return m.id !== mem.id; });
       msg = ("Stopped sharing " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
     } else {
-      nextList = sw.concat([{ id:mem.id, name:mem.name }]);
+      nextList = sw.concat([{ id:mem.id, name:mem.name, firstName:firstNameFromName(mem.name), email:memEmail }]);
       msg = ("Shared " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
     }
     patchPrivateSpot(setProfile, selectedSpot.id, { sharedWith:nextList });
     appendSpotActivity(setProfile, msg);
+  }
+
+  function inviteMemberByEmail(mem) {
+    var memEmail = sanitizeStr(mem.email || "", 200).toLowerCase();
+    if (!memEmail || allowedShareEmails.indexOf(memEmail) === -1) {
+      alert("This member does not have an allowed club email yet.");
+      return;
+    }
+    var firstName = firstNameFromName(mem.name);
+    var inviter = sanitizeStr((profile && profile.name) || "Your club member", 120);
+    var appUrl = sanitizeStr((typeof window !== "undefined" && window.location && window.location.href) ? window.location.href : "", 1500);
+    var subj = encodeURIComponent("Join me on the Riverside Fishing Club app");
+    var body = encodeURIComponent("Hi " + firstName + ",\n\n" + inviter + " invited you to try the Riverside Fishing Club app.\n\nOpen app: " + appUrl + "\n\nSee you on the water!");
+    window.location.href = "mailto:" + memEmail + "?subject=" + subj + "&body=" + body;
   }
 
   if (mapSpot) {
@@ -1283,7 +1310,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   if (privView === "detail" && selectedSpot) {
     var rosterF = CLUB_ROSTER.filter(function(m) {
-      return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
+      var q = sanitizeStr(memberSearch, 160).toLowerCase();
+      var nm = sanitizeStr(m.name || "", 160).toLowerCase();
+      var em = sanitizeStr(m.email || "", 200).toLowerCase();
+      var fn = firstNameFromName(m.name).toLowerCase();
+      return !q || nm.indexOf(q) >= 0 || em.indexOf(q) >= 0 || fn.indexOf(q) >= 0;
     });
     var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
     var shareLabel = selectedSpot.shareClub ? "Shared with Club" : (selectedSpot.sharedWith && selectedSpot.sharedWith.length ? "Shared with " + selectedSpot.sharedWith.map(function(m) { return m.name; }).join(", ") : "Private");
@@ -1321,15 +1352,21 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <input type="checkbox" checked={!!selectedSpot.shareClub} onChange={toggleShareClub} />
             <span style={{ fontSize:13, color:th.white }}>Share with Club (club map)</span>
           </label>
-          <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members</div>
-          <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search roster…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
+          <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members (allowable club emails)</div>
+          <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search first name or email…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             {rosterF.map(function(m) {
               var on = (selectedSpot.sharedWith || []).some(function(x) { return x.id === m.id; });
+              var first = firstNameFromName(m.name);
               return (
-                <button key={m.id} type="button" onClick={function() { toggleShareMember(m); }} style={{ textAlign:"left", background:on ? th.green + "22" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12 }}>
-                  {on ? "✓ " : ""}{m.name}
-                </button>
+                <div key={m.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8 }}>
+                  <button type="button" onClick={function() { toggleShareMember(m); }} style={{ width:"100%", textAlign:"left", background:on ? th.green + "22" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12, marginBottom:6 }}>
+                    {on ? "✓ " : ""}{first} <span style={{ color:th.muted }}>({m.email})</span>
+                  </button>
+                  <button type="button" onClick={function() { inviteMemberByEmail(m); }} style={{ width:"100%", textAlign:"center", background:th.blue + "20", border:"1px solid " + th.blue, borderRadius:8, padding:"7px 8px", color:th.blue, cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                    Invite {first} to app
+                  </button>
+                </div>
               );
             })}
           </div>
