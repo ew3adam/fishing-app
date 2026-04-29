@@ -965,6 +965,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastManualLng, setPastManualLng] = useState("");
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
+  const [spotSearch, setSpotSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [closestLoading, setClosestLoading] = useState(false);
   const [closestErr, setClosestErr] = useState("");
@@ -1178,6 +1179,40 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       { enableHighAccuracy:true, maximumAge:60000, timeout:20000 }
     );
   }
+
+  function normalizeSpotQuery(raw) {
+    return sanitizeStr(raw, 120).toLowerCase();
+  }
+
+  function spotMatchesQuery(spot, q) {
+    if (!q) return true;
+    if (q === "local" || q === "locals" || q === "nearby") return true;
+    var bucket = [
+      sanitizeStr(spot.name || "", 200),
+      sanitizeStr(spot.addr || "", 200),
+      sanitizeStr(spot.tag || "", 80),
+      Array.isArray(spot.species) ? spot.species.join(" ") : "",
+      sanitizeStr(spot.dist || "", 40),
+    ].join(" ").toLowerCase();
+    return bucket.indexOf(q) >= 0;
+  }
+
+  function searchFishingLocations() {
+    var q = normalizeSpotQuery(spotSearch);
+    if (!q) {
+      setView("local");
+      return;
+    }
+    if (q.indexOf("near me") >= 0 || q.indexOf("closest") >= 0 || q === "nearby") {
+      findClosestSpotsForMember();
+      return;
+    }
+    setView("local");
+  }
+
+  var searchQ = normalizeSpotQuery(spotSearch);
+  var localFiltered = LOCAL_SPOTS.filter(function(s) { return spotMatchesQuery(s, searchQ); });
+  var salmonFiltered = SALMON_SPOTS.filter(function(s) { return spotMatchesQuery(s, searchQ); });
 
   if (mapSpot) {
     return (
@@ -1779,6 +1814,31 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
         These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
       </p>
+      <Card T={T} borderColor={th.blue + "44"}>
+        <SecLabel text="Find fishing locations" T={T} />
+        <input
+          value={spotSearch}
+          onChange={function(e) { setSpotSearch(e.target.value); }}
+          placeholder='Search by local, name, city, species, or type "near me"'
+          style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:13, boxSizing:"border-box", marginBottom:8 }}
+        />
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <button
+            type="button"
+            onClick={searchFishingLocations}
+            style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, padding:"9px 10px", color:th.blue, cursor:"pointer", fontWeight:700, fontSize:12 }}
+          >
+            Search spots
+          </button>
+          <button
+            type="button"
+            onClick={findClosestSpotsForMember}
+            style={{ background:th.teal + "22", border:"1px solid " + th.teal, borderRadius:8, padding:"9px 10px", color:th.teal, cursor:"pointer", fontWeight:700, fontSize:12 }}
+          >
+            Search near me
+          </button>
+        </div>
+      </Card>
       <button
         type="button"
         onClick={findClosestSpotsForMember}
@@ -1867,7 +1927,14 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </button>
       </div>
 
-      {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+      {view === "local" && (
+        <div>
+          {localFiltered.length === 0 ? (
+            <Card T={T}><div style={{ fontSize:12, color:th.muted }}>No local fishing spots found for "<strong style={{ color:th.white }}>{sanitizeStr(spotSearch, 80)}</strong>".</div></Card>
+          ) : null}
+          {localFiltered.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+        </div>
+      )}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
@@ -1878,7 +1945,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
             <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
           </div>
-          {SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
+          {salmonFiltered.length === 0 ? (
+            <Card T={T}><div style={{ fontSize:12, color:th.muted }}>No salmon trail spots found for "<strong style={{ color:th.white }}>{sanitizeStr(spotSearch, 80)}</strong>".</div></Card>
+          ) : null}
+          {salmonFiltered.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
         </div>
       )}
       {view === "fav" && (
