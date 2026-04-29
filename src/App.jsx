@@ -1165,7 +1165,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           return { spot:s, miles:milesBetween(lat, lng, s.lat, s.lng) };
         }).sort(function(a, b) { return a.miles - b.miles; });
         setMemberLocation({ lat:lat, lng:lng });
-        setClosestSpots(ranked.slice(0, 5));
+        // Show a useful nearby list instead of just one item.
+        setClosestSpots(ranked.slice(0, 10));
         setClosestLoading(false);
         setView("closest");
       },
@@ -1778,6 +1779,24 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
         These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
       </p>
+      <button
+        type="button"
+        onClick={findClosestSpotsForMember}
+        style={{
+          width:"100%",
+          background:th.teal + "22",
+          border:"2px solid " + th.teal,
+          borderRadius:12,
+          padding:"12px 14px",
+          cursor:"pointer",
+          color:th.teal,
+          fontWeight:800,
+          fontSize:14,
+          marginBottom:12,
+        }}
+      >
+        🔎 Search fishing locations near me
+      </button>
 
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
         <button
@@ -1844,7 +1863,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             cursor:"pointer",
           }}
         >
-          Closest spot 📍
+          Search near me 📍
         </button>
       </div>
 
@@ -1870,7 +1889,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       {view === "closest" && (
         <div>
           <Card T={T} borderColor={th.teal + "55"}>
-            <SecLabel text="Closest spots for member location" T={T} />
+            <SecLabel text="Nearby fishing locations list" T={T} />
             {closestLoading ? <div style={{ fontSize:12, color:th.muted }}>Finding your location and ranking spots...</div> : null}
             {closestErr ? <div style={{ fontSize:12, color:th.orange }}>{closestErr}</div> : null}
             {memberLocation ? (
@@ -1880,10 +1899,15 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             ) : null}
             {!closestLoading ? (
               <button type="button" onClick={findClosestSpotsForMember} style={{ background:th.teal + "22", border:"1px solid " + th.teal, borderRadius:8, padding:"8px 12px", color:th.teal, cursor:"pointer", fontWeight:700, fontSize:12 }}>
-                Refresh closest spots
+                Search near me
               </button>
             ) : null}
           </Card>
+          {!closestLoading && !closestErr && closestSpots.length === 0 ? (
+            <Card T={T}>
+              <div style={{ fontSize:12, color:th.muted }}>Tap <strong style={{ color:th.white }}>Search near me</strong> to list the closest fishing locations.</div>
+            </Card>
+          ) : null}
           {closestSpots.map(function(row) {
             return <SpotCard key={"closest_" + row.spot.name} s={row.spot} distanceLabel={row.miles.toFixed(1) + " mi away"} />;
           })}
