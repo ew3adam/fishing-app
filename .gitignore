@@ -13,3 +13,5 @@ dist/
 .env
 .env.*
 !.env.example
+data/contacts.enc*
+data/*.decrypted.csv

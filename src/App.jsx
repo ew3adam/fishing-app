@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createFirebaseAdapter } from "./services/firebaseAdapter";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -2864,6 +2865,11 @@ export default function App() {
     return n;
   });
   var th = THEMES[theme];
+  // Backend adapter is instantiated once so future Firebase calls can be routed here.
+  const backendAdapter = useRef(null);
+  if (!backendAdapter.current) {
+    backendAdapter.current = createFirebaseAdapter({ provider:"firebase", enabled:false });
+  }
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   /** Opens Spots tab on the main screen (big green save / save another way). */
