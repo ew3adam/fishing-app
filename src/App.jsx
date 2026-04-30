@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createFirebaseAdapter } from "./services/firebaseAdapter";
+import { createDataAdapter } from "./services/serviceFactory";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -2865,10 +2865,13 @@ export default function App() {
     return n;
   });
   var th = THEMES[theme];
-  // Backend adapter is instantiated once so future Firebase calls can be routed here.
+  // Backend adapter is instantiated once so future integrations route via one framework entry.
   const backendAdapter = useRef(null);
   if (!backendAdapter.current) {
-    backendAdapter.current = createFirebaseAdapter({ provider:"firebase", enabled:false });
+    backendAdapter.current = createDataAdapter({
+      provider: "local",
+      firebase: { enabled:false },
+    });
   }
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);

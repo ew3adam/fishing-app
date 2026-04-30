@@ -16,7 +16,11 @@ Prepare this app for future upgrades without major rewrites.
   - Firebase adapter (future)
 
 ### Immediate Changes Done
-- Added `src/services/firebaseAdapter.js` for future Firebase bootstrap/service abstraction.
+- Added adapter framework under `src/services/`:
+  - `serviceFactory.js` (provider selection + fallback)
+  - `serviceContracts.js` (adapter shape validation)
+  - `localAdapter.js` (working local provider)
+  - `firebaseAdapter.js` (Firebase-ready stub provider)
 - Added encrypted CSV tooling for temporary import/export pipeline.
 
 ### Future Firebase Integration Tasks
@@ -58,3 +62,8 @@ Prepare this app for future upgrades without major rewrites.
 - Avoid direct Firebase calls inside UI components.
 - Version your import/export file formats.
 - Add migration scripts once remote persistence is introduced.
+
+### Runtime Provider Switching
+- Default provider: `local`
+- Set `VITE_DATA_PROVIDER=firebase` to route through Firebase adapter.
+- If Firebase adapter is incomplete or misconfigured, framework falls back to local adapter.

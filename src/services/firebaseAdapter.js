@@ -1,6 +1,7 @@
+import { validateAdapter } from "./serviceContracts";
+
 // Firebase adapter stub for future backend integration.
 // Keep business logic in service layer and swap to real Firebase SDK later.
-
 export function createFirebaseAdapter(config) {
   var cfg = config || {};
 
@@ -8,7 +9,8 @@ export function createFirebaseAdapter(config) {
     return Promise.reject(new Error("Firebase adapter not configured for operation: " + op));
   }
 
-  return {
+  var adapter = {
+    provider: "firebase",
     config: cfg,
 
     // Contacts
@@ -23,8 +25,7 @@ export function createFirebaseAdapter(config) {
     listCatches: function() { return notConfigured("listCatches"); },
     saveCatch: function() { return notConfigured("saveCatch"); },
   };
-}
 
-// Default export used by the current app shell.
-export const firebaseAdapter = createFirebaseAdapter({});
+  return validateAdapter(adapter).ok ? adapter : adapter;
+}
 
