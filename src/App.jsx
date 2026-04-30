@@ -237,6 +237,7 @@ var SPECIES_PHOTO_BY_ID = {
 const LOCAL_SPOTS = [
   {name:"Salt Creek",addr:"Brookfield, IL",dist:"~1 mi",lat:41.826,lng:-87.845,species:["Bass","Carp","Catfish"],tag:"Creek",color:"#4ab8a0",tip:"Light tackle. Deep bends hold big carp.",apple:"maps://maps.apple.com/?daddr=41.826,-87.845",google:"https://maps.google.com/?daddr=41.826,-87.845"},
   {name:"Thatcher Woods / Des Plaines",addr:"River Forest, IL",dist:"~3 mi",lat:41.874,lng:-87.831,species:["Bass","Carp","Catfish","Crappie","Pike"],tag:"River",color:"#5a9fd4",tip:"Eddies behind fallen logs = bass. Night = catfish.",apple:"maps://maps.apple.com/?daddr=41.874,-87.831",google:"https://maps.google.com/?daddr=41.874,-87.831"},
+  {name:"Navy Pier — North Side",addr:"Chicago, IL",dist:"~11 mi",lat:41.8917,lng:-87.5987,species:["Coho Salmon","Perch","Smallmouth Bass"],tag:"Pier",color:"#5a6fd4",tip:"Fish early by the north side wall and harbor edge. Spawn sacs, spoons, and minnows can all work by season.",apple:"maps://maps.apple.com/?daddr=41.8917,-87.5987",google:"https://maps.google.com/?daddr=41.8917,-87.5987"},
   {name:"Columbia Woods / Des Plaines",addr:"Willow Springs, IL",dist:"~6 mi",lat:41.762,lng:-87.884,species:["Bass","Catfish","Carp","Crappie"],tag:"River",color:"#5a9fd4",tip:"Best catfish holes on the Des Plaines. Night fish.",apple:"maps://maps.apple.com/?daddr=41.762,-87.884",google:"https://maps.google.com/?daddr=41.762,-87.884"},
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
   {name:"Sag Quarry East",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,species:["Rainbow Trout","Bass"],tag:"Trout Lake",color:"#5a9fd4",tip:"PowerBait near aerators after stocking.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
@@ -1193,10 +1194,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       function(pos) {
         var lat = pos.coords.latitude;
         var lng = pos.coords.longitude;
+        var acc = (pos.coords && typeof pos.coords.accuracy === "number") ? pos.coords.accuracy : null;
         var ranked = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
           return { spot:s, miles:milesBetween(lat, lng, s.lat, s.lng) };
         }).sort(function(a, b) { return a.miles - b.miles; });
-        setMemberLocation({ lat:lat, lng:lng });
+        setMemberLocation({ lat:lat, lng:lng, accuracy:acc });
         // Show a useful nearby list instead of just one item.
         setClosestSpots(ranked.slice(0, 10));
         setClosestLoading(false);
@@ -1207,7 +1209,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         setClosestErr("Could not read your location. Check location permissions and try again.");
         setView("closest");
       },
-      { enableHighAccuracy:true, maximumAge:60000, timeout:20000 }
+      { enableHighAccuracy:true, maximumAge:0, timeout:30000 }
     );
   }
 
