@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "npm run build && gh-pages -d dist",
+    "contacts:encrypt": "node scripts/contacts-secure.js encrypt",
+    "contacts:decrypt": "node scripts/contacts-secure.js decrypt"
   },
   "dependencies": {
     "react": "^18.2.0",

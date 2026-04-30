@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createDataAdapter } from "./services/serviceFactory";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -236,6 +237,7 @@ var SPECIES_PHOTO_BY_ID = {
 const LOCAL_SPOTS = [
   {name:"Salt Creek",addr:"Brookfield, IL",dist:"~1 mi",lat:41.826,lng:-87.845,species:["Bass","Carp","Catfish"],tag:"Creek",color:"#4ab8a0",tip:"Light tackle. Deep bends hold big carp.",apple:"maps://maps.apple.com/?daddr=41.826,-87.845",google:"https://maps.google.com/?daddr=41.826,-87.845"},
   {name:"Thatcher Woods / Des Plaines",addr:"River Forest, IL",dist:"~3 mi",lat:41.874,lng:-87.831,species:["Bass","Carp","Catfish","Crappie","Pike"],tag:"River",color:"#5a9fd4",tip:"Eddies behind fallen logs = bass. Night = catfish.",apple:"maps://maps.apple.com/?daddr=41.874,-87.831",google:"https://maps.google.com/?daddr=41.874,-87.831"},
+  {name:"Navy Pier — North Side",addr:"Chicago, IL",dist:"~11 mi",lat:41.8917,lng:-87.5987,species:["Coho Salmon","Perch","Smallmouth Bass"],tag:"Pier",color:"#5a6fd4",tip:"Fish early by the north side wall and harbor edge. Spawn sacs, spoons, and minnows can all work by season.",apple:"maps://maps.apple.com/?daddr=41.8917,-87.5987",google:"https://maps.google.com/?daddr=41.8917,-87.5987"},
   {name:"Columbia Woods / Des Plaines",addr:"Willow Springs, IL",dist:"~6 mi",lat:41.762,lng:-87.884,species:["Bass","Catfish","Carp","Crappie"],tag:"River",color:"#5a9fd4",tip:"Best catfish holes on the Des Plaines. Night fish.",apple:"maps://maps.apple.com/?daddr=41.762,-87.884",google:"https://maps.google.com/?daddr=41.762,-87.884"},
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
   {name:"Sag Quarry East",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,species:["Rainbow Trout","Bass"],tag:"Trout Lake",color:"#5a9fd4",tip:"PowerBait near aerators after stocking.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
@@ -259,10 +261,10 @@ var PROFILE_STORAGE_KEY = "rfc_fishing_profile_v2";
 var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
 
 var CLUB_ROSTER = [
-  { id:"roster_1", name:"Jim K." },
-  { id:"roster_2", name:"Sarah M." },
-  { id:"roster_3", name:"Bob T." },
-  { id:"roster_4", name:"Maria G." },
+  { id:"roster_1", name:"Jim K.", email:"jim.k@riversidefishingclub.com" },
+  { id:"roster_2", name:"Sarah M.", email:"sarah.m@riversidefishingclub.com" },
+  { id:"roster_3", name:"Bob T.", email:"bob.t@riversidefishingclub.com" },
+  { id:"roster_4", name:"Maria G.", email:"maria.g@riversidefishingclub.com" },
 ];
 
 var MOCK_CLUB_SHARED_SPOTS = [
@@ -275,6 +277,12 @@ function sanitizeStr(s, maxLen) {
   return s.replace(/\s+/g, " ").trim().slice(0, m);
 }
 
+function firstNameFromName(name) {
+  var clean = sanitizeStr(name, 120);
+  if (!clean) return "Member";
+  return clean.split(/\s+/).filter(Boolean)[0] || "Member";
+}
+
 function parseCoordNum(v) {
   var n = parseFloat(String(v).trim());
   return isFinite(n) ? n : NaN;
@@ -282,6 +290,18 @@ function parseCoordNum(v) {
 
 function isValidLatLng(lat, lng) {
   return isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function milesBetween(lat1, lng1, lat2, lng2) {
+  // Haversine distance in miles for nearest-spot ranking.
+  var R = 3958.8;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLng = (lng2 - lng1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 /** Pull lat,lng from pasted Google Maps URLs or plain "lat, lng" text. Short goo.gl links are not expanded here. */
@@ -681,12 +701,17 @@ function HomeTab({ profile, T, onOpenSpots }) {
   const [loading, setLoading] = useState(true);
   const [showRefresh, setShowRefresh] = useState(false);
   const [expandArticles, setExpandArticles] = useState(false);
+  const [nearbySpots, setNearbySpots] = useState([]);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
     function doLoad(la, ln) {
+      var rankedSpots = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
+        return { spot:s, miles:milesBetween(la, ln, s.lat, s.lng) };
+      }).sort(function(a, b) { return a.miles - b.miles; });
+      setNearbySpots(rankedSpots.slice(0, 3));
       loadWeather(la, ln).then(function(w) {
         setWx(w);
         setLoading(false);
@@ -797,6 +822,31 @@ function HomeTab({ profile, T, onOpenSpots }) {
             Weather unavailable. <span style={{ color:th.green, cursor:"pointer" }} onClick={load}>Retry</span>
           </div>
         )}
+      </Card>
+
+      <Card T={T}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <SecLabel text="Nearby fishing spots" T={T} />
+          <OBtn label="Open Spots" onClick={function() { if (typeof onOpenSpots === "function") onOpenSpots(); }} color={th.teal} style={{ fontSize:10, padding:"3px 8px" }} />
+        </div>
+        {nearbySpots.length === 0 ? <div style={{ fontSize:12, color:th.muted }}>Loading nearby spots…</div> : null}
+        {nearbySpots.map(function(row) {
+          var s = row.spot;
+          return (
+            <div key={"home_near_" + s.name} style={{ borderBottom:"1px solid " + th.border, paddingBottom:8, marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                <div>
+                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <div style={{ fontSize:11, color:th.muted }}>{s.addr}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:11, color:th.teal, fontFamily:"monospace" }}>{row.miles.toFixed(1)} mi</div>
+                  <a href={s.google} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:th.blue, textDecoration:"none" }}>Directions</a>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </Card>
 
       <Card T={T}>
@@ -947,9 +997,16 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastManualLng, setPastManualLng] = useState("");
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
+  const [spotSearch, setSpotSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [closestLoading, setClosestLoading] = useState(false);
+  const [closestErr, setClosestErr] = useState("");
+  const [memberLocation, setMemberLocation] = useState(null);
+  const [closestSpots, setClosestSpots] = useState([]);
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
+  // Keep invite/share targets restricted to known club emails.
+  const allowedShareEmails = CLUB_ROSTER.map(function(m) { return sanitizeStr(m.email || "", 200).toLowerCase(); }).filter(Boolean);
 
   useEffect(function() {
     if (spotsOpenSection === "my_spots") {
@@ -1089,6 +1146,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   function toggleShareMember(mem) {
     if (!selectedSpot) return;
+    var memEmail = sanitizeStr(mem.email || "", 200).toLowerCase();
+    if (!memEmail || allowedShareEmails.indexOf(memEmail) === -1) {
+      alert("This member does not have an allowed club email yet.");
+      return;
+    }
     var sw = (selectedSpot.sharedWith || []).slice();
     var ix = sw.findIndex(function(m) { return m.id === mem.id; });
     var nextList;
@@ -1098,12 +1160,92 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       nextList = sw.filter(function(m) { return m.id !== mem.id; });
       msg = ("Stopped sharing " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
     } else {
-      nextList = sw.concat([{ id:mem.id, name:mem.name }]);
+      nextList = sw.concat([{ id:mem.id, name:mem.name, firstName:firstNameFromName(mem.name), email:memEmail }]);
       msg = ("Shared " + sanitizeStr(selectedSpot.name, 120) + " with " + mem.name + " on " + d);
     }
     patchPrivateSpot(setProfile, selectedSpot.id, { sharedWith:nextList });
     appendSpotActivity(setProfile, msg);
   }
+
+  function inviteMemberByEmail(mem) {
+    var memEmail = sanitizeStr(mem.email || "", 200).toLowerCase();
+    if (!memEmail || allowedShareEmails.indexOf(memEmail) === -1) {
+      alert("This member does not have an allowed club email yet.");
+      return;
+    }
+    var firstName = firstNameFromName(mem.name);
+    var inviter = sanitizeStr((profile && profile.name) || "Your club member", 120);
+    var appUrl = sanitizeStr((typeof window !== "undefined" && window.location && window.location.href) ? window.location.href : "", 1500);
+    var subj = encodeURIComponent("Join me on the Riverside Fishing Club app");
+    var body = encodeURIComponent("Hi " + firstName + ",\n\n" + inviter + " invited you to try the Riverside Fishing Club app.\n\nOpen app: " + appUrl + "\n\nSee you on the water!");
+    window.location.href = "mailto:" + memEmail + "?subject=" + subj + "&body=" + body;
+  }
+
+  function findClosestSpotsForMember() {
+    setClosestErr("");
+    setClosestLoading(true);
+    if (!navigator.geolocation) {
+      setClosestLoading(false);
+      setClosestErr("Location is not available in this browser.");
+      setView("closest");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
+        var acc = (pos.coords && typeof pos.coords.accuracy === "number") ? pos.coords.accuracy : null;
+        var ranked = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
+          return { spot:s, miles:milesBetween(lat, lng, s.lat, s.lng) };
+        }).sort(function(a, b) { return a.miles - b.miles; });
+        setMemberLocation({ lat:lat, lng:lng, accuracy:acc });
+        // Show a useful nearby list instead of just one item.
+        setClosestSpots(ranked.slice(0, 10));
+        setClosestLoading(false);
+        setView("closest");
+      },
+      function() {
+        setClosestLoading(false);
+        setClosestErr("Could not read your location. Check location permissions and try again.");
+        setView("closest");
+      },
+      { enableHighAccuracy:true, maximumAge:0, timeout:30000 }
+    );
+  }
+
+  function normalizeSpotQuery(raw) {
+    return sanitizeStr(raw, 120).toLowerCase();
+  }
+
+  function spotMatchesQuery(spot, q) {
+    if (!q) return true;
+    if (q === "local" || q === "locals" || q === "nearby") return true;
+    var bucket = [
+      sanitizeStr(spot.name || "", 200),
+      sanitizeStr(spot.addr || "", 200),
+      sanitizeStr(spot.tag || "", 80),
+      Array.isArray(spot.species) ? spot.species.join(" ") : "",
+      sanitizeStr(spot.dist || "", 40),
+    ].join(" ").toLowerCase();
+    return bucket.indexOf(q) >= 0;
+  }
+
+  function searchFishingLocations() {
+    var q = normalizeSpotQuery(spotSearch);
+    if (!q) {
+      setView("local");
+      return;
+    }
+    if (q.indexOf("near me") >= 0 || q.indexOf("closest") >= 0 || q === "nearby") {
+      findClosestSpotsForMember();
+      return;
+    }
+    setView("local");
+  }
+
+  var searchQ = normalizeSpotQuery(spotSearch);
+  var localFiltered = LOCAL_SPOTS.filter(function(s) { return spotMatchesQuery(s, searchQ); });
+  var salmonFiltered = SALMON_SPOTS.filter(function(s) { return spotMatchesQuery(s, searchQ); });
 
   if (mapSpot) {
     return (
@@ -1283,7 +1425,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   if (privView === "detail" && selectedSpot) {
     var rosterF = CLUB_ROSTER.filter(function(m) {
-      return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
+      var q = sanitizeStr(memberSearch, 160).toLowerCase();
+      var nm = sanitizeStr(m.name || "", 160).toLowerCase();
+      var em = sanitizeStr(m.email || "", 200).toLowerCase();
+      var fn = firstNameFromName(m.name).toLowerCase();
+      return !q || nm.indexOf(q) >= 0 || em.indexOf(q) >= 0 || fn.indexOf(q) >= 0;
     });
     var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
     var shareLabel = selectedSpot.shareClub ? "Shared with Club" : (selectedSpot.sharedWith && selectedSpot.sharedWith.length ? "Shared with " + selectedSpot.sharedWith.map(function(m) { return m.name; }).join(", ") : "Private");
@@ -1321,15 +1467,21 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <input type="checkbox" checked={!!selectedSpot.shareClub} onChange={toggleShareClub} />
             <span style={{ fontSize:13, color:th.white }}>Share with Club (club map)</span>
           </label>
-          <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members</div>
-          <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search roster…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
+          <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members (allowable club emails)</div>
+          <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search first name or email…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             {rosterF.map(function(m) {
               var on = (selectedSpot.sharedWith || []).some(function(x) { return x.id === m.id; });
+              var first = firstNameFromName(m.name);
               return (
-                <button key={m.id} type="button" onClick={function() { toggleShareMember(m); }} style={{ textAlign:"left", background:on ? th.green + "22" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12 }}>
-                  {on ? "✓ " : ""}{m.name}
-                </button>
+                <div key={m.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8 }}>
+                  <button type="button" onClick={function() { toggleShareMember(m); }} style={{ width:"100%", textAlign:"left", background:on ? th.green + "22" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12, marginBottom:6 }}>
+                    {on ? "✓ " : ""}{first} <span style={{ color:th.muted }}>({m.email})</span>
+                  </button>
+                  <button type="button" onClick={function() { inviteMemberByEmail(m); }} style={{ width:"100%", textAlign:"center", background:th.blue + "20", border:"1px solid " + th.blue, borderRadius:8, padding:"7px 8px", color:th.blue, cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                    Invite {first} to app
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1477,6 +1629,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   function SpotCard(props) {
     var s = props.s;
+    var distLabel = props.distanceLabel || s.dist;
     return (
       <Card T={T} borderColor={s.color + "44"} style={{ borderLeft:"3px solid " + s.color }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -1487,7 +1640,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           </div>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
             <Pill label={s.tag} color={s.color} />
-            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
+            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{distLabel}</span>
             <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:22, minWidth:44, minHeight:44 }}>
               {favSpots.includes(s.name) ? "⭐" : "☆"}
             </button>
@@ -1694,6 +1847,49 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
         These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
       </p>
+      <Card T={T} borderColor={th.blue + "44"}>
+        <SecLabel text="Find fishing locations" T={T} />
+        <input
+          value={spotSearch}
+          onChange={function(e) { setSpotSearch(e.target.value); }}
+          placeholder='Search by local, name, city, species, or type "near me"'
+          style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:13, boxSizing:"border-box", marginBottom:8 }}
+        />
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <button
+            type="button"
+            onClick={searchFishingLocations}
+            style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, padding:"9px 10px", color:th.blue, cursor:"pointer", fontWeight:700, fontSize:12 }}
+          >
+            Search spots
+          </button>
+          <button
+            type="button"
+            onClick={findClosestSpotsForMember}
+            style={{ background:th.teal + "22", border:"1px solid " + th.teal, borderRadius:8, padding:"9px 10px", color:th.teal, cursor:"pointer", fontWeight:700, fontSize:12 }}
+          >
+            Search near me
+          </button>
+        </div>
+      </Card>
+      <button
+        type="button"
+        onClick={findClosestSpotsForMember}
+        style={{
+          width:"100%",
+          background:th.teal + "22",
+          border:"2px solid " + th.teal,
+          borderRadius:12,
+          padding:"12px 14px",
+          cursor:"pointer",
+          color:th.teal,
+          fontWeight:800,
+          fontSize:14,
+          marginBottom:12,
+        }}
+      >
+        🔎 Search fishing locations near me
+      </button>
 
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
         <button
@@ -1746,9 +1942,32 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             My favorites ⭐
           </button>
         ) : null}
+        <button
+          type="button"
+          onClick={findClosestSpotsForMember}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="closest" ? th.teal : th.border),
+            background:view==="closest" ? th.teal + "35" : "transparent",
+            color:view==="closest" ? th.teal : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Search near me 📍
+        </button>
       </div>
 
-      {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+      {view === "local" && (
+        <div>
+          {localFiltered.length === 0 ? (
+            <Card T={T}><div style={{ fontSize:12, color:th.muted }}>No local fishing spots found for "<strong style={{ color:th.white }}>{sanitizeStr(spotSearch, 80)}</strong>".</div></Card>
+          ) : null}
+          {localFiltered.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+        </div>
+      )}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
@@ -1759,12 +1978,42 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
             <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
           </div>
-          {SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
+          {salmonFiltered.length === 0 ? (
+            <Card T={T}><div style={{ fontSize:12, color:th.muted }}>No salmon trail spots found for "<strong style={{ color:th.white }}>{sanitizeStr(spotSearch, 80)}</strong>".</div></Card>
+          ) : null}
+          {salmonFiltered.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
         </div>
       )}
       {view === "fav" && (
         <div>
           {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+        </div>
+      )}
+      {view === "closest" && (
+        <div>
+          <Card T={T} borderColor={th.teal + "55"}>
+            <SecLabel text="Nearby fishing locations list" T={T} />
+            {closestLoading ? <div style={{ fontSize:12, color:th.muted }}>Finding your location and ranking spots...</div> : null}
+            {closestErr ? <div style={{ fontSize:12, color:th.orange }}>{closestErr}</div> : null}
+            {memberLocation ? (
+              <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>
+                Member location: <span style={{ fontFamily:"monospace" }}>{memberLocation.lat.toFixed(5)}, {memberLocation.lng.toFixed(5)}</span>
+              </div>
+            ) : null}
+            {!closestLoading ? (
+              <button type="button" onClick={findClosestSpotsForMember} style={{ background:th.teal + "22", border:"1px solid " + th.teal, borderRadius:8, padding:"8px 12px", color:th.teal, cursor:"pointer", fontWeight:700, fontSize:12 }}>
+                Search near me
+              </button>
+            ) : null}
+          </Card>
+          {!closestLoading && !closestErr && closestSpots.length === 0 ? (
+            <Card T={T}>
+              <div style={{ fontSize:12, color:th.muted }}>Tap <strong style={{ color:th.white }}>Search near me</strong> to list the closest fishing locations.</div>
+            </Card>
+          ) : null}
+          {closestSpots.map(function(row) {
+            return <SpotCard key={"closest_" + row.spot.name} s={row.spot} distanceLabel={row.miles.toFixed(1) + " mi away"} />;
+          })}
         </div>
       )}
 
@@ -2054,37 +2303,119 @@ function CatalogueTab({ T }) {
 function CatchTab({ profile, T }) {
   const th = THEMES[T];
   const [view, setView] = useState("feed");
-  const fileRef = useRef();
+  const fileCameraRef = useRef();
+  const fileLibraryRef = useRef();
   const [catches, setCatches] = useState([
     { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
     { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
   ]);
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
+  const [photoSource, setPhotoSource] = useState("");
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showRuler, setShowRuler] = useState(true);
+  const [rulerInches, setRulerInches] = useState(18);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
 
-  function handlePhoto(e) {
-    var file = e.target.files[0];
-    if (!file) return;
+  function openPhotoPicker(refObj) {
+    if (!refObj || !refObj.current) return;
+    // Clear previous value so selecting the same image again still triggers onChange.
+    refObj.current.value = "";
+    refObj.current.click();
+  }
+
+  function choosePresetLength(inches) {
+    // Quick options to speed up logging for common fish sizes.
+    setF("length", String(inches) + " inches");
+  }
+
+  function setLengthNotMeasured() {
+    // Keep posting possible even when no reliable measurement is available.
+    setF("length", "Length not measured");
+  }
+
+  function renderPhotoWithRuler(maxHeightPx) {
+    if (!photo) return null;
+    var ticks = [];
+    var i;
+    for (i = 0; i <= rulerInches; i++) ticks.push(i);
+    return (
+      <div style={{ position:"relative", marginBottom:12 }}>
+        <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, maxHeight:maxHeightPx, objectFit:"cover", display:"block" }} />
+        {showRuler ? (
+          <div style={{ position:"absolute", left:8, right:8, bottom:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:8, padding:"8px 10px 6px" }}>
+            <div style={{ position:"relative", height:16, borderTop:"2px solid #ffffff" }}>
+              {ticks.map(function(tick) {
+                return (
+                  <div key={tick} style={{ position:"absolute", left:(tick / rulerInches * 100) + "%", top:-2, transform:"translateX(-0.5px)" }}>
+                    <div style={{ width:1, height:tick % 2 === 0 ? 10 : 6, background:"#ffffff" }} />
+                    {tick % 2 === 0 ? <div style={{ fontSize:8, color:"#ffffff", marginTop:1 }}>{tick}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:10, color:"#ffffff", marginTop:2 }}>Ruler overlay ({rulerInches} in)</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function downscaleImageToWeb72(file, onDone) {
+    // Convert to web-sized image so uploads are lightweight (72 DPI equivalent for screen use).
     var reader = new FileReader();
     reader.onload = function(ev) {
       var full = ev.target.result;
-      var b64 = full.split(",")[1];
+      var img = new Image();
+      img.onload = function() {
+        var maxW = 1600;
+        var maxH = 1600;
+        var srcW = img.width || maxW;
+        var srcH = img.height || maxH;
+        var scale = Math.min(1, maxW / srcW, maxH / srcH);
+        var outW = Math.max(1, Math.round(srcW * scale));
+        var outH = Math.max(1, Math.round(srcH * scale));
+        var canvas = document.createElement("canvas");
+        canvas.width = outW;
+        canvas.height = outH;
+        var ctx = canvas.getContext("2d");
+        if (!ctx) {
+          onDone(full, full.split(",")[1] || "", file.type || "image/jpeg");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, outW, outH);
+        var outType = "image/jpeg";
+        var compressed = canvas.toDataURL(outType, 0.86);
+        onDone(compressed, compressed.split(",")[1] || "", outType);
+      };
+      img.onerror = function() {
+        onDone(full, full.split(",")[1] || "", file.type || "image/jpeg");
+      };
+      img.src = full;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handlePhoto(e, sourceType) {
+    var file = e.target.files[0];
+    if (!file) return;
+    setAiResult(null);
+    setAiLoading(true);
+    setStep(2);
+    downscaleImageToWeb72(file, function(full, b64, mediaType) {
       setPhoto(full);
       setPhotoB64(b64);
-      setStep(2);
-      setAiLoading(true);
+      setPhotoSource(sourceType || "library");
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
           messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},
+            {type:"image",source:{type:"base64",media_type:mediaType || "image/jpeg",data:b64}},
             {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
           ]}]
         })
@@ -2098,15 +2429,23 @@ function CatchTab({ profile, T }) {
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var userName = sanitizeStr(((profile && profile.name) || "Angler"), 120);
+    var species = sanitizeStr(form.species, 120);
+    var length = sanitizeStr(form.length, 120) || "Length not measured";
+    var bait = sanitizeStr(form.bait, 200);
+    var rod = sanitizeStr(form.rod, 200);
+    var spot = sanitizeStr(form.spot, 200);
+    var notes = sanitizeStr(form.notes, 1200);
+    var date = sanitizeStr(form.date, 80);
+    var anglerEmail = sanitizeStr(((profile && profile.email) || "not provided"), 160);
+    var entry = { id:Date.now(), user:userName, species:species, length:length, bait:bait, rod:rod, spot:spot, notes:notes, date:date, photo:photo };
     setCatches(function(c) { return [entry].concat(c); });
-    var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
-    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
+    var subj = encodeURIComponent("RFC Catch Report — " + species + " · " + length + " · " + userName);
+    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + userName + "\nEmail: " + anglerEmail + "\nDate: " + date + "\n\nFish: " + species + "\nLength: " + length + "\nBait: " + bait + "\nRod: " + rod + "\nSpot: " + spot + "\nNotes: " + notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
     setStep(6);
   }
@@ -2154,10 +2493,12 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
-              <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
-                <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
+              <input type="file" accept="image/*" capture="environment" ref={fileCameraRef} onChange={function(e) { handlePhoto(e, "camera"); }} style={{ display:"none" }} />
+              <input type="file" accept="image/*" ref={fileLibraryRef} onChange={function(e) { handlePhoto(e, "library"); }} style={{ display:"none" }} />
+              <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:10, marginBottom:12 }}>
+                <button onClick={function() { openPhotoPicker(fileCameraRef); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
+                <button onClick={function() { openPhotoPicker(fileLibraryRef); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>🖼️ Upload from Device</button>
+                <button onClick={function() { setStep(3); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, cursor:"pointer", color:th.white, fontSize:13, fontWeight:700 }}>📝 Log Without Photo</button>
               </div>
             </div>
           )}
@@ -2165,7 +2506,20 @@ function CatchTab({ profile, T }) {
           {step === 2 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:200, objectFit:"cover" }} /> : null}
+              {renderPhotoWithRuler(220)}
+              {photo ? <div style={{ fontSize:11, color:th.muted, marginTop:-4, marginBottom:10 }}>Photo source: {photoSource === "camera" ? "Camera" : "Photo library"}</div> : null}
+              <Card T={T}>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Photo ruler in inches</div>
+                <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                  <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:th.white }}>
+                    <input type="checkbox" checked={showRuler} onChange={function(e) { setShowRuler(!!e.target.checked); }} />
+                    Show ruler overlay
+                  </label>
+                  <select value={rulerInches} onChange={function(e) { setRulerInches(parseInt(e.target.value, 10) || 18); }} style={{ background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"6px 8px", fontSize:12 }}>
+                    {[12,18,24,30].map(function(n) { return <option key={n} value={n}>{n} in</option>; })}
+                  </select>
+                </div>
+              </Card>
               {aiLoading ? <div style={{ textAlign:"center", color:th.muted, padding:"20px 0" }}>Identifying fish...</div> : null}
               {aiResult && !aiLoading ? (
                 <Card T={T} borderColor={th.green + "44"}>
@@ -2176,8 +2530,22 @@ function CatchTab({ profile, T }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
               <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
-              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length options (inches or custom):</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                {[8,10,12,14,16,18,20,22,24].map(function(n) {
+                  var label = n + " in";
+                  var on = (form.length || "").toLowerCase() === (n + " inches");
+                  return (
+                    <button key={n} type="button" onClick={function() { choosePresetLength(n); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:16, color:on ? th.green : th.muted, padding:"4px 10px", cursor:"pointer", fontSize:11 }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='Freeform: e.g. 17.5 inches or 45 cm' style={inputStyle} />
+              <button type="button" onClick={setLengthNotMeasured} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, color:th.muted, padding:"8px 0", cursor:"pointer", fontSize:12, marginBottom:10 }}>
+                Use "Length not measured"
+              </button>
               <button onClick={function() { setStep(3); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
             </div>
           )}
@@ -2185,7 +2553,7 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
+              {["species","bait","spot","date"].map(function(k) {
                 return (
                   <div key={k}>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
@@ -2193,6 +2561,21 @@ function CatchTab({ profile, T }) {
                   </div>
                 );
               })}
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length (quick options or freeform)</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                {[8,10,12,14,16,18,20,22,24].map(function(n) {
+                  var on = (form.length || "").toLowerCase() === (n + " inches");
+                  return (
+                    <button key={n} type="button" onClick={function() { choosePresetLength(n); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:16, color:on ? th.green : th.muted, padding:"4px 10px", cursor:"pointer", fontSize:11 }}>
+                      {n} in
+                    </button>
+                  );
+                })}
+              </div>
+              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder="e.g. 13 inches, 17.5 in, 45 cm" style={inputStyle} />
+              <button type="button" onClick={setLengthNotMeasured} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, color:th.muted, padding:"8px 0", cursor:"pointer", fontSize:12, marginBottom:10 }}>
+                Use "Length not measured"
+              </button>
               {gear.length > 0 ? (
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
@@ -2211,7 +2594,7 @@ function CatchTab({ profile, T }) {
           {step === 4 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
+              {renderPhotoWithRuler(200)}
               <Card T={T}>
                 {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
@@ -2237,7 +2620,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoSource(""); setPhotoB64(null); setAiResult(null); setShowRuler(true); setRulerInches(18); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
@@ -2484,6 +2867,14 @@ export default function App() {
     return n;
   });
   var th = THEMES[theme];
+  // Backend adapter is instantiated once so future integrations route via one framework entry.
+  const backendAdapter = useRef(null);
+  if (!backendAdapter.current) {
+    backendAdapter.current = createDataAdapter({
+      provider: "local",
+      firebase: { enabled:false },
+    });
+  }
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   /** Opens Spots tab on the main screen (big green save / save another way). */
