@@ -232,6 +232,17 @@ var SPECIES_PHOTO_BY_ID = {
   bullhead:"https://upload.wikimedia.org/wikipedia/commons/b/b4/Ameiurus_nebulosus.jpg",
 };
 
+// ─── HAVERSINE DISTANCE (miles) ──────────────────────────────────────────────
+function haversineMi(lat1, lng1, lat2, lng2) {
+  var R = 3958.8;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLng = (lng2 - lng1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ─── LOCAL SPOTS ──────────────────────────────────────────────────────────────
 const LOCAL_SPOTS = [
   {name:"Salt Creek",addr:"Brookfield, IL",dist:"~1 mi",lat:41.826,lng:-87.845,species:["Bass","Carp","Catfish"],tag:"Creek",color:"#4ab8a0",tip:"Light tackle. Deep bends hold big carp.",apple:"maps://maps.apple.com/?daddr=41.826,-87.845",google:"https://maps.google.com/?daddr=41.826,-87.845"},
@@ -240,6 +251,12 @@ const LOCAL_SPOTS = [
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
   {name:"Sag Quarry East",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,species:["Rainbow Trout","Bass"],tag:"Trout Lake",color:"#5a9fd4",tip:"PowerBait near aerators after stocking.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
   {name:"Horsetail Lake",addr:"Palos Hills, IL",dist:"~9 mi",lat:41.698,lng:-87.851,species:["Rainbow Trout"],tag:"Trout Lake",color:"#5a9fd4",tip:"Smaller lake — easier to cover. Spinners work great.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.698,-87.851",google:"https://maps.google.com/?daddr=41.698,-87.851"},
+  {name:"Navy Pier — North Side",addr:"Chicago, IL",dist:"~12 mi",lat:41.892,lng:-87.609,species:["Coho Salmon","Perch","Bass","Steelhead"],tag:"Lakefront",color:"#5a6fd4",tip:"North side open for shore fishing. Perch in summer, coho in spring/fall. Arrive early for rail space.",apple:"maps://maps.apple.com/?daddr=41.892,-87.609",google:"https://maps.google.com/?daddr=41.892,-87.609"},
+  {name:"Montrose Harbor / Pier",addr:"Chicago, IL",dist:"~14 mi",lat:41.964,lng:-87.638,species:["Perch","Bass","Coho Salmon","Chinook Salmon"],tag:"Lakefront",color:"#5a6fd4",tip:"Top Chicago perch pier. Rocks south of harbor for bass. Fall coho from the point.",apple:"maps://maps.apple.com/?daddr=41.964,-87.638",google:"https://maps.google.com/?daddr=41.964,-87.638"},
+  {name:"Diversey Harbor",addr:"Chicago, IL",dist:"~13 mi",lat:41.933,lng:-87.636,species:["Perch","Bass","Catfish"],tag:"Lakefront",color:"#5a6fd4",tip:"Protected harbor walls. Great perch spot. Easier access than piers.",apple:"maps://maps.apple.com/?daddr=41.933,-87.636",google:"https://maps.google.com/?daddr=41.933,-87.636"},
+  {name:"Belmont Harbor Rocks",addr:"Chicago, IL",dist:"~14 mi",lat:41.942,lng:-87.636,species:["Perch","Smallmouth Bass","Coho Salmon"],tag:"Lakefront",color:"#5a6fd4",tip:"Rocky shoreline south of harbor. Smallmouth on tubes. Perch off the wall.",apple:"maps://maps.apple.com/?daddr=41.942,-87.636",google:"https://maps.google.com/?daddr=41.942,-87.636"},
+  {name:"59th St Pier / Promontory Point",addr:"Chicago, IL",dist:"~12 mi",lat:41.794,lng:-87.579,species:["Perch","Coho Salmon","Smallmouth Bass"],tag:"Lakefront",color:"#5a6fd4",tip:"Deep water close to shore. Good fall coho. Perch year-round off the point.",apple:"maps://maps.apple.com/?daddr=41.794,-87.579",google:"https://maps.google.com/?daddr=41.794,-87.579"},
+  {name:"Calumet Park Pier",addr:"Chicago, IL",dist:"~15 mi",lat:41.714,lng:-87.530,species:["Perch","Catfish","Coho Salmon"],tag:"Lakefront",color:"#5a6fd4",tip:"South side pier. Less crowded than Montrose. Night catfish off the rocks.",apple:"maps://maps.apple.com/?daddr=41.714,-87.530",google:"https://maps.google.com/?daddr=41.714,-87.530"},
 ];
 
 // ─── SALMON TRAIL ─────────────────────────────────────────────────────────────
@@ -948,6 +965,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [userPos, setUserPos] = useState(null);
+  const [nearMeLoading, setNearMeLoading] = useState(false);
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -1698,6 +1717,47 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
         <button
           type="button"
+          onClick={function() {
+            if (!userPos) {
+              setNearMeLoading(true);
+              if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                  function(pos) {
+                    setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+                    setNearMeLoading(false);
+                    setView("nearme");
+                  },
+                  function() {
+                    setNearMeLoading(false);
+                    setGeoErr("Could not get your location for Near Me.");
+                    setView("nearme");
+                  },
+                  { enableHighAccuracy:true, maximumAge:120000, timeout:15000 }
+                );
+              } else {
+                setNearMeLoading(false);
+                setGeoErr("GPS not available in this browser.");
+                setView("nearme");
+              }
+            } else {
+              setView("nearme");
+            }
+          }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="nearme" ? th.orange : th.border),
+            background:view==="nearme" ? th.orange + "35" : "transparent",
+            color:view==="nearme" ? th.orange : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          {nearMeLoading ? "Locating…" : "Near Me 📍"}
+        </button>
+        <button
+          type="button"
           onClick={function() { setView("local"); }}
           style={{
             padding:"10px 14px",
@@ -1747,6 +1807,57 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           </button>
         ) : null}
       </div>
+
+      {view === "nearme" && (function() {
+        if (!userPos) {
+          return (
+            <Card T={T}>
+              <div style={{ fontSize:14, color:th.muted, textAlign:"center", padding:20 }}>
+                {nearMeLoading ? "Getting your location…" : "Location unavailable. Allow GPS access to see spots sorted by distance."}
+              </div>
+            </Card>
+          );
+        }
+        var allSpots = LOCAL_SPOTS.concat(SALMON_SPOTS).map(function(s) {
+          var d = haversineMi(userPos.lat, userPos.lng, s.lat, s.lng);
+          return Object.assign({}, s, { _distMi:d, dist:d < 0.1 ? "< 0.1 mi" : d < 10 ? d.toFixed(1) + " mi" : Math.round(d) + " mi" });
+        });
+        allSpots.sort(function(a, b) { return a._distMi - b._distMi; });
+        var bands = [
+          { label:"Within 1 mile", max:1, color:th.green, spots:[] },
+          { label:"1 – 5 miles", max:5, color:th.teal, spots:[] },
+          { label:"5 – 15 miles", max:15, color:th.blue, spots:[] },
+          { label:"15 – 30 miles", max:30, color:th.orange, spots:[] },
+          { label:"30+ miles", max:Infinity, color:th.muted, spots:[] },
+        ];
+        allSpots.forEach(function(s) {
+          for (var i = 0; i < bands.length; i++) {
+            if (s._distMi < bands[i].max || (i === bands.length - 1)) {
+              bands[i].spots.push(s);
+              break;
+            }
+          }
+        });
+        return (
+          <div>
+            <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "44", borderRadius:10, padding:12, marginBottom:12 }}>
+              <div style={{ fontSize:11, color:th.orange, fontFamily:"monospace", marginBottom:4 }}>SORTED BY YOUR LOCATION</div>
+              <div style={{ fontSize:13, color:th.white, lineHeight:1.5 }}>All {allSpots.length} spots ranked closest to farthest from where you are right now.</div>
+            </div>
+            {bands.map(function(band) {
+              if (band.spots.length === 0) return null;
+              return (
+                <div key={band.label}>
+                  <div style={{ fontSize:12, color:band.color, fontFamily:"monospace", letterSpacing:1, marginBottom:6, marginTop:14, textTransform:"uppercase", borderBottom:"1px solid " + band.color + "44", paddingBottom:4 }}>
+                    {band.label} ({band.spots.length})
+                  </div>
+                  {band.spots.map(function(s, i) { return <SpotCard key={band.label + "_" + i} s={s} />; })}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
       {view === "salmon" && (
