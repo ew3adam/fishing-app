@@ -674,7 +674,7 @@ function Pill({ label, color }) {
 }
 
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ profile, T, onOpenSpots }) {
+function HomeTab({ profile, T }) {
   const th = THEMES[T];
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
@@ -720,35 +720,6 @@ function HomeTab({ profile, T, onOpenSpots }) {
         <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
         <div style={{ fontSize:12, color:th.muted }}>North Riverside · Lake Michigan Corridor</div>
       </div>
-
-      <button
-        type="button"
-        onClick={function() { if (typeof onOpenSpots === "function") onOpenSpots(); }}
-        style={{
-          width:"100%",
-          background:th.green,
-          color:"#081208",
-          border:"none",
-          borderRadius:14,
-          padding:"16px 14px",
-          cursor:"pointer",
-          fontSize:17,
-          fontWeight:800,
-          marginBottom:8,
-          display:"flex",
-          alignItems:"center",
-          justifyContent:"center",
-          gap:10,
-          minHeight:54,
-          boxShadow:"0 6px 22px rgba(0,0,0,0.45)",
-        }}
-      >
-        <span style={{ fontSize:26 }} aria-hidden>📍</span>
-        <span>Add my fishing spot</span>
-      </button>
-      <p style={{ fontSize:12, color:th.muted, textAlign:"center", marginBottom:14, lineHeight:1.45 }}>
-        Saved only on this device. From here you can use GPS or paste a map link.
-      </p>
 
       {showRefresh && (
         <div style={{ background:th.green + "22", border:"1px solid " + th.green + "55", borderRadius:10, padding:12, marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -2064,6 +2035,9 @@ function CatchTab({ profile, T }) {
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [rulerMaxInches, setRulerMaxInches] = useState(24);
+  const [mouthPct, setMouthPct] = useState(10);
+  const [tailPct, setTailPct] = useState(90);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
 
@@ -2078,6 +2052,9 @@ function CatchTab({ profile, T }) {
       var b64 = full.split(",")[1];
       setPhoto(full);
       setPhotoB64(b64);
+      setRulerMaxInches(24);
+      setMouthPct(10);
+      setTailPct(90);
       setStep(2);
       setAiLoading(true);
       fetch("https://api.anthropic.com/v1/messages", {
@@ -2112,6 +2089,11 @@ function CatchTab({ profile, T }) {
   }
 
   var gear = (profile && profile.gear) || [];
+  // Clamp ruler input so the overlay always has a valid scale.
+  var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || 24));
+  // Convert marker distance (percentage of image width) into inches.
+  var measuredInches = (Math.abs(tailPct - mouthPct) / 100) * rulerInches;
+  var measuredLengthLabel = measuredInches.toFixed(1) + " inches";
 
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
 
@@ -2165,7 +2147,48 @@ function CatchTab({ profile, T }) {
           {step === 2 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:200, objectFit:"cover" }} /> : null}
+              {photo ? (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
+                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
+                    <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                      {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                        var left = (i / rulerInches) * 100;
+                        var major = i % 5 === 0;
+                        return (
+                          <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                            {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                          </div>
+                        );
+                      })}
+                      {/* Mouth and tail markers define the measured fish span. */}
+                      <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
+                        <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                      </div>
+                      <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
+                        <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                      </div>
+                    </div>
+                  </div>
+                  <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
+                    <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
+                      Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                    </div>
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Visible ruler inches in photo</div>
+                    <input type="number" min="10" max="60" value={rulerInches} onChange={function(e) { setRulerMaxInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Mouth marker position</div>
+                    <input type="range" min="0" max="100" step="1" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Tail marker position</div>
+                    <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10 }} />
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                      <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Measured length: {measuredLengthLabel}</div>
+                      <button onClick={function() { setF("length", measuredLengthLabel); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        Use this length
+                      </button>
+                    </div>
+                  </Card>
+                </div>
+              ) : null}
               {aiLoading ? <div style={{ textAlign:"center", color:th.muted, padding:"20px 0" }}>Identifying fish...</div> : null}
               {aiResult && !aiLoading ? (
                 <Card T={T} borderColor={th.green + "44"}>
@@ -2174,6 +2197,11 @@ function CatchTab({ profile, T }) {
                   <div style={{ fontSize:13, color:th.white }}>{aiResult.notes}</div>
                 </Card>
               ) : null}
+              <Card T={T} borderColor={th.orange + "44"}>
+                <div style={{ fontSize:12, color:th.white, lineHeight:1.55 }}>
+                  ID check: use the species photo guide in the Fish tab to confirm body shape, mouth size, and tail shape before saving your catch.
+                </div>
+              </Card>
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
               <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
@@ -2486,11 +2514,6 @@ export default function App() {
   var th = THEMES[theme];
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
-  /** Opens Spots tab on the main screen (big green save / save another way). */
-  var goSpotsMain = useCallback(function() {
-    setTab("spots");
-    setSpotsOpenSection(null);
-  }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
 
   useEffect(function() {
@@ -2500,7 +2523,7 @@ export default function App() {
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
       <div style={{ padding:"0 14px" }}>
-        {tab==="home"      && <HomeTab profile={profile} T={theme} onOpenSpots={goSpotsMain} />}
+        {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
