@@ -2723,7 +2723,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots 
 // ─── NAV + APP ────────────────────────────────────────────────────────────────
 var NAV = [
   {id:"home",emoji:"🏠",label:"Home"},
-  {id:"fish",emoji:"🐟",label:"Species"},
+  {id:"fish",emoji:"🐟",label:"Fish"},
   {id:"spots",emoji:"📍",label:"Spots"},
   {id:"lakes",emoji:"🌊",label:"Lakes"},
   {id:"catalogue",emoji:"📚",label:"Tackle"},
@@ -2752,7 +2752,7 @@ export default function App() {
   }, [profile]);
 
   return (
-    <div className="app-shell" style={{ background:th.bg, minHeight:"100vh", fontFamily:"Inter, system-ui, -apple-system, sans-serif", color:th.white, paddingBottom:88 }}>
+    <div className="app-shell" style={{ background:th.bg, minHeight:"100vh", fontFamily:"Inter, system-ui, -apple-system, sans-serif", color:th.white, paddingBottom:144 }}>
       <div className="app-frame" style={{ margin:"0 auto", padding:"0 16px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
@@ -2763,13 +2763,13 @@ export default function App() {
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
       </div>
-      <div className="bottom-nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:1040, background:th.nav, border:"1px solid " + th.border, borderBottom:"none", borderRadius:"22px 22px 0 0", display:"flex", backdropFilter:"blur(12px)", padding:"6px 8px 8px" }}>
+      <div className="bottom-nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:1040, background:th.nav, border:"1px solid " + th.border, borderBottom:"none", borderRadius:"22px 22px 0 0", display:"grid", gridTemplateColumns:"repeat(4, minmax(0, 1fr))", backdropFilter:"blur(12px)", padding:"6px 8px 8px", gap:4 }}>
         {NAV.map(function(n) {
           var isActive = tab === n.id;
           return (
-            <button className="nav-button" key={n.id} onClick={function() { setTab(n.id); }} style={{ flex:1, minHeight:52, padding:"7px 0 5px", background:isActive ? th.green + "18" : "transparent", border:"none", borderRadius:14, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
-              <span style={{ width:28, height:24, borderRadius:999, display:"grid", placeItems:"center", background:isActive ? th.green : "transparent", color:isActive ? "#fff" : th.muted, fontSize:15 }}>{n.emoji}</span>
-              <span style={{ fontSize:9, color:isActive ? th.green : th.muted, fontWeight:isActive ? 800 : 600, letterSpacing:0.2 }}>{n.label}</span>
+            <button aria-label={"Open " + n.label} className="nav-button" key={n.id} onClick={function() { setTab(n.id); }} style={{ minHeight:50, padding:"6px 0 5px", background:isActive ? th.green + "18" : "transparent", border:"none", borderRadius:14, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2 }}>
+              <span style={{ width:30, height:26, borderRadius:999, display:"grid", placeItems:"center", background:isActive ? th.green : "transparent", color:isActive ? "#fff" : th.muted, fontSize:16 }}>{n.emoji}</span>
+              <span style={{ fontSize:10, color:isActive ? th.green : th.muted, fontWeight:isActive ? 800 : 700, letterSpacing:0.1 }}>{n.label}</span>
             </button>
           );
         })}

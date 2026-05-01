@@ -28,6 +28,16 @@ a {
   box-shadow: 0 14px 32px rgba(26, 42, 58, 0.12);
 }
 
+.bottom-nav {
+  flex-wrap: wrap;
+  gap: 4px;
+  scrollbar-width: none;
+}
+
+.bottom-nav::-webkit-scrollbar {
+  display: none;
+}
+
 .top-navbar {
   backdrop-filter: blur(16px);
 }
@@ -103,6 +113,10 @@ a {
 @media (min-width: 700px) {
   .app-frame {
     max-width: 760px;
+  }
+
+  .bottom-nav {
+    flex-wrap: nowrap;
   }
 
   .article-grid {
