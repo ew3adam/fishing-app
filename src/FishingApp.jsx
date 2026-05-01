@@ -1,3 +1,9 @@
+/**
+ * Legacy module note:
+ * - This file currently mirrors a prior single-file implementation.
+ * - Active app entry uses src/App.jsx from src/main.jsx.
+ * - Kept for rollback/reference while the primary module is hardened.
+ */
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────

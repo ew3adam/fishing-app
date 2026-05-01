@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+/**
+ * RFC App module summary:
+ * - Single-file React app for fishing guidance, spots, weather, and catch logging.
+ * - Handles local profile storage, map helpers, AI-assisted catch analysis, and wizard UI flows.
+ * - Includes defensive input sanitization and runtime guards for browser/device variability.
+ */
+
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
   dark:      { bg:"#0d1a0d", card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", dim:"#3a6a3a", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a", blue:"#5a9fd4", red:"#e05050", orange:"#e09030", teal:"#4ab8a0", indigo:"#5a6fd4", nav:"rgba(13,26,13,0.97)" },
@@ -269,6 +276,154 @@ var MOCK_CLUB_SHARED_SPOTS = [
   { id:"club_demo_busse", name:"Busse Lake — south cove", lat:42.018, lng:-88.045, credit:"Jim K.", species_present:["Largemouth Bass","Crappie"], isDemo:true },
 ];
 
+var LOG_LEVELS = { debug:10, info:20, warn:30, error:40 };
+var ACTIVE_LOG_LEVEL = "info";
+
+/**
+ * Structured logger so failures are visible and actionable.
+ * Includes context metadata to avoid silent failures in production paths.
+ */
+function appLog(level, event, details) {
+  var lv = LOG_LEVELS[level] || LOG_LEVELS.info;
+  var min = LOG_LEVELS[ACTIVE_LOG_LEVEL] || LOG_LEVELS.info;
+  if (lv < min) return;
+  var payload = {
+    level:level,
+    event:sanitizeStr(String(event || "app_event"), 120),
+    at:new Date().toISOString(),
+    details:details && typeof details === "object" ? details : {},
+  };
+  try {
+    if (level === "error") console.error("[RFC_APP]", payload);
+    else if (level === "warn") console.warn("[RFC_APP]", payload);
+    else console.log("[RFC_APP]", payload);
+  } catch (e) {}
+}
+
+/** Convert unknown errors to safe one-line message for logs/UI. */
+function toErrorMessage(err) {
+  if (!err) return "unknown_error";
+  if (typeof err === "string") return sanitizeStr(err, 240);
+  if (typeof err.message === "string") return sanitizeStr(err.message, 240);
+  try {
+    return sanitizeStr(JSON.stringify(err), 240);
+  } catch (e) {
+    return "unknown_error";
+  }
+}
+
+/** Guard JSON.parse with consistent fallback and logging. */
+function safeJsonParse(raw, fallback, contextLabel) {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    appLog("warn", "json_parse_failed", { context:contextLabel || "unknown", error:toErrorMessage(e) });
+    return fallback;
+  }
+}
+
+/** Basic request helper with timeout and explicit non-2xx failure. */
+function safeFetchJson(url, options, timeoutMs, contextLabel) {
+  var ms = Math.max(1000, Math.min(20000, parseInt(timeoutMs, 10) || 10000));
+  var ctx = contextLabel || "fetch_json";
+  var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var timer = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, ms) : null;
+  var req = Object.assign({}, options || {});
+  if (ctrl) req.signal = ctrl.signal;
+  return fetch(url, req).then(function(r) {
+    if (!r.ok) throw new Error(ctx + "_http_" + r.status);
+    return r.json();
+  }).finally(function() {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/** Parse AI raw text and extract first JSON object safely. */
+function parseAiJsonFromText(rawText) {
+  var txt = typeof rawText === "string" ? rawText : "";
+  var m = txt.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  return safeJsonParse(m[0], null, "ai_json_payload");
+}
+
+/** Open external maps URL with safe target+rel behavior. */
+function safeOpenExternalUrl(url) {
+  var u = sanitizeStr(url || "", 2000);
+  if (!/^https?:\/\//i.test(u)) {
+    appLog("warn", "blocked_external_url", { url:u });
+    return;
+  }
+  try {
+    window.open(u, "_blank", "noopener,noreferrer");
+  } catch (e) {
+    appLog("error", "open_external_failed", { url:u, error:toErrorMessage(e) });
+  }
+}
+
+/** Convenience wrappers to keep call sites readable. */
+function appWarn(event, details) { appLog("warn", event, details); }
+function appError(event, details) { appLog("error", event, details); }
+
+/** Numeric guard used for lat/lng and weather values. */
+function clampNum(value, min, max, fallback) {
+  var n = Number(value);
+  if (!isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+/** Restrict external links to plain http/https targets. */
+function sanitizeExternalHttpUrl(rawUrl) {
+  var s = sanitizeStr(rawUrl || "", 2000);
+  if (!/^https?:\/\//i.test(s)) return "";
+  return s;
+}
+
+/** Safe storage wrappers that surface failures. */
+function safeStorageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    appWarn("storage.get.failed", { key:sanitizeStr(key || "", 120), message:toErrorMessage(e) });
+    return null;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    appWarn("storage.set.failed", { key:sanitizeStr(key || "", 120), message:toErrorMessage(e) });
+    return false;
+  }
+}
+
+function safeStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch (e) {
+    appWarn("storage.remove.failed", { key:sanitizeStr(key || "", 120), message:toErrorMessage(e) });
+    return false;
+  }
+}
+
+/** Parse first JSON object from AI text output safely. */
+function safeParseJsonFromText(rawText, context) {
+  var txt = sanitizeStr(String(rawText || ""), 20000);
+  var m = txt.match(/\{[\s\S]*\}/);
+  if (!m) {
+    appWarn("json.extract.missing", { context:sanitizeStr(context || "unknown", 80) });
+    return null;
+  }
+  return safeJsonParse(m[0], null, context || "ai_json_payload");
+}
+
+/** Backward-compatible alias used by older call sites. */
+function logWarn(event, details) {
+  appWarn(event, details);
+}
+
 function sanitizeStr(s, maxLen) {
   var m = maxLen != null ? maxLen : 4000;
   if (typeof s !== "string") return "";
@@ -314,19 +469,22 @@ function extractLatLngFromMapsText(raw) {
 
 function loadLocationTrail() {
   try {
-    var raw = localStorage.getItem(LOCATION_TRAIL_KEY);
+    var raw = safeStorageGet(LOCATION_TRAIL_KEY);
     if (!raw) return [];
-    var arr = JSON.parse(raw);
+    var arr = safeJsonParse(raw, []);
     return Array.isArray(arr) ? arr : [];
   } catch (e) {
+    appWarn("loadLocationTrail.failed", { reason:toErrorMessage(e) });
     return [];
   }
 }
 
 function saveLocationTrail(points) {
   try {
-    localStorage.setItem(LOCATION_TRAIL_KEY, JSON.stringify(points));
-  } catch (e) {}
+    safeStorageSet(LOCATION_TRAIL_KEY, JSON.stringify(points));
+  } catch (e) {
+    appWarn("saveLocationTrail.failed", { reason:toErrorMessage(e) });
+  }
 }
 
 function pruneTrailPoints(points, nowMs) {
@@ -350,19 +508,22 @@ function clusterTrailPoints(points, decimals) {
 
 function loadStoredProfile() {
   try {
-    var raw = localStorage.getItem(PROFILE_STORAGE_KEY);
+    var raw = safeStorageGet(PROFILE_STORAGE_KEY);
     if (!raw) return null;
-    var o = JSON.parse(raw);
+    var o = safeJsonParse(raw, null);
     return o && typeof o === "object" ? o : null;
   } catch (e) {
+    appWarn("loadStoredProfile.failed", { reason:toErrorMessage(e) });
     return null;
   }
 }
 
 function persistProfileToStorage(profile) {
   try {
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-  } catch (e) {}
+    safeStorageSet(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+  } catch (e) {
+    appWarn("persistProfileToStorage.failed", { reason:toErrorMessage(e) });
+  }
 }
 
 function normalizeProfile(raw) {
@@ -589,61 +750,106 @@ function fishingScore(wx) {
 
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
-    if (!r.ok) throw new Error("bad");
+    var safeLat = clampNum(lat, -90, 90, 41.84);
+    var safeLng = clampNum(lng, -180, 180, -87.83);
+    const r = await fetchJsonWithTimeout(
+      "https://api.open-meteo.com/v1/forecast?latitude=" + encodeURIComponent(safeLat) + "&longitude=" + encodeURIComponent(safeLng) + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago",
+      {},
+      { timeoutMs:9000, context:"loadWeather.openMeteo" }
+    );
     const d = await r.json();
     const c = d.current;
+    if (!c) throw new Error("weather_response_missing_current");
     return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
   } catch(e) {
+    appWarn("weather.primary.failed", { message:sanitizeStr((e && e.message) || "", 200) });
     // Fallback: ask Claude for estimate
     const now = new Date();
     const mo = now.toLocaleString("default",{month:"long"});
     const hr = now.getHours();
     const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
-        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
-      })
-    });
-    const data = await res.json();
-    const txt = (data.content && data.content[0] && data.content[0].text) || "";
-    const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
-    return null;
+    try {
+      const res = await fetchJsonWithTimeout(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:150,
+            messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
+          })
+        },
+        { timeoutMs:12000, context:"loadWeather.aiFallback" }
+      );
+      const data = await res.json();
+      const txt = (data.content && data.content[0] && data.content[0].text) || "";
+      const out = safeParseJsonFromText(txt, "loadWeather.aiFallback.parse");
+      if (out && typeof out === "object") return out;
+      return null;
+    } catch (fallbackErr) {
+      appError("weather.fallback.failed", { message:sanitizeStr((fallbackErr && fallbackErr.message) || "", 200) });
+      return null;
+    }
   }
 }
 
 async function loadFishingTip(temp, wind, condition) {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:80,
-        messages:[{role:"user",content:"Weather near North Riverside IL: " + temp + "F, " + wind + "mph wind, " + condition + ". Give ONE short fishing tip for the Des Plaines River, Cook County lakes, or Lake Michigan. One sentence, no preamble."}]
-      })
-    });
+    var safeTemp = clampNum(temp, -40, 140, 60);
+    var safeWind = clampNum(wind, 0, 120, 8);
+    var safeCond = sanitizeStr(condition || "Unknown", 60);
+    const res = await fetchJsonWithTimeout(
+      "https://api.anthropic.com/v1/messages",
+      {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:80,
+          messages:[{role:"user",content:"Weather near North Riverside IL: " + safeTemp + "F, " + safeWind + "mph wind, " + safeCond + ". Give ONE short fishing tip for the Des Plaines River, Cook County lakes, or Lake Michigan. One sentence, no preamble."}]
+        })
+      },
+      { timeoutMs:10000, context:"loadFishingTip" }
+    );
     const data = await res.json();
     return (data.content && data.content[0] && data.content[0].text && data.content[0].text.trim()) || "";
-  } catch(e) { return ""; }
+  } catch(e) {
+    appWarn("tip.load.failed", { message:sanitizeStr((e && e.message) || "", 200) });
+    return "";
+  }
 }
 
 async function loadTackleImage(itemName) {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400,
-        tools:[{type:"web_search_20250305",name:"web_search"}],
-        messages:[{role:"user",content:"Find a product photo for " + itemName + " fishing lure or bait. Search for a direct image URL ending in .jpg .png or .webp from walmart.com amazon.com basspro.com or tacklewarehouse.com. Return ONLY the image URL on one line. Nothing else."}]
-      })
-    });
+    var safeItemName = sanitizeStr(itemName || "", 120);
+    if (!safeItemName) return null;
+    const res = await fetchJsonWithTimeout(
+      "https://api.anthropic.com/v1/messages",
+      {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:400,
+          tools:[{type:"web_search_20250305",name:"web_search"}],
+          messages:[{role:"user",content:"Find a product photo for " + safeItemName + " fishing lure or bait. Search for a direct image URL ending in .jpg .png or .webp from walmart.com amazon.com basspro.com or tacklewarehouse.com. Return ONLY the image URL on one line. Nothing else."}]
+        })
+      },
+      { timeoutMs:12000, context:"loadTackleImage" }
+    );
     const data = await res.json();
     const allText = (data.content || []).map(function(b) {
       if (b.type === "text") return b.text;
       return JSON.stringify(b);
     }).join(" ");
     const m = allText.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(\?\S*)?/i);
-    return m ? m[0] : null;
-  } catch(e) { return null; }
+    if (!m) return null;
+    return sanitizeExternalHttpUrl(m[0]);
+  } catch(e) {
+    appWarn("tackle.image.failed", { message:sanitizeStr((e && e.message) || "", 200) });
+    return null;
+  }
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -663,7 +869,11 @@ function SecLabel({ text, T }) {
 
 function OBtn({ label, onClick, color, style }) {
   return (
-    <button onClick={onClick} style={{ background:"transparent", color:color, border:"1px solid " + color, borderRadius:8, padding:"7px 13px", cursor:"pointer", fontSize:12, ...style }}>
+    <button
+      onClick={onClick}
+      type="button"
+      style={{ background:"transparent", color:color, border:"1px solid " + color, borderRadius:8, padding:"7px 13px", cursor:"pointer", fontSize:12, ...style }}
+    >
       {label}
     </button>
   );
@@ -690,7 +900,23 @@ function HomeTab({ profile, T }) {
       loadWeather(la, ln).then(function(w) {
         setWx(w);
         setLoading(false);
-        if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
+        if (w) {
+          loadFishingTip(w.temp, w.wind, w.condition)
+            .then(function(nextTip) {
+              setTip(sanitizeStr(nextTip || "", 220));
+            })
+            .catch(function(err) {
+              appWarn("tip.load.chain.failed", { message:toErrorMessage(err) });
+              setTip("");
+            });
+        } else {
+          setTip("");
+        }
+      }).catch(function(err) {
+        appWarn("weather.load.chain.failed", { message:toErrorMessage(err) });
+        setWx(null);
+        setTip("");
+        setLoading(false);
       });
     }
     if (navigator.geolocation) {
@@ -1337,7 +1563,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <Card key={s.id} T={T}>
               <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
               <img src={img} alt="" style={{ width:"100%", borderRadius:8, border:"1px solid " + th.border }} />
-              <OBtn label="Open in maps" onClick={function() { window.open("https://maps.google.com/?q=" + s.lat + "," + s.lng, "_blank"); }} color={th.blue} style={{ marginTop:8, fontSize:11 }} />
+              <OBtn label="Open in maps" onClick={function() { safeOpenExternalUrl("https://maps.google.com/?q=" + encodeURIComponent(s.lat + "," + s.lng)); }} color={th.blue} style={{ marginTop:8, fontSize:11 }} />
             </Card>
           );
         })}
@@ -2225,12 +2451,22 @@ function CatchTab({ profile, T }) {
   }
 
   function reverseGeocodeLabel(lat, lon) {
-    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon);
-    return fetch(url).then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
-      if (data && data.display_name) return data.display_name;
-      return lat.toFixed(5) + ", " + lon.toFixed(5);
-    }).catch(function() {
-      return lat.toFixed(5) + ", " + lon.toFixed(5);
+    var safeLat = clampNum(lat, -90, 90, 0);
+    var safeLon = clampNum(lon, -180, 180, 0);
+    var fallbackLabel = safeLat.toFixed(5) + ", " + safeLon.toFixed(5);
+    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" + encodeURIComponent(safeLat) + "&lon=" + encodeURIComponent(safeLon);
+    return fetchJsonWithTimeout(
+      url,
+      { headers:{ Accept:"application/json" } },
+      { timeoutMs:9000, context:"photo.reverseGeocode" }
+    ).then(function(r) {
+      return r.json();
+    }).then(function(data) {
+      if (data && data.display_name) return sanitizeStr(data.display_name, 240);
+      return fallbackLabel;
+    }).catch(function(err) {
+      appWarn("photo.reverseGeocode.failed", { message:toErrorMessage(err) });
+      return fallbackLabel;
     });
   }
 
@@ -2242,7 +2478,10 @@ function CatchTab({ profile, T }) {
       return reverseGeocodeLabel(gps.lat, gps.lon).then(function(label) {
         return { lat:gps.lat, lon:gps.lon, label:label };
       });
-    }).catch(function() { return null; });
+    }).catch(function(err) {
+      appWarn("photo.location.extract.failed", { message:toErrorMessage(err) });
+      return null;
+    });
   }
 
   function handlePhoto(e) {
@@ -2297,35 +2536,55 @@ function CatchTab({ profile, T }) {
         setRequiresManualTimeLocation(true);
         setLocationDecision("edit");
         setAiHint("Photo metadata location was not found. Please enter catch time and location manually.");
+      }).catch(function(err) {
+        appWarn("photo.location.extract.failed", { message:toErrorMessage(err) });
+        setPhotoLocation(null);
+        setRequiresManualTimeLocation(true);
+        setLocationDecision("edit");
+        setAiHint("Photo metadata location was not found. Please enter catch time and location manually.");
       });
-      fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
-          messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
-            {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
-          ]}]
-        })
-      }).then(function(r) { return r.json(); }).then(function(data) {
+      fetchJsonWithTimeout(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:300,
+            messages:[{
+              role:"user",
+              content:[
+                {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
+                {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
+              ]
+            }]
+          })
+        },
+        { timeoutMs:12000, context:"catch.ai.identify" }
+      ).then(function(r) { return r.json(); }).then(function(data) {
         var txt = (data.content && data.content[0] && data.content[0].text) || "";
-        var m = txt.match(/\{[^}]+\}/);
-        if (m) {
-          var res = JSON.parse(m[0]);
+        var res = safeParseJsonFromText(txt, "catch.ai.identify.parse");
+        if (res && typeof res === "object") {
           setAiResult(res);
           setForm(function(f) {
             return Object.assign({}, f, {
               species: normalizeSpeciesName(res.species) || f.species,
-              length: res.length || f.length
+              length: sanitizeStr(res.length || f.length, 60)
             });
           });
         }
         setAiLoading(false);
-      }).catch(function() {
+      }).catch(function(err) {
+        appWarn("catch.ai.identify.failed", { message:toErrorMessage(err) });
         // Keep UX smooth if AI endpoint fails: user can still quick-pick species.
         setAiResult({ species:"Unknown", confidence:0, notes:"AI unavailable. Use species quick picks below." });
         setAiLoading(false);
       });
-    }).catch(function() {});
+    }).catch(function(err) {
+      appWarn("photo.read.failed", { message:toErrorMessage(err) });
+      setAiHint("Could not read this image. Please try another photo.");
+      setAiLoading(false);
+    });
     e.target.value = "";
   }
 
@@ -2336,7 +2595,10 @@ function CatchTab({ profile, T }) {
       setReferencePhotos(function(prev) {
         return prev.concat(extra.map(function(x) { return x.full; })).slice(0, 4);
       });
-    }).catch(function() {});
+    }).catch(function(err) {
+      appWarn("reference.photos.read.failed", { message:toErrorMessage(err) });
+      setAiHint("Could not load one or more reference photos.");
+    });
     e.target.value = "";
   }
 
