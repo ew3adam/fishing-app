@@ -2041,6 +2041,11 @@ function CatchTab({ profile, T }) {
   const [aiHint, setAiHint] = useState("");
   const [photoLocation, setPhotoLocation] = useState(null);
   const [requiresManualTimeLocation, setRequiresManualTimeLocation] = useState(false);
+  const [speciesConfirmed, setSpeciesConfirmed] = useState(false);
+  const [lengthConfirmed, setLengthConfirmed] = useState(false);
+  const [locationDecision, setLocationDecision] = useState("ask");
+  const [gearFlowChoice, setGearFlowChoice] = useState("ask");
+  const [gearFlowStep, setGearFlowStep] = useState(1);
   const [measurementOption, setMeasurementOption] = useState("1_ruler");
   const [rulerMaxInches, setRulerMaxInches] = useState(24);
   const [referenceInches, setReferenceInches] = useState("3.37");
@@ -2058,6 +2063,9 @@ function CatchTab({ profile, T }) {
     catchTime:"",
     locationVisibility:"private",
     rod:"",
+    reelType:"",
+    lineType:"",
+    techniques:"",
     notes:"",
     date:new Date().toLocaleDateString(),
     dateISO:new Date().toISOString().slice(0, 10)
@@ -2079,7 +2087,10 @@ function CatchTab({ profile, T }) {
   const commonLengths = ["8 inches","10 inches","12 inches","14 inches","16 inches","18 inches","20 inches"];
   const [quickLength, setQuickLength] = useState(12);
 
-  function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function setF(k, v) {
+    var next = typeof v === "string" ? sanitizeStr(v, 2000) : v;
+    setForm(function(f) { return Object.assign({}, f, { [k]: next }); });
+  }
   function normalizeSpeciesName(name) {
     var s = String(name || "").trim().toLowerCase();
     if (!s) return "";
@@ -2094,10 +2105,12 @@ function CatchTab({ profile, T }) {
     return String(name || "").trim();
   }
   function setSpeciesQuick(name) {
+    setSpeciesConfirmed(false);
     setForm(function(f) { return Object.assign({}, f, { species:normalizeSpeciesName(name) }); });
   }
   function applyQuickLength(v) {
     var inches = Math.max(6, Math.min(40, parseInt(v, 10) || 12));
+    setLengthConfirmed(false);
     setQuickLength(inches);
     setForm(function(f) { return Object.assign({}, f, { length:inches + " inches", lengthInches:inches }); });
   }
@@ -2243,6 +2256,11 @@ function CatchTab({ profile, T }) {
       setPhotoLocation(null);
       setAiHint("");
       setRequiresManualTimeLocation(false);
+      setSpeciesConfirmed(false);
+      setLengthConfirmed(false);
+      setLocationDecision("ask");
+      setGearFlowChoice("ask");
+      setGearFlowStep(1);
       setAxisFromPhoto(img.full);
       setMeasurementOption("1_ruler");
       setRulerMaxInches(24);
@@ -2267,6 +2285,7 @@ function CatchTab({ profile, T }) {
           setPhotoLocation(loc);
           setAiHint("Photo metadata found. Location was auto-filled. Choose Public or Private below.");
           setRequiresManualTimeLocation(false);
+          setLocationDecision("ask");
           setForm(function(f) {
             if (f.spot && String(f.spot).trim()) return f;
             return Object.assign({}, f, { spot:loc.label });
@@ -2276,6 +2295,7 @@ function CatchTab({ profile, T }) {
         // If no metadata location exists, require manual time + location input.
         setPhotoLocation(null);
         setRequiresManualTimeLocation(true);
+        setLocationDecision("edit");
         setAiHint("Photo metadata location was not found. Please enter catch time and location manually.");
       });
       fetch("https://api.anthropic.com/v1/messages", {
@@ -2321,23 +2341,36 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
+    // Normalize text fields before saving to keep data clean and consistent.
+    var cleanSpecies = sanitizeStr(form.species || "", 120);
+    var cleanLength = sanitizeStr(form.length || "", 60);
+    var cleanBait = sanitizeStr(form.bait || "", 120);
+    var cleanRod = sanitizeStr(form.rod || "", 120);
+    var cleanReel = sanitizeStr(form.reelType || "", 120);
+    var cleanLine = sanitizeStr(form.lineType || "", 120);
+    var cleanSpot = sanitizeStr(form.spot || "", 240);
+    var cleanTechniques = sanitizeStr(form.techniques || "", 2000);
+    var cleanNotes = sanitizeStr(form.notes || "", 2000);
     var entry = {
       id:Date.now(),
       user:(profile && profile.name) || "Angler",
-      species:form.species,
-      length:form.length,
-      bait:form.bait,
-      rod:form.rod,
-      spot:form.spot,
-      catchTime:form.catchTime,
+      species:cleanSpecies,
+      length:cleanLength,
+      bait:cleanBait,
+      rod:cleanRod,
+      reelType:cleanReel,
+      lineType:cleanLine,
+      spot:cleanSpot,
+      catchTime:sanitizeStr(form.catchTime || "", 32),
       locationVisibility:form.locationVisibility,
-      notes:form.notes,
-      date:form.date,
+      techniques:cleanTechniques,
+      notes:cleanNotes,
+      date:sanitizeStr(form.date || "", 64),
       photo:photo
     };
     setCatches(function(c) { return [entry].concat(c); });
-    var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
-    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\nTime: " + (form.catchTime || "not provided") + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nLocation sharing: " + (form.locationVisibility === "public" ? "Public" : "Private") + "\nNotes: " + form.notes);
+    var subj = encodeURIComponent("RFC Catch Report — " + cleanSpecies + " · " + cleanLength + " · " + ((profile && profile.name) || "Angler"));
+    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\nTime: " + (form.catchTime || "not provided") + "\n\nFish: " + cleanSpecies + "\nLength: " + cleanLength + "\nBait/Rig: " + cleanBait + "\nPole/Rod: " + cleanRod + "\nReel: " + cleanReel + "\nLine: " + cleanLine + "\nSpot: " + cleanSpot + "\nLocation sharing: " + (form.locationVisibility === "public" ? "Public" : "Private") + "\nTechniques: " + cleanTechniques + "\nNotes: " + cleanNotes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
     setStep(6);
   }
@@ -2361,6 +2394,7 @@ function CatchTab({ profile, T }) {
   var axisLabel = measureAxis === "x" ? "left to right" : "top to bottom";
   function pickQuickSpecies(name) {
     setForm(function(f) { return Object.assign({}, f, { species:name }); });
+    setSpeciesConfirmed(false);
   }
   function applyLengthFromSlider(v) {
     var inches = Math.max(6, Math.min(40, parseInt(v, 10) || 12));
@@ -2371,6 +2405,7 @@ function CatchTab({ profile, T }) {
   function proceedToCatchDetails() {
     // On Next, always carry a photo-based estimate forward if length is empty.
     var fallbackEstimate = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredLengthLabel;
+    if (!speciesConfirmed || !lengthConfirmed) return;
     setForm(function(f) {
       return Object.assign({}, f, {
         species:f.species || normalizeSpeciesName(aiResult && aiResult.species) || "",
@@ -2388,6 +2423,52 @@ function CatchTab({ profile, T }) {
     setForm(function(f) { return Object.assign({}, f, { spot:v }); });
   }
 
+  function setLocationAsOk() {
+    if (!photoLocation || !photoLocation.label) return;
+    setForm(function(f) {
+      return Object.assign({}, f, { spot:photoLocation.label });
+    });
+    setLocationDecision("ok");
+  }
+
+  function chooseLocationEdit() {
+    setLocationDecision("edit");
+  }
+
+  function chooseGearFlow(choice) {
+    setGearFlowChoice(choice);
+    setGearFlowStep(choice === "yes" ? 1 : 5);
+  }
+
+  function continueGearFlow(nextStep) {
+    setGearFlowStep(function(prev) { return Math.max(prev, nextStep); });
+  }
+
+  function startVoiceInput(fieldName) {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setAiHint("Voice input is not supported on this browser.");
+      return;
+    }
+    // Capture a short speech snippet and append to the selected text field.
+    var recognizer = new SR();
+    recognizer.lang = "en-US";
+    recognizer.interimResults = false;
+    recognizer.maxAlternatives = 1;
+    recognizer.onresult = function(ev) {
+      var txt = sanitizeStr((((ev || {}).results || [])[0] || [])[0] ? ev.results[0][0].transcript : "", 2000);
+      if (!txt) return;
+      setForm(function(f) {
+        var prev = sanitizeStr(f[fieldName] || "", 2000);
+        return Object.assign({}, f, { [fieldName]:sanitizeStr((prev ? prev + " " : "") + txt, 2000) });
+      });
+    };
+    recognizer.onerror = function() {
+      setAiHint("Voice input failed. You can still type your notes.");
+    };
+    recognizer.start();
+  }
+
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:"12px 14px", color:th.white, fontSize:16, boxSizing:"border-box", outline:"none", marginBottom:10, minHeight:48 };
   var primaryBtnStyle = { width:"100%", background:th.green, color:"#000", border:"none", borderRadius:14, padding:"14px 0", cursor:"pointer", fontSize:16, fontWeight:800 };
   var quickSpecies = SPECIES.slice(0, 8).map(function(sp) { return sp.name; });
@@ -2397,8 +2478,15 @@ function CatchTab({ profile, T }) {
   var hasSpot = !!String(form.spot || "").trim();
   var hasManualDate = !!String(form.dateISO || "").trim();
   var hasManualTime = !!String(form.catchTime || "").trim();
+  var hasRod = !!String(form.rod || "").trim();
+  var hasReel = !!String(form.reelType || "").trim();
+  var hasLine = !!String(form.lineType || "").trim();
+  var hasBait = !!String(form.bait || "").trim();
+  var locationReady = locationDecision === "ok" || ((locationDecision === "edit" || !photoLocation || !photoLocation.label) && hasSpot);
+  var gearReady = gearFlowChoice === "no" || (gearFlowChoice === "yes" && gearFlowStep >= 5 && hasRod && hasReel && hasLine && hasBait);
+  var canProceedFromPhotoStep = hasSpecies && hasLength && speciesConfirmed && lengthConfirmed;
   // When photo metadata is missing, require user-confirmed time and location.
-  var canContinueToReview = hasSpecies && hasLength && hasSpot && (!requiresManualTimeLocation || (hasManualDate && hasManualTime));
+  var canContinueToReview = hasSpecies && hasLength && locationReady && gearReady && (!requiresManualTimeLocation || (hasManualDate && hasManualTime));
 
   return (
     <div>
@@ -2643,21 +2731,35 @@ function CatchTab({ profile, T }) {
               ) : null}
               <Card T={T} borderColor={th.orange + "44"}>
                 <div style={{ fontSize:12, color:th.white, lineHeight:1.55 }}>
-                  ID check: use the species photo guide in the Fish tab to confirm body shape, mouth size, and tail shape before saving your catch.
+                  Step 1: confirm species. Step 2: confirm fish length. You can accept each step or adjust and continue.
                 </div>
               </Card>
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
-              <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 1 · Identify species</div>
+              <input value={form.species} onChange={function(e) { setF("species", e.target.value); setSpeciesConfirmed(false); }} style={inputStyle} />
               <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
                 {speciesQuickPicks.map(function(v) {
                   return (
-                    <button key={v} onClick={function() { setSpeciesQuick(v); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"4px 9px", color:th.white, cursor:"pointer", fontSize:11 }}>
+                    <button key={v} onClick={function() { setSpeciesQuick(v); setSpeciesConfirmed(false); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"4px 9px", color:th.white, cursor:"pointer", fontSize:11 }}>
                       {v}
                     </button>
                   );
                 })}
               </div>
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                <button
+                  onClick={function() { if (String(form.species || "").trim()) setSpeciesConfirmed(true); }}
+                  style={{ background:speciesConfirmed ? th.green + "33" : th.card, border:"1px solid " + (speciesConfirmed ? th.green : th.border), borderRadius:8, padding:"9px 8px", color:speciesConfirmed ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}
+                >
+                  Species Correct
+                </button>
+                <button
+                  onClick={function() { setSpeciesConfirmed(false); }}
+                  style={{ background:!speciesConfirmed ? th.card : "transparent", border:"1px solid " + th.border, borderRadius:8, padding:"9px 8px", color:th.white, cursor:"pointer", fontSize:12 }}
+                >
+                  Change Species
+                </button>
+              </div>
+              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 2 · Confirm measurement</div>
               <div style={{ fontSize:11, color:th.white, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
               <input
                 aria-label="Length in inches"
@@ -2666,31 +2768,50 @@ function CatchTab({ profile, T }) {
                 max="40"
                 step="1"
                 value={quickLength}
-                onChange={function(e) { applyQuickLength(e.target.value); }}
+                onChange={function(e) { applyQuickLength(e.target.value); setLengthConfirmed(false); }}
                 style={{ width:"100%", marginBottom:10 }}
               />
-              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
-              <button onClick={proceedToCatchDetails} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
+              <input value={form.length} onChange={function(e) { setF("length", e.target.value); setLengthConfirmed(false); }} placeholder='e.g. 13 inches' style={inputStyle} />
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+                <button
+                  onClick={function() { if (String(form.length || "").trim()) setLengthConfirmed(true); }}
+                  style={{ background:lengthConfirmed ? th.green + "33" : th.card, border:"1px solid " + (lengthConfirmed ? th.green : th.border), borderRadius:8, padding:"9px 8px", color:lengthConfirmed ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}
+                >
+                  Measurement Correct
+                </button>
+                <button
+                  onClick={function() { setLengthConfirmed(false); }}
+                  style={{ background:!lengthConfirmed ? th.card : "transparent", border:"1px solid " + th.border, borderRadius:8, padding:"9px 8px", color:th.white, cursor:"pointer", fontSize:12 }}
+                >
+                  Adjust (Freehand/Slide)
+                </button>
+              </div>
+              <button onClick={proceedToCatchDetails} disabled={!canProceedFromPhotoStep} style={{ width:"100%", background:canProceedFromPhotoStep ? th.green : th.dim, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:canProceedFromPhotoStep ? "pointer" : "not-allowed", fontSize:14, fontWeight:700 }}>Next</button>
+              {!canProceedFromPhotoStep ? (
+                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>
+                  Confirm species and measurement to continue.
+                </div>
+              ) : null}
             </div>
           )}
 
           {step === 3 && (
             <div>
-              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
+              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Wizard</div>
               <div style={{ display:"flex", gap:8, marginBottom:12 }}>
                 <OBtn label={photo ? "Back to Photo Step" : "Back"} onClick={function() { setStep(photo ? 2 : 0); }} color={th.muted} />
               </div>
 
               <Card T={T} borderColor={th.green + "44"} style={{ borderRadius:16 }}>
-                <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:8 }}>Quick Log</div>
-
-                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Species</div>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+                <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:8 }}>Step 1: Species check</div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Identify species for the user, then confirm:</div>
+                <input value={form.species} onChange={function(e) { setF("species", e.target.value); setSpeciesConfirmed(false); }} placeholder="Species" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:8 }}>
                   {speciesQuickPicks.map(function(v) {
                     return (
                       <button
                         key={v}
-                        onClick={function() { pickQuickSpecies(v); }}
+                        onClick={function() { setSpeciesQuick(v); setSpeciesConfirmed(false); }}
                         style={{
                           background:form.species === v ? th.green + "33" : th.card,
                           border:"1px solid " + (form.species === v ? th.green : th.border),
@@ -2706,12 +2827,14 @@ function CatchTab({ profile, T }) {
                     );
                   })}
                 </div>
-                <input list="species-options" value={form.species} onChange={function(e) { setSpeciesQuick(e.target.value); }} placeholder="Or type species..." style={Object.assign({}, inputStyle, { marginBottom:12 })} />
-                <datalist id="species-options">
-                  {speciesOptions.map(function(v) { return <option key={v} value={v} />; })}
-                </datalist>
+                <button onClick={function() { if (hasSpecies) setSpeciesConfirmed(true); }} style={{ background:speciesConfirmed ? th.green : th.card, color:speciesConfirmed ? "#000" : th.white, border:"1px solid " + (speciesConfirmed ? th.green : th.border), borderRadius:10, padding:"10px 12px", cursor:"pointer", fontSize:12, fontWeight:700, marginBottom:4 }}>
+                  {speciesConfirmed ? "Species confirmed" : "Yes, species is correct"}
+                </button>
+              </Card>
 
-                <div style={{ fontSize:13, color:th.muted, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
+              <Card T={T} borderColor={th.blue + "44"} style={{ borderRadius:16 }}>
+                <div style={{ fontSize:13, color:th.blue, fontWeight:700, marginBottom:8 }}>Step 2: Measurement check</div>
+                <div style={{ fontSize:13, color:th.muted, marginBottom:4 }}>Measured length: {quickLength.toFixed(1)} inches</div>
                 <input
                   aria-label="Length in inches"
                   type="range"
@@ -2723,76 +2846,50 @@ function CatchTab({ profile, T }) {
                     var v = parseFloat(e.target.value);
                     setQuickLength(v);
                     setF("length", v.toFixed(1) + " inches");
+                    setLengthConfirmed(false);
                   }}
-                  style={{ width:"100%", marginBottom:4, height:34 }}
+                  style={{ width:"100%", marginBottom:8, height:34 }}
                 />
-                <div style={{ display:"flex", justifyContent:"space-between", color:th.muted, fontSize:11, marginBottom:12 }}>
-                  <span>6</span><span>40</span>
-                </div>
+                <input value={form.length} onChange={function(e) { setF("length", e.target.value); setLengthConfirmed(false); }} placeholder="Freehand length (example: 15.5 inches)" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                <button onClick={function() { if (hasLength) setLengthConfirmed(true); }} style={{ background:lengthConfirmed ? th.green : th.card, color:lengthConfirmed ? "#000" : th.white, border:"1px solid " + (lengthConfirmed ? th.green : th.border), borderRadius:10, padding:"10px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                  {lengthConfirmed ? "Measurement confirmed" : "Yes, measurement is correct"}
+                </button>
+              </Card>
 
-                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Bait shortcut</div>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-                  {popularBaits.slice(0, 6).map(function(v) {
-                    return (
-                      <button
-                        key={v}
-                        onClick={function() { setF("bait", v); }}
-                        style={{
-                          background:form.bait === v ? th.blue + "33" : th.card,
-                          border:"1px solid " + (form.bait === v ? th.blue : th.border),
-                          borderRadius:18,
-                          padding:"8px 12px",
-                          color:form.bait === v ? th.blue : th.white,
-                          cursor:"pointer",
-                          fontSize:13
-                        }}
-                      >
-                        {v}
-                      </button>
-                    );
-                  })}
-                </div>
-                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder="Or type bait..." style={Object.assign({}, inputStyle, { marginBottom:12 })} />
-                <datalist id="bait-options">
-                  {popularBaits.map(function(v) { return <option key={v} value={v} />; })}
-                </datalist>
-
-                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Spot shortcut</div>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-                  {spotOptions.slice(0, 4).map(function(v) {
-                    return (
-                      <button
-                        key={v}
-                        onClick={function() { setF("spot", v); }}
-                        style={{
-                          background:form.spot === v ? th.teal + "33" : th.card,
-                          border:"1px solid " + (form.spot === v ? th.teal : th.border),
-                          borderRadius:18,
-                          padding:"8px 12px",
-                          color:form.spot === v ? th.teal : th.white,
-                          cursor:"pointer",
-                          fontSize:13
-                        }}
-                      >
-                        {v}
-                      </button>
-                    );
-                  })}
-                </div>
-                <input list="spot-options" value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} placeholder="Or type spot..." style={Object.assign({}, inputStyle, { marginBottom:8 })} />
-                <datalist id="spot-options">
-                  {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
-                </datalist>
+              <Card T={T} borderColor={th.teal + "44"} style={{ borderRadius:16 }}>
+                <div style={{ fontSize:13, color:th.teal, fontWeight:700, marginBottom:8 }}>Step 3: Location from photo metadata (IPTC/EXIF)</div>
                 {photoLocation && photoLocation.label ? (
-                  <div style={{ fontSize:11, color:th.teal, marginTop:2, marginBottom:6 }}>
-                    Auto-filled from photo metadata. Confirm if needed.
+                  <div>
+                    <div style={{ fontSize:12, color:th.white, marginBottom:6 }}>Detected location: {photoLocation.label}</div>
+                    <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                      <button onClick={setLocationAsOk} style={{ flex:1, background:locationDecision === "ok" ? th.green : th.card, color:locationDecision === "ok" ? "#000" : th.white, border:"1px solid " + (locationDecision === "ok" ? th.green : th.border), borderRadius:10, padding:"10px 8px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        OK, continue
+                      </button>
+                      <button onClick={chooseLocationEdit} style={{ flex:1, background:locationDecision === "edit" ? th.green : th.card, color:locationDecision === "edit" ? "#000" : th.white, border:"1px solid " + (locationDecision === "edit" ? th.green : th.border), borderRadius:10, padding:"10px 8px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        Change location
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>
+                    Location metadata not found. Please enter location and catch time.
+                  </div>
+                )}
+                {(locationDecision === "edit" || !photoLocation || !photoLocation.label) ? (
+                  <div>
+                    <input list="spot-options" value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} placeholder="Type or pick location" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                    <datalist id="spot-options">
+                      {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
+                    </datalist>
                   </div>
                 ) : null}
-                {requiresManualTimeLocation ? (
-                  <div style={{ background:th.orange + "15", border:"1px solid " + th.orange + "44", borderRadius:10, padding:10, marginBottom:10 }}>
-                    <div style={{ fontSize:11, color:th.white, marginBottom:6 }}>
-                      No photo metadata found. Enter catch time and location.
-                    </div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Location privacy</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:6 }}>
+                  <button onClick={function() { setF("locationVisibility", "private"); }} style={{ background:form.locationVisibility !== "public" ? th.green + "33" : th.card, border:"1px solid " + (form.locationVisibility !== "public" ? th.green : th.border), borderRadius:10, padding:"10px 12px", color:form.locationVisibility !== "public" ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}>Private</button>
+                  <button onClick={function() { setF("locationVisibility", "public"); }} style={{ background:form.locationVisibility === "public" ? th.green + "33" : th.card, border:"1px solid " + (form.locationVisibility === "public" ? th.green : th.border), borderRadius:10, padding:"10px 12px", color:form.locationVisibility === "public" ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}>Public</button>
+                </div>
+                {(requiresManualTimeLocation || !photoLocation || !photoLocation.label || locationDecision === "edit") ? (
+                  <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8 }}>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Catch date</div>
                     <input type="date" value={form.dateISO || ""} onChange={function(e) {
                       var iso = e.target.value;
@@ -2804,84 +2901,69 @@ function CatchTab({ profile, T }) {
                       });
                     }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Catch time</div>
-                    <input type="time" value={form.catchTime || ""} onChange={function(e) { setF("catchTime", e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:2 })} />
+                    <input type="time" value={form.catchTime || ""} onChange={function(e) { setF("catchTime", e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:0 })} />
                   </div>
                 ) : null}
-                {(!form.spot || !String(form.spot).trim()) ? (
-                  <div style={{ fontSize:11, color:th.muted, marginTop:2, marginBottom:6 }}>
-                    Location from photo metadata not found. Please pick a spot or type one.
-                  </div>
-                ) : null}
-                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Location sharing</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:2 }}>
-                  <button
-                    onClick={function() { setF("locationVisibility", "private"); }}
-                    style={{
-                      background:form.locationVisibility !== "public" ? th.green + "33" : th.card,
-                      border:"1px solid " + (form.locationVisibility !== "public" ? th.green : th.border),
-                      borderRadius:10,
-                      padding:"10px 12px",
-                      color:form.locationVisibility !== "public" ? th.green : th.white,
-                      cursor:"pointer",
-                      fontSize:12,
-                      fontWeight:700
-                    }}
-                  >
-                    Private
-                  </button>
-                  <button
-                    onClick={function() { setF("locationVisibility", "public"); }}
-                    style={{
-                      background:form.locationVisibility === "public" ? th.green + "33" : th.card,
-                      border:"1px solid " + (form.locationVisibility === "public" ? th.green : th.border),
-                      borderRadius:10,
-                      padding:"10px 12px",
-                      color:form.locationVisibility === "public" ? th.green : th.white,
-                      cursor:"pointer",
-                      fontSize:12,
-                      fontWeight:700
-                    }}
-                  >
-                    Public
-                  </button>
-                </div>
-                <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>
-                  Current setting: {form.locationVisibility === "public" ? "Public location" : "Private location"}
-                </div>
               </Card>
 
-              <details style={{ marginBottom:12 }}>
-                <summary style={{ cursor:"pointer", color:th.muted, fontSize:13, marginBottom:8 }}>Advanced details (optional)</summary>
-                <div>
-                  {!requiresManualTimeLocation ? (
-                    <div>
-                      <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
-                      <input type="date" value={form.dateISO || ""} onChange={function(e) {
-                        var iso = e.target.value;
-                        setForm(function(f) {
-                          return Object.assign({}, f, {
-                            dateISO:iso,
-                            date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
-                          });
-                        });
-                      }} style={inputStyle} />
-                    </div>
-                  ) : null}
-
-                  {gear.length > 0 ? (
-                    <div>
-                      <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
-                      <select value={form.rod} onChange={function(e) { setF("rod", e.target.value); }} style={Object.assign({}, inputStyle, { background:th.card })}>
-                        <option value="">Select rod...</option>
-                        {gear.map(function(g, i) { return <option key={i} value={g.nickname || g.brand}>{g.nickname || (g.brand + " " + g.model)}</option>; })}
-                      </select>
-                    </div>
-                  ) : null}
-
-                  <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes</div>
-                  <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
+              <Card T={T} borderColor={th.gold + "44"} style={{ borderRadius:16 }}>
+                <div style={{ fontSize:13, color:th.gold, fontWeight:700, marginBottom:8 }}>Step 4: Additional gear details?</div>
+                <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                  <button onClick={function() { chooseGearFlow("yes"); }} style={{ flex:1, background:gearFlowChoice === "yes" ? th.green + "33" : th.card, border:"1px solid " + (gearFlowChoice === "yes" ? th.green : th.border), borderRadius:10, padding:"10px 8px", color:gearFlowChoice === "yes" ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}>Yes</button>
+                  <button onClick={function() { chooseGearFlow("no"); }} style={{ flex:1, background:gearFlowChoice === "no" ? th.green + "33" : th.card, border:"1px solid " + (gearFlowChoice === "no" ? th.green : th.border), borderRadius:10, padding:"10px 8px", color:gearFlowChoice === "no" ? th.green : th.white, cursor:"pointer", fontSize:12, fontWeight:700 }}>No</button>
                 </div>
-              </details>
+
+                {gearFlowChoice === "yes" ? (
+                  <div>
+                    <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 4.1 Pole type</div>
+                    <input value={form.rod} onChange={function(e) { setF("rod", e.target.value); }} placeholder="Pole type" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                    <button onClick={function() { if (hasRod) continueGearFlow(2); }} style={{ background:gearFlowStep >= 2 ? th.green + "33" : th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", cursor:"pointer", fontSize:11, marginBottom:8 }}>Continue to reel</button>
+
+                    {gearFlowStep >= 2 ? (
+                      <div>
+                        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 4.2 Reel type</div>
+                        <input value={form.reelType} onChange={function(e) { setF("reelType", e.target.value); }} placeholder="Reel type" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                        <button onClick={function() { if (hasReel) continueGearFlow(3); }} style={{ background:gearFlowStep >= 3 ? th.green + "33" : th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", cursor:"pointer", fontSize:11, marginBottom:8 }}>Continue to line</button>
+                      </div>
+                    ) : null}
+
+                    {gearFlowStep >= 3 ? (
+                      <div>
+                        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 4.3 Line type</div>
+                        <input value={form.lineType} onChange={function(e) { setF("lineType", e.target.value); }} placeholder="Line type" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                        <button onClick={function() { if (hasLine) continueGearFlow(4); }} style={{ background:gearFlowStep >= 4 ? th.green + "33" : th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", cursor:"pointer", fontSize:11, marginBottom:8 }}>Continue to bait/rig</button>
+                      </div>
+                    ) : null}
+
+                    {gearFlowStep >= 4 ? (
+                      <div>
+                        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Step 4.4 Bait or rig used</div>
+                        <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder="Bait or rig" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                        <datalist id="bait-options">
+                          {popularBaits.map(function(v) { return <option key={v} value={v} />; })}
+                        </datalist>
+                        <button onClick={function() { if (hasBait) continueGearFlow(5); }} style={{ background:gearFlowStep >= 5 ? th.green + "33" : th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", cursor:"pointer", fontSize:11, marginBottom:8 }}>Continue to notes</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </Card>
+
+              <Card T={T} borderColor={th.indigo + "44"} style={{ borderRadius:16 }}>
+                <div style={{ fontSize:13, color:th.indigo, fontWeight:700, marginBottom:8 }}>Step 5: Notes / techniques / voice</div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes</div>
+                <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Anything else to add..." style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Techniques</div>
+                <input value={form.techniques || ""} onChange={function(e) { setF("techniques", e.target.value); }} placeholder="Techniques used" style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={function() { startVoiceInput("notes"); }} style={{ flex:1, background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:10, padding:"10px 8px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                    Voice to Notes
+                  </button>
+                  <button onClick={function() { startVoiceInput("techniques"); }} style={{ flex:1, background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:10, padding:"10px 8px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                    Voice to Techniques
+                  </button>
+                </div>
+              </Card>
 
               <button
                 onClick={function() { setStep(4); }}
@@ -2895,7 +2977,7 @@ function CatchTab({ profile, T }) {
               </button>
               {!canContinueToReview ? (
                 <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>
-                  {requiresManualTimeLocation ? "Pick Species, Length, Spot, Date, and Time to continue." : "Pick Species, Length, and Spot to continue."}
+                  Complete required wizard confirmations (species, measurement, location, and gear flow choice) to continue.
                 </div>
               ) : null}
             </div>
@@ -2906,7 +2988,7 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:320, objectFit:"contain", background:"#00000022" }} /> : null}
               <Card T={T}>
-                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Time",form.catchTime],["Location sharing", form.locationVisibility === "public" ? "Public" : "Private"],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
+                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Reel",form.reelType],["Line",form.lineType],["Spot",form.spot],["Date",form.date],["Time",form.catchTime],["Location sharing", form.locationVisibility === "public" ? "Public" : "Private"],["Techniques",form.techniques],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
                     <div key={i} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, paddingBottom:6, borderBottom:"1px solid " + th.border }}>
                       <span style={{ fontSize:12, color:th.muted }}>{r[0]}</span>
@@ -2930,7 +3012,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to Riverside Fishing Club</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setPhotoLocation(null); setAiHint(""); setRequiresManualTimeLocation(false); setForm({ species:"", length:"", bait:"", spot:"", catchTime:"", locationVisibility:"private", rod:"", notes:"", date:new Date().toLocaleDateString(), dateISO:new Date().toISOString().slice(0, 10) }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setPhotoLocation(null); setAiHint(""); setRequiresManualTimeLocation(false); setSpeciesConfirmed(false); setLengthConfirmed(false); setLocationDecision("ask"); setGearFlowChoice("ask"); setGearFlowStep(1); setForm({ species:"", length:"", bait:"", spot:"", catchTime:"", locationVisibility:"private", rod:"", reelType:"", lineType:"", techniques:"", notes:"", date:new Date().toLocaleDateString(), dateISO:new Date().toISOString().slice(0, 10) }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
