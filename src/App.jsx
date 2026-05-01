@@ -2046,6 +2046,7 @@ function CatchTab({ profile, T }) {
   const [measureAxis, setMeasureAxis] = useState("x");
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [form, setForm] = useState({
     species:"",
     length:"",
@@ -2058,6 +2059,7 @@ function CatchTab({ profile, T }) {
   });
   const [rfcLink, setRfcLink] = useState("");
   const speciesOptions = SPECIES.map(function(sp) { return sp.name; });
+  const speciesQuickPicks = SPECIES.slice(0, 8).map(function(sp) { return sp.name; });
   const popularBaits = [
     "Nightcrawler",
     "Minnow",
@@ -2070,8 +2072,30 @@ function CatchTab({ profile, T }) {
   ];
   const spotOptions = LOCAL_SPOTS.map(function(s) { return s.name; });
   const commonLengths = ["8 inches","10 inches","12 inches","14 inches","16 inches","18 inches","20 inches"];
+  const [quickLength, setQuickLength] = useState(12);
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function normalizeSpeciesName(name) {
+    var s = String(name || "").trim().toLowerCase();
+    if (!s) return "";
+    for (var i = 0; i < SPECIES.length; i++) {
+      var candidate = SPECIES[i].name;
+      var c = candidate.toLowerCase();
+      if (s === c || s.indexOf(c) >= 0 || c.indexOf(s) >= 0) return candidate;
+      if (c.indexOf("largemouth") >= 0 && (s.indexOf("largemouth") >= 0 || s === "bass")) return candidate;
+      if (c.indexOf("rainbow trout") >= 0 && (s.indexOf("rainbow") >= 0 || s === "trout")) return candidate;
+      if (c.indexOf("channel catfish") >= 0 && (s.indexOf("catfish") >= 0 || s === "catfish")) return candidate;
+    }
+    return String(name || "").trim();
+  }
+  function setSpeciesQuick(name) {
+    setForm(function(f) { return Object.assign({}, f, { species:normalizeSpeciesName(name) }); });
+  }
+  function applyQuickLength(v) {
+    var inches = Math.max(6, Math.min(40, parseInt(v, 10) || 12));
+    setQuickLength(inches);
+    setForm(function(f) { return Object.assign({}, f, { length:inches + " inches", lengthInches:inches }); });
+  }
   function setAxisFromPhoto(dataUrl) {
     var probe = new Image();
     probe.onload = function() {
@@ -2132,7 +2156,12 @@ function CatchTab({ profile, T }) {
         if (m) {
           var res = JSON.parse(m[0]);
           setAiResult(res);
-          setForm(function(f) { return Object.assign({}, f, { species: res.species || f.species, length: res.length || f.length }); });
+          setForm(function(f) {
+            return Object.assign({}, f, {
+              species: normalizeSpeciesName(res.species) || f.species,
+              length: res.length || f.length
+            });
+          });
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
@@ -2177,19 +2206,38 @@ function CatchTab({ profile, T }) {
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
   var axisLabel = measureAxis === "x" ? "left to right" : "top to bottom";
+  function pickQuickSpecies(name) {
+    setForm(function(f) { return Object.assign({}, f, { species:name }); });
+  }
+  function applyLengthFromSlider(v) {
+    var inches = Math.max(6, Math.min(40, parseInt(v, 10) || 12));
+    setQuickLength(inches);
+    setForm(function(f) { return Object.assign({}, f, { length:inches + " inches", lengthInches:inches }); });
+  }
+
   function proceedToCatchDetails() {
     // On Next, always carry a photo-based estimate forward if length is empty.
     var fallbackEstimate = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredLengthLabel;
     setForm(function(f) {
       return Object.assign({}, f, {
-        species:f.species || (aiResult && aiResult.species) || "",
+        species:f.species || normalizeSpeciesName(aiResult && aiResult.species) || "",
         length:f.length || fallbackEstimate
       });
     });
     setStep(3);
   }
 
+  function pickQuickBait(v) {
+    setForm(function(f) { return Object.assign({}, f, { bait:v }); });
+  }
+
+  function pickQuickSpot(v) {
+    setForm(function(f) { return Object.assign({}, f, { spot:v }); });
+  }
+
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
+  var quickSpecies = SPECIES.slice(0, 8).map(function(sp) { return sp.name; });
+  var lengthSliderValue = parseInt((form.length || "").match(/\d+/) ? (form.length || "").match(/\d+/)[0] : (form.lengthInches || 12), 10);
 
   return (
     <div>
@@ -2434,7 +2482,27 @@ function CatchTab({ profile, T }) {
               </Card>
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
               <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                {speciesQuickPicks.map(function(v) {
+                  return (
+                    <button key={v} onClick={function() { setSpeciesQuick(v); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"4px 9px", color:th.white, cursor:"pointer", fontSize:11 }}>
+                      {v}
+                    </button>
+                  );
+                })}
+              </div>
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
+              <div style={{ fontSize:11, color:th.white, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
+              <input
+                aria-label="Length in inches"
+                type="range"
+                min="6"
+                max="40"
+                step="1"
+                value={quickLength}
+                onChange={function(e) { applyQuickLength(e.target.value); }}
+                style={{ width:"100%", marginBottom:10 }}
+              />
               <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
               <button onClick={proceedToCatchDetails} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
             </div>
@@ -2446,67 +2514,137 @@ function CatchTab({ profile, T }) {
               <div style={{ display:"flex", gap:8, marginBottom:10 }}>
                 <OBtn label={photo ? "Back to Photo Step" : "Back"} onClick={function() { setStep(photo ? 2 : 0); }} color={th.muted} />
               </div>
-              <div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Species</div>
-                <input list="species-options" value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
-                <datalist id="species-options">
-                  {speciesOptions.map(function(v) { return <option key={v} value={v} />; })}
-                </datalist>
+
+              <Card T={T} borderColor={th.green + "44"}>
+                <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:8 }}>Quick Log</div>
+
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Species</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
-                  {speciesOptions.slice(0, 6).map(function(v) {
+                  {speciesQuickPicks.map(function(v) {
                     return (
-                      <button key={v} onClick={function() { setF("species", v); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"4px 9px", color:th.white, cursor:"pointer", fontSize:11 }}>
+                      <button
+                        key={v}
+                        onClick={function() { pickQuickSpecies(v); }}
+                        style={{
+                          background:form.species === v ? th.green + "33" : th.card,
+                          border:"1px solid " + (form.species === v ? th.green : th.border),
+                          borderRadius:16,
+                          padding:"5px 10px",
+                          color:form.species === v ? th.green : th.white,
+                          cursor:"pointer",
+                          fontSize:11
+                        }}
+                      >
                         {v}
                       </button>
                     );
                   })}
                 </div>
-              </div>
-              <div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length</div>
-                <select value={form.length} onChange={function(e) { setF("length", e.target.value); }} style={Object.assign({}, inputStyle, { background:th.card })}>
-                  <option value="">Select length...</option>
-                  {commonLengths.map(function(v) { return <option key={v} value={v}>{v}</option>; })}
-                  {form.length && commonLengths.indexOf(form.length) === -1 ? <option value={form.length}>{form.length}</option> : null}
-                </select>
-              </div>
-              <div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Bait</div>
-                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} style={inputStyle} />
+                <input list="species-options" value={form.species} onChange={function(e) { setF("species", e.target.value); }} placeholder="Or type species..." style={Object.assign({}, inputStyle, { marginBottom:10 })} />
+                <datalist id="species-options">
+                  {speciesOptions.map(function(v) { return <option key={v} value={v} />; })}
+                </datalist>
+
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
+                <input
+                  aria-label="Length in inches"
+                  type="range"
+                  min="6"
+                  max="40"
+                  step="0.5"
+                  value={quickLength}
+                  onChange={function(e) {
+                    var v = parseFloat(e.target.value);
+                    setQuickLength(v);
+                    setF("length", v.toFixed(1) + " inches");
+                  }}
+                  style={{ width:"100%", marginBottom:10 }}
+                />
+
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Bait shortcut</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                  {popularBaits.slice(0, 6).map(function(v) {
+                    return (
+                      <button
+                        key={v}
+                        onClick={function() { setF("bait", v); }}
+                        style={{
+                          background:form.bait === v ? th.blue + "33" : th.card,
+                          border:"1px solid " + (form.bait === v ? th.blue : th.border),
+                          borderRadius:16,
+                          padding:"5px 10px",
+                          color:form.bait === v ? th.blue : th.white,
+                          cursor:"pointer",
+                          fontSize:11
+                        }}
+                      >
+                        {v}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder="Or type bait..." style={Object.assign({}, inputStyle, { marginBottom:10 })} />
                 <datalist id="bait-options">
                   {popularBaits.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
-              </div>
-              <div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot</div>
-                <input list="spot-options" value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} style={inputStyle} />
+
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Spot shortcut</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                  {spotOptions.slice(0, 4).map(function(v) {
+                    return (
+                      <button
+                        key={v}
+                        onClick={function() { setF("spot", v); }}
+                        style={{
+                          background:form.spot === v ? th.teal + "33" : th.card,
+                          border:"1px solid " + (form.spot === v ? th.teal : th.border),
+                          borderRadius:16,
+                          padding:"5px 10px",
+                          color:form.spot === v ? th.teal : th.white,
+                          cursor:"pointer",
+                          fontSize:11
+                        }}
+                      >
+                        {v}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input list="spot-options" value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} placeholder="Or type spot..." style={Object.assign({}, inputStyle, { marginBottom:8 })} />
                 <datalist id="spot-options">
                   {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
-              </div>
-              <div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
-                <input type="date" value={form.dateISO || ""} onChange={function(e) {
-                  var iso = e.target.value;
-                  setForm(function(f) {
-                    return Object.assign({}, f, {
-                      dateISO:iso,
-                      date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
-                    });
-                  });
-                }} style={inputStyle} />
-              </div>
-              {gear.length > 0 ? (
+              </Card>
+
+              <details style={{ marginBottom:10 }}>
+                <summary style={{ cursor:"pointer", color:th.muted, fontSize:12, marginBottom:8 }}>Advanced details (optional)</summary>
                 <div>
-                  <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
-                  <select value={form.rod} onChange={function(e) { setF("rod", e.target.value); }} style={Object.assign({}, inputStyle, { background:th.card })}>
-                    <option value="">Select rod...</option>
-                    {gear.map(function(g, i) { return <option key={i} value={g.nickname || g.brand}>{g.nickname || (g.brand + " " + g.model)}</option>; })}
-                  </select>
+                  <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
+                  <input type="date" value={form.dateISO || ""} onChange={function(e) {
+                    var iso = e.target.value;
+                    setForm(function(f) {
+                      return Object.assign({}, f, {
+                        dateISO:iso,
+                        date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
+                      });
+                    });
+                  }} style={inputStyle} />
+
+                  {gear.length > 0 ? (
+                    <div>
+                      <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
+                      <select value={form.rod} onChange={function(e) { setF("rod", e.target.value); }} style={Object.assign({}, inputStyle, { background:th.card })}>
+                        <option value="">Select rod...</option>
+                        {gear.map(function(g, i) { return <option key={i} value={g.nickname || g.brand}>{g.nickname || (g.brand + " " + g.model)}</option>; })}
+                      </select>
+                    </div>
+                  ) : null}
+
+                  <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes</div>
+                  <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
                 </div>
-              ) : null}
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes (optional)</div>
-              <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
+              </details>
+
               <button
                 onClick={function() { setStep(4); }}
                 disabled={!form.species || !form.length || !form.spot}
@@ -2522,10 +2660,10 @@ function CatchTab({ profile, T }) {
                   fontWeight:700
                 }}
               >
-                Review
+                Continue to Review
               </button>
               {(!form.species || !form.length || !form.spot) ? (
-                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>Fill Species, Length, and Spot to continue.</div>
+                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>Pick Species, Length, and Spot to continue.</div>
               ) : null}
             </div>
           )}
