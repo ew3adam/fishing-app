@@ -2235,7 +2235,8 @@ function CatchTab({ profile, T }) {
     setForm(function(f) { return Object.assign({}, f, { spot:v }); });
   }
 
-  var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
+  var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:"12px 14px", color:th.white, fontSize:16, boxSizing:"border-box", outline:"none", marginBottom:10, minHeight:48 };
+  var primaryBtnStyle = { width:"100%", background:th.green, color:"#000", border:"none", borderRadius:14, padding:"14px 0", cursor:"pointer", fontSize:16, fontWeight:800 };
   var quickSpecies = SPECIES.slice(0, 8).map(function(sp) { return sp.name; });
   var lengthSliderValue = parseInt((form.length || "").match(/\d+/) ? (form.length || "").match(/\d+/)[0] : (form.lengthInches || 12), 10);
 
@@ -2511,15 +2512,15 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
                 <OBtn label={photo ? "Back to Photo Step" : "Back"} onClick={function() { setStep(photo ? 2 : 0); }} color={th.muted} />
               </div>
 
-              <Card T={T} borderColor={th.green + "44"}>
+              <Card T={T} borderColor={th.green + "44"} style={{ borderRadius:16 }}>
                 <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:8 }}>Quick Log</div>
 
                 <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Species</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
                   {speciesQuickPicks.map(function(v) {
                     return (
                       <button
@@ -2528,11 +2529,11 @@ function CatchTab({ profile, T }) {
                         style={{
                           background:form.species === v ? th.green + "33" : th.card,
                           border:"1px solid " + (form.species === v ? th.green : th.border),
-                          borderRadius:16,
-                          padding:"5px 10px",
+                          borderRadius:18,
+                          padding:"8px 12px",
                           color:form.species === v ? th.green : th.white,
                           cursor:"pointer",
-                          fontSize:11
+                          fontSize:13
                         }}
                       >
                         {v}
@@ -2540,12 +2541,12 @@ function CatchTab({ profile, T }) {
                     );
                   })}
                 </div>
-                <input list="species-options" value={form.species} onChange={function(e) { setF("species", e.target.value); }} placeholder="Or type species..." style={Object.assign({}, inputStyle, { marginBottom:10 })} />
+                <input list="species-options" value={form.species} onChange={function(e) { setSpeciesQuick(e.target.value); }} placeholder="Or type species..." style={Object.assign({}, inputStyle, { marginBottom:12 })} />
                 <datalist id="species-options">
                   {speciesOptions.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
 
-                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
+                <div style={{ fontSize:13, color:th.muted, marginBottom:4 }}>Length in inches: {quickLength.toFixed(1)}</div>
                 <input
                   aria-label="Length in inches"
                   type="range"
@@ -2558,11 +2559,14 @@ function CatchTab({ profile, T }) {
                     setQuickLength(v);
                     setF("length", v.toFixed(1) + " inches");
                   }}
-                  style={{ width:"100%", marginBottom:10 }}
+                  style={{ width:"100%", marginBottom:4, height:34 }}
                 />
+                <div style={{ display:"flex", justifyContent:"space-between", color:th.muted, fontSize:11, marginBottom:12 }}>
+                  <span>6</span><span>40</span>
+                </div>
 
                 <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Bait shortcut</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
                   {popularBaits.slice(0, 6).map(function(v) {
                     return (
                       <button
@@ -2571,11 +2575,11 @@ function CatchTab({ profile, T }) {
                         style={{
                           background:form.bait === v ? th.blue + "33" : th.card,
                           border:"1px solid " + (form.bait === v ? th.blue : th.border),
-                          borderRadius:16,
-                          padding:"5px 10px",
+                          borderRadius:18,
+                          padding:"8px 12px",
                           color:form.bait === v ? th.blue : th.white,
                           cursor:"pointer",
-                          fontSize:11
+                          fontSize:13
                         }}
                       >
                         {v}
@@ -2583,13 +2587,13 @@ function CatchTab({ profile, T }) {
                     );
                   })}
                 </div>
-                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder="Or type bait..." style={Object.assign({}, inputStyle, { marginBottom:10 })} />
+                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder="Or type bait..." style={Object.assign({}, inputStyle, { marginBottom:12 })} />
                 <datalist id="bait-options">
                   {popularBaits.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
 
                 <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Spot shortcut</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
                   {spotOptions.slice(0, 4).map(function(v) {
                     return (
                       <button
@@ -2598,11 +2602,11 @@ function CatchTab({ profile, T }) {
                         style={{
                           background:form.spot === v ? th.teal + "33" : th.card,
                           border:"1px solid " + (form.spot === v ? th.teal : th.border),
-                          borderRadius:16,
-                          padding:"5px 10px",
+                          borderRadius:18,
+                          padding:"8px 12px",
                           color:form.spot === v ? th.teal : th.white,
                           cursor:"pointer",
-                          fontSize:11
+                          fontSize:13
                         }}
                       >
                         {v}
@@ -2616,8 +2620,8 @@ function CatchTab({ profile, T }) {
                 </datalist>
               </Card>
 
-              <details style={{ marginBottom:10 }}>
-                <summary style={{ cursor:"pointer", color:th.muted, fontSize:12, marginBottom:8 }}>Advanced details (optional)</summary>
+              <details style={{ marginBottom:12 }}>
+                <summary style={{ cursor:"pointer", color:th.muted, fontSize:13, marginBottom:8 }}>Advanced details (optional)</summary>
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
                   <input type="date" value={form.dateISO || ""} onChange={function(e) {
@@ -2648,17 +2652,10 @@ function CatchTab({ profile, T }) {
               <button
                 onClick={function() { setStep(4); }}
                 disabled={!form.species || !form.length || !form.spot}
-                style={{
-                  width:"100%",
+                style={Object.assign({}, primaryBtnStyle, {
                   background:(!form.species || !form.length || !form.spot) ? th.dim : th.green,
-                  color:"#000",
-                  border:"none",
-                  borderRadius:8,
-                  padding:"11px 0",
-                  cursor:(!form.species || !form.length || !form.spot) ? "not-allowed" : "pointer",
-                  fontSize:14,
-                  fontWeight:700
-                }}
+                  cursor:(!form.species || !form.length || !form.spot) ? "not-allowed" : "pointer"
+                })}
               >
                 Continue to Review
               </button>
