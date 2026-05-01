@@ -2149,6 +2149,8 @@ function CatchTab({ profile, T }) {
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [catchMsg, setCatchMsg] = useState("");
   const [measurementOption, setMeasurementOption] = useState("1_ruler");
   const [rulerMaxInches, setRulerMaxInches] = useState(24);
   const [referenceInches, setReferenceInches] = useState("3.37");
@@ -2160,6 +2162,42 @@ function CatchTab({ profile, T }) {
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function cleanValue(v) { return (v || "").toString().trim(); }
+  function missingCatchFields() {
+    var missing = [];
+    if (!cleanValue(form.species)) missing.push("species");
+    if (!cleanValue(form.length)) missing.push("length");
+    if (!cleanValue(form.spot)) missing.push("spot");
+    return missing;
+  }
+  function goToReview() {
+    var missing = missingCatchFields();
+    if (missing.length) {
+      setCatchMsg("Pick " + missing.join(", ") + " before review.");
+      return;
+    }
+    setCatchMsg("");
+    setStep(4);
+  }
+  function goToDetailsFromAnalysis() {
+    var missing = [];
+    if (!cleanValue(form.species)) missing.push("species");
+    if (!cleanValue(form.length)) missing.push("length");
+    if (missing.length) {
+      setCatchMsg("Confirm " + missing.join(" and ") + " before details.");
+      return;
+    }
+    setCatchMsg("");
+    setStep(3);
+  }
+  function useSpecies(name) {
+    setF("species", name);
+    setCatchMsg("");
+  }
+  function useMeasuredLength() {
+    setF("length", measuredLengthLabel);
+    setCatchMsg("");
+  }
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -2179,13 +2217,15 @@ function CatchTab({ profile, T }) {
     readImageFile(primary).then(function(img) {
       setPhoto(img.full);
       setPhotoB64(img.b64);
+      setCatchMsg("");
+      setAiError("");
       setMeasurementOption("1_ruler");
       setRulerMaxInches(24);
       setReferenceInches("3.37");
-      setRefStartPct(20);
-      setRefEndPct(34);
-      setMouthPct(10);
-      setTailPct(90);
+      setRefStartPct(8);
+      setRefEndPct(92);
+      setMouthPct(18);
+      setTailPct(82);
       setStep(2);
       // If multiple images are uploaded together, treat extras as reference shots.
       if (files.length > 1) {
@@ -2211,9 +2251,11 @@ function CatchTab({ profile, T }) {
           var res = JSON.parse(m[0]);
           setAiResult(res);
           setForm(function(f) { return Object.assign({}, f, { species: res.species || f.species, length: res.length || f.length }); });
+        } else {
+          setAiError("Auto ID could not read this photo. Pick the closest species below.");
         }
         setAiLoading(false);
-      }).catch(function() { setAiLoading(false); });
+      }).catch(function() { setAiError("Auto ID is unavailable. Pick the closest species below."); setAiLoading(false); });
     }).catch(function() {});
     e.target.value = "";
   }
@@ -2230,6 +2272,14 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
+    var missing = [];
+    if (!String(form.species || "").trim()) missing.push("species");
+    if (!String(form.length || "").trim()) missing.push("length");
+    if (!String(form.spot || "").trim()) missing.push("spot");
+    if (missing.length) {
+      setCatchMsg("Pick " + missing.join(", ") + " before posting.");
+      return;
+    }
     var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
     setCatches(function(c) { return [entry].concat(c); });
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
@@ -2239,18 +2289,21 @@ function CatchTab({ profile, T }) {
   }
 
   var gear = (profile && profile.gear) || [];
+  var commonSpecies = (SPECIES || []).slice(0, 12).map(function(sp) { return sp.name; });
+  var suggestedSpecies = [];
+  if (aiResult && aiResult.species) suggestedSpecies.push(aiResult.species);
+  commonSpecies.forEach(function(name) { if (suggestedSpecies.indexOf(name) < 0) suggestedSpecies.push(name); });
+  var quickSpots = LOCAL_SPOTS.map(function(s) { return s.name; }).slice(0, 4);
   // Clamp ruler input so the overlay always has a valid scale.
   var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || 24));
-  var usesObjectReference = measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth";
+  var usesObjectReference = measurementOption === "1_ruler" || measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth";
   var fishSpanPct = Math.abs(tailPct - mouthPct);
   var refSpanPct = Math.max(0.1, Math.abs(refEndPct - refStartPct));
   var customReferenceLen = Math.max(0, parseFloat(referenceInches) || 0);
-  var referenceLenInches = measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : customReferenceLen;
-  // Convert marker distance (percentage of image width) into inches.
-  var measuredByRuler = (fishSpanPct / 100) * rulerInches;
+  var referenceLenInches = measurementOption === "1_ruler" ? rulerInches : measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : customReferenceLen;
   var measuredByReference = (fishSpanPct / refSpanPct) * referenceLenInches;
-  var measuredInches = usesObjectReference && referenceLenInches > 0 ? measuredByReference : measuredByRuler;
-  var estimatedLengthLabel = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredByRuler.toFixed(1) + " inches (estimate)";
+  var measuredInches = usesObjectReference && referenceLenInches > 0 ? measuredByReference : 0;
+  var estimatedLengthLabel = aiResult && aiResult.length ? aiResult.length + " (estimate)" : "Need reference for estimate";
   var measuredLengthLabel = measurementOption === "5_none" ? estimatedLengthLabel : measuredInches.toFixed(1) + " inches";
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
@@ -2311,28 +2364,23 @@ function CatchTab({ profile, T }) {
                 <div style={{ marginBottom:12 }}>
                   <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
                     <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
-                    <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                      {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                        var left = (i / rulerInches) * 100;
-                        var major = i % 5 === 0;
-                        return (
-                          <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                            {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                          </div>
-                        );
-                      })}
-                      {/* Mouth and tail markers define the measured fish span. */}
-                      <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
-                        <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
-                      </div>
-                      <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
-                        <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
-                      </div>
+                    <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:3, background:th.green, boxShadow:"0 0 0 1px rgba(0,0,0,0.5)" }}>
+                      <div style={{ position:"absolute", top:8, left:-20, fontSize:10, color:"#fff", background:th.green, borderRadius:6, padding:"2px 5px", fontWeight:800 }}>MOUTH</div>
                     </div>
+                    <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:3, background:th.orange, boxShadow:"0 0 0 1px rgba(0,0,0,0.5)" }}>
+                      <div style={{ position:"absolute", top:34, left:-14, fontSize:10, color:"#140800", background:th.orange, borderRadius:6, padding:"2px 5px", fontWeight:800 }}>TAIL</div>
+                    </div>
+                    {usesObjectReference ? (
+                      <div style={{ position:"absolute", left:Math.min(refStartPct, refEndPct) + "%", width:Math.abs(refEndPct - refStartPct) + "%", bottom:12, height:7, borderRadius:999, background:"rgba(255,255,255,0.9)", border:"1px solid rgba(0,0,0,0.55)" }}>
+                        <div style={{ position:"absolute", left:0, top:-7, width:2, height:19, background:"#fff" }} />
+                        <div style={{ position:"absolute", right:0, top:-7, width:2, height:19, background:"#fff" }} />
+                        <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", bottom:10, fontSize:10, color:"#fff", background:"rgba(0,0,0,0.65)", borderRadius:6, padding:"2px 6px", whiteSpace:"nowrap" }}>known reference</div>
+                      </div>
+                    ) : null}
                   </div>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
-                      Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                      Move MOUTH and TAIL to the actual fish. Move the white reference bar over the visible ruler or object in the photo.
                     </div>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
@@ -2392,7 +2440,7 @@ function CatchTab({ profile, T }) {
                     {needsMorePhotos ? (
                       <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "55", borderRadius:8, padding:10, marginBottom:10 }}>
                         <div style={{ fontSize:12, color:th.white, lineHeight:1.45, marginBottom:7 }}>
-                          To improve accuracy, add at least one more photo with a known object (ruler, credit card, or quarter) next to the fish.
+                          Best accuracy: add a second photo with the fish beside a ruler, card, or quarter.
                         </div>
                         <button onClick={function() { refFileRef.current.click(); }} style={{ background:th.orange, color:"#120900", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
                           Add reference photo
@@ -2413,7 +2461,7 @@ function CatchTab({ profile, T }) {
                     ) : null}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
                       <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Measured length: {measuredLengthLabel}</div>
-                      <button onClick={function() { setF("length", measuredLengthLabel); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                      <button onClick={useMeasuredLength} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
                         Use this length
                       </button>
                     </div>
@@ -2421,20 +2469,29 @@ function CatchTab({ profile, T }) {
                 </div>
               ) : null}
               {aiLoading ? <div style={{ textAlign:"center", color:th.muted, padding:"20px 0" }}>Identifying fish...</div> : null}
-              {aiResult && !aiLoading ? (
-                <Card T={T} borderColor={th.green + "44"}>
-                  <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>AI Result — Please Verify</div>
-                  <div style={{ fontSize:13, color:th.white, marginBottom:4 }}>Species: {aiResult.species} ({aiResult.confidence}% confident)</div>
-                  <div style={{ fontSize:13, color:th.white }}>{aiResult.notes}</div>
-                </Card>
-              ) : null}
-              <Card T={T} borderColor={th.orange + "44"}>
-                <div style={{ fontSize:12, color:th.white, lineHeight:1.55 }}>
-                  ID check: use the species photo guide in the Fish tab to confirm body shape, mouth size, and tail shape before saving your catch.
+              <Card T={T} borderColor={th.green + "44"}>
+                <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Confirm fish</div>
+                {aiResult && !aiLoading ? (
+                  <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
+                    Auto ID suggests <strong>{aiResult.species}</strong>{aiResult.confidence ? " (" + aiResult.confidence + "%)" : ""}. Tap to confirm or pick another.
+                  </div>
+                ) : null}
+                {aiError ? <div style={{ fontSize:12, color:th.orange, marginBottom:8 }}>{aiError}</div> : null}
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+                  {suggestedSpecies.slice(0, 12).map(function(name) {
+                    var selected = form.species === name;
+                    return (
+                      <button key={name} onClick={function() { useSpecies(name); }} style={{ background:selected ? th.green : th.green + "18", color:selected ? "#000" : th.green, border:"1px solid " + th.green + "66", borderRadius:999, padding:"8px 10px", minHeight:38, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        {selected ? "✓ " : ""}{name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} placeholder="Or type species..." style={inputStyle} />
+                <div style={{ fontSize:11, color:th.muted, lineHeight:1.45 }}>
+                  Check the Fish tab if you are unsure; confirm body shape, mouth size, and tail shape before posting.
                 </div>
               </Card>
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
-              <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
               <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
               <button onClick={function() { setStep(3); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
@@ -2444,11 +2501,38 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
+              {!photo ? (
+                <div>
+                  {["species","length"].map(function(k) {
+                    return (
+                      <div key={k}>
+                        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
+                        <input value={form[k]} onChange={function(e) { setF(k, e.target.value); setCatchMsg(""); }} style={inputStyle} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Card T={T} borderColor={th.green + "44"} style={{ padding:10 }}>
+                  <div style={{ fontSize:12, color:th.white, lineHeight:1.5 }}>Confirmed: <strong>{form.species || "No species"}</strong> · <strong>{form.length || "No length"}</strong></div>
+                </Card>
+              )}
+              {["bait","spot","date"].map(function(k) {
                 return (
                   <div key={k}>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
-                    <input value={form[k]} onChange={function(e) { setF(k, e.target.value); }} style={inputStyle} />
+                    <input value={form[k]} onChange={function(e) { setF(k, e.target.value); setCatchMsg(""); }} style={inputStyle} />
+                    {k === "spot" ? (
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", margin:"-4px 0 10px" }}>
+                        {LOCAL_SPOTS.slice(0, 4).map(function(s) {
+                          return (
+                            <button key={s.name} type="button" onClick={function() { setF("spot", s.name); setCatchMsg(""); }} style={{ background:form.spot === s.name ? th.green + "33" : th.card, border:"1px solid " + (form.spot === s.name ? th.green : th.border), color:form.spot === s.name ? th.green : th.muted, borderRadius:18, padding:"6px 10px", cursor:"pointer", fontSize:11 }}>
+                              {s.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -2463,7 +2547,8 @@ function CatchTab({ profile, T }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes (optional)</div>
               <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
-              <button onClick={function() { setStep(4); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
+              {catchMsg ? <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "55", color:th.white, borderRadius:8, padding:10, fontSize:12, marginBottom:10 }}>{catchMsg}</div> : null}
+              <button onClick={goToReview} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"13px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}>Continue to Review</button>
             </div>
           )}
 
