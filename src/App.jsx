@@ -2038,6 +2038,8 @@ function CatchTab({ profile, T }) {
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiHint, setAiHint] = useState("");
+  const [photoLocation, setPhotoLocation] = useState(null);
   const [measurementOption, setMeasurementOption] = useState("1_ruler");
   const [rulerMaxInches, setRulerMaxInches] = useState(24);
   const [referenceInches, setReferenceInches] = useState("3.37");
@@ -2117,6 +2119,116 @@ function CatchTab({ profile, T }) {
     });
   }
 
+  function readAscii(dv, start, len) {
+    var out = "";
+    for (var i = 0; i < len; i++) out += String.fromCharCode(dv.getUint8(start + i));
+    return out;
+  }
+
+  function parseGpsFromJpegBuffer(buffer) {
+    try {
+      var dv = new DataView(buffer);
+      if (dv.byteLength < 4 || dv.getUint16(0, false) !== 0xffd8) return null;
+
+      function read16(off, little) { return dv.getUint16(off, !!little); }
+      function read32(off, little) { return dv.getUint32(off, !!little); }
+      function getTypeSize(type) {
+        if (type === 1 || type === 2 || type === 7) return 1;
+        if (type === 3) return 2;
+        if (type === 4 || type === 9) return 4;
+        if (type === 5 || type === 10) return 8;
+        return 1;
+      }
+      function parseRational(off, count, little) {
+        var vals = [];
+        for (var i = 0; i < count; i++) {
+          var n = read32(off + i * 8, little);
+          var d = read32(off + i * 8 + 4, little) || 1;
+          vals.push(n / d);
+        }
+        return vals;
+      }
+
+      var offset = 2;
+      while (offset + 4 < dv.byteLength) {
+        if (dv.getUint8(offset) !== 0xff) break;
+        var marker = dv.getUint8(offset + 1);
+        offset += 2;
+        if (marker === 0xda || marker === 0xd9) break;
+        var segLen = dv.getUint16(offset, false);
+        if (segLen < 2 || offset + segLen > dv.byteLength) break;
+        if (marker === 0xe1 && segLen > 10 && readAscii(dv, offset + 2, 4) === "Exif") {
+          var tiff = offset + 8;
+          var endian = readAscii(dv, tiff, 2);
+          var little = endian === "II";
+          if (!(endian === "II" || endian === "MM")) return null;
+          if (read16(tiff + 2, little) !== 42) return null;
+          var ifd0 = tiff + read32(tiff + 4, little);
+          if (ifd0 <= 0 || ifd0 + 2 > dv.byteLength) return null;
+          var count = read16(ifd0, little);
+          var gpsOffset = 0;
+          for (var e = 0; e < count; e++) {
+            var entry = ifd0 + 2 + e * 12;
+            if (entry + 12 > dv.byteLength) break;
+            var tag = read16(entry, little);
+            if (tag === 0x8825) gpsOffset = read32(entry + 8, little);
+          }
+          if (!gpsOffset) return null;
+          var gpsIfd = tiff + gpsOffset;
+          if (gpsIfd + 2 > dv.byteLength) return null;
+          var gpsCount = read16(gpsIfd, little);
+          var latRef = "", lonRef = "";
+          var latVals = null, lonVals = null;
+          for (var g = 0; g < gpsCount; g++) {
+            var ge = gpsIfd + 2 + g * 12;
+            if (ge + 12 > dv.byteLength) break;
+            var gTag = read16(ge, little);
+            var gType = read16(ge + 2, little);
+            var gCnt = read32(ge + 4, little);
+            var byteCount = gCnt * getTypeSize(gType);
+            var dataOff = byteCount <= 4 ? ge + 8 : tiff + read32(ge + 8, little);
+            if (dataOff < 0 || dataOff + byteCount > dv.byteLength) continue;
+            if (gTag === 1 && gType === 2) latRef = readAscii(dv, dataOff, Math.max(1, gCnt)).replace(/\0/g, "").trim();
+            if (gTag === 3 && gType === 2) lonRef = readAscii(dv, dataOff, Math.max(1, gCnt)).replace(/\0/g, "").trim();
+            if (gTag === 2 && gType === 5) latVals = parseRational(dataOff, gCnt, little);
+            if (gTag === 4 && gType === 5) lonVals = parseRational(dataOff, gCnt, little);
+          }
+          if (latVals && lonVals && latVals.length >= 3 && lonVals.length >= 3) {
+            var lat = latVals[0] + latVals[1] / 60 + latVals[2] / 3600;
+            var lon = lonVals[0] + lonVals[1] / 60 + lonVals[2] / 3600;
+            if (latRef === "S") lat = -lat;
+            if (lonRef === "W") lon = -lon;
+            if (isFinite(lat) && isFinite(lon)) return { lat:lat, lon:lon };
+          }
+          return null;
+        }
+        offset += segLen;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function reverseGeocodeLabel(lat, lon) {
+    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon);
+    return fetch(url).then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+      if (data && data.display_name) return data.display_name;
+      return lat.toFixed(5) + ", " + lon.toFixed(5);
+    }).catch(function() {
+      return lat.toFixed(5) + ", " + lon.toFixed(5);
+    });
+  }
+
+  function tryExtractPhotoLocation(file) {
+    if (!file || typeof file.arrayBuffer !== "function") return Promise.resolve(null);
+    return file.arrayBuffer().then(function(buf) {
+      var gps = parseGpsFromJpegBuffer(buf);
+      if (!gps) return null;
+      return reverseGeocodeLabel(gps.lat, gps.lon).then(function(label) {
+        return { lat:gps.lat, lon:gps.lon, label:label };
+      });
+    }).catch(function() { return null; });
+  }
+
   function handlePhoto(e) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -2142,6 +2254,14 @@ function CatchTab({ profile, T }) {
         setReferencePhotos([]);
       }
       setAiLoading(true);
+      // Pull GPS from EXIF/metadata when available to prefill spot.
+      tryExtractPhotoLocation(primary).then(function(loc) {
+        if (!loc || !loc.label) return;
+        setForm(function(f) {
+          if (f.spot && String(f.spot).trim()) return f;
+          return Object.assign({}, f, { spot:loc.label });
+        });
+      });
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
@@ -2164,7 +2284,11 @@ function CatchTab({ profile, T }) {
           });
         }
         setAiLoading(false);
-      }).catch(function() { setAiLoading(false); });
+      }).catch(function() {
+        // Keep UX smooth if AI endpoint fails: user can still quick-pick species.
+        setAiResult({ species:"Unknown", confidence:0, notes:"AI unavailable. Use species quick picks below." });
+        setAiLoading(false);
+      });
     }).catch(function() {});
     e.target.value = "";
   }
@@ -2295,7 +2419,7 @@ function CatchTab({ profile, T }) {
               {photo ? (
                 <div style={{ marginBottom:12 }}>
                   <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
-                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
+                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block", background:"#00000022" }} />
                     {measureAxis === "x" ? (
                       <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
                         {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
@@ -2618,6 +2742,11 @@ function CatchTab({ profile, T }) {
                 <datalist id="spot-options">
                   {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
+                {(!form.spot || !String(form.spot).trim()) ? (
+                  <div style={{ fontSize:11, color:th.muted, marginTop:2, marginBottom:6 }}>
+                    Location from photo metadata not found. Please pick a spot or type one.
+                  </div>
+                ) : null}
               </Card>
 
               <details style={{ marginBottom:12 }}>
@@ -2668,7 +2797,7 @@ function CatchTab({ profile, T }) {
           {step === 4 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
-              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
+              {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:320, objectFit:"contain", background:"#00000022" }} /> : null}
               <Card T={T}>
                 {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
