@@ -2040,6 +2040,7 @@ function CatchTab({ profile, T }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiHint, setAiHint] = useState("");
   const [photoLocation, setPhotoLocation] = useState(null);
+  const [requiresManualTimeLocation, setRequiresManualTimeLocation] = useState(false);
   const [measurementOption, setMeasurementOption] = useState("1_ruler");
   const [rulerMaxInches, setRulerMaxInches] = useState(24);
   const [referenceInches, setReferenceInches] = useState("3.37");
@@ -2054,6 +2055,8 @@ function CatchTab({ profile, T }) {
     length:"",
     bait:"",
     spot:"",
+    catchTime:"",
+    locationVisibility:"private",
     rod:"",
     notes:"",
     date:new Date().toLocaleDateString(),
@@ -2236,6 +2239,10 @@ function CatchTab({ profile, T }) {
     readImageFile(primary).then(function(img) {
       setPhoto(img.full);
       setPhotoB64(img.b64);
+      // Reset metadata guidance each time a new primary photo is selected.
+      setPhotoLocation(null);
+      setAiHint("");
+      setRequiresManualTimeLocation(false);
       setAxisFromPhoto(img.full);
       setMeasurementOption("1_ruler");
       setRulerMaxInches(24);
@@ -2256,11 +2263,20 @@ function CatchTab({ profile, T }) {
       setAiLoading(true);
       // Pull GPS from EXIF/metadata when available to prefill spot.
       tryExtractPhotoLocation(primary).then(function(loc) {
-        if (!loc || !loc.label) return;
-        setForm(function(f) {
-          if (f.spot && String(f.spot).trim()) return f;
-          return Object.assign({}, f, { spot:loc.label });
-        });
+        if (loc && loc.label) {
+          setPhotoLocation(loc);
+          setAiHint("Photo metadata found. Location was auto-filled. Choose Public or Private below.");
+          setRequiresManualTimeLocation(false);
+          setForm(function(f) {
+            if (f.spot && String(f.spot).trim()) return f;
+            return Object.assign({}, f, { spot:loc.label });
+          });
+          return;
+        }
+        // If no metadata location exists, require manual time + location input.
+        setPhotoLocation(null);
+        setRequiresManualTimeLocation(true);
+        setAiHint("Photo metadata location was not found. Please enter catch time and location manually.");
       });
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
@@ -2305,10 +2321,23 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var entry = {
+      id:Date.now(),
+      user:(profile && profile.name) || "Angler",
+      species:form.species,
+      length:form.length,
+      bait:form.bait,
+      rod:form.rod,
+      spot:form.spot,
+      catchTime:form.catchTime,
+      locationVisibility:form.locationVisibility,
+      notes:form.notes,
+      date:form.date,
+      photo:photo
+    };
     setCatches(function(c) { return [entry].concat(c); });
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
-    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
+    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\nTime: " + (form.catchTime || "not provided") + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nLocation sharing: " + (form.locationVisibility === "public" ? "Public" : "Private") + "\nNotes: " + form.notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
     setStep(6);
   }
@@ -2363,6 +2392,13 @@ function CatchTab({ profile, T }) {
   var primaryBtnStyle = { width:"100%", background:th.green, color:"#000", border:"none", borderRadius:14, padding:"14px 0", cursor:"pointer", fontSize:16, fontWeight:800 };
   var quickSpecies = SPECIES.slice(0, 8).map(function(sp) { return sp.name; });
   var lengthSliderValue = parseInt((form.length || "").match(/\d+/) ? (form.length || "").match(/\d+/)[0] : (form.lengthInches || 12), 10);
+  var hasSpecies = !!String(form.species || "").trim();
+  var hasLength = !!String(form.length || "").trim();
+  var hasSpot = !!String(form.spot || "").trim();
+  var hasManualDate = !!String(form.dateISO || "").trim();
+  var hasManualTime = !!String(form.catchTime || "").trim();
+  // When photo metadata is missing, require user-confirmed time and location.
+  var canContinueToReview = hasSpecies && hasLength && hasSpot && (!requiresManualTimeLocation || (hasManualDate && hasManualTime));
 
   return (
     <div>
@@ -2600,6 +2636,11 @@ function CatchTab({ profile, T }) {
                   <div style={{ fontSize:13, color:th.white }}>{aiResult.notes}</div>
                 </Card>
               ) : null}
+              {aiHint ? (
+                <Card T={T} borderColor={th.teal + "44"}>
+                  <div style={{ fontSize:12, color:th.white, lineHeight:1.5 }}>{aiHint}</div>
+                </Card>
+              ) : null}
               <Card T={T} borderColor={th.orange + "44"}>
                 <div style={{ fontSize:12, color:th.white, lineHeight:1.55 }}>
                   ID check: use the species photo guide in the Fish tab to confirm body shape, mouth size, and tail shape before saving your catch.
@@ -2742,26 +2783,90 @@ function CatchTab({ profile, T }) {
                 <datalist id="spot-options">
                   {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
                 </datalist>
+                {photoLocation && photoLocation.label ? (
+                  <div style={{ fontSize:11, color:th.teal, marginTop:2, marginBottom:6 }}>
+                    Auto-filled from photo metadata. Confirm if needed.
+                  </div>
+                ) : null}
+                {requiresManualTimeLocation ? (
+                  <div style={{ background:th.orange + "15", border:"1px solid " + th.orange + "44", borderRadius:10, padding:10, marginBottom:10 }}>
+                    <div style={{ fontSize:11, color:th.white, marginBottom:6 }}>
+                      No photo metadata found. Enter catch time and location.
+                    </div>
+                    <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Catch date</div>
+                    <input type="date" value={form.dateISO || ""} onChange={function(e) {
+                      var iso = e.target.value;
+                      setForm(function(f) {
+                        return Object.assign({}, f, {
+                          dateISO:iso,
+                          date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
+                        });
+                      });
+                    }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                    <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Catch time</div>
+                    <input type="time" value={form.catchTime || ""} onChange={function(e) { setF("catchTime", e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:2 })} />
+                  </div>
+                ) : null}
                 {(!form.spot || !String(form.spot).trim()) ? (
                   <div style={{ fontSize:11, color:th.muted, marginTop:2, marginBottom:6 }}>
                     Location from photo metadata not found. Please pick a spot or type one.
                   </div>
                 ) : null}
+                <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Location sharing</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:2 }}>
+                  <button
+                    onClick={function() { setF("locationVisibility", "private"); }}
+                    style={{
+                      background:form.locationVisibility !== "public" ? th.green + "33" : th.card,
+                      border:"1px solid " + (form.locationVisibility !== "public" ? th.green : th.border),
+                      borderRadius:10,
+                      padding:"10px 12px",
+                      color:form.locationVisibility !== "public" ? th.green : th.white,
+                      cursor:"pointer",
+                      fontSize:12,
+                      fontWeight:700
+                    }}
+                  >
+                    Private
+                  </button>
+                  <button
+                    onClick={function() { setF("locationVisibility", "public"); }}
+                    style={{
+                      background:form.locationVisibility === "public" ? th.green + "33" : th.card,
+                      border:"1px solid " + (form.locationVisibility === "public" ? th.green : th.border),
+                      borderRadius:10,
+                      padding:"10px 12px",
+                      color:form.locationVisibility === "public" ? th.green : th.white,
+                      cursor:"pointer",
+                      fontSize:12,
+                      fontWeight:700
+                    }}
+                  >
+                    Public
+                  </button>
+                </div>
+                <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>
+                  Current setting: {form.locationVisibility === "public" ? "Public location" : "Private location"}
+                </div>
               </Card>
 
               <details style={{ marginBottom:12 }}>
                 <summary style={{ cursor:"pointer", color:th.muted, fontSize:13, marginBottom:8 }}>Advanced details (optional)</summary>
                 <div>
-                  <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
-                  <input type="date" value={form.dateISO || ""} onChange={function(e) {
-                    var iso = e.target.value;
-                    setForm(function(f) {
-                      return Object.assign({}, f, {
-                        dateISO:iso,
-                        date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
-                      });
-                    });
-                  }} style={inputStyle} />
+                  {!requiresManualTimeLocation ? (
+                    <div>
+                      <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
+                      <input type="date" value={form.dateISO || ""} onChange={function(e) {
+                        var iso = e.target.value;
+                        setForm(function(f) {
+                          return Object.assign({}, f, {
+                            dateISO:iso,
+                            date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
+                          });
+                        });
+                      }} style={inputStyle} />
+                    </div>
+                  ) : null}
 
                   {gear.length > 0 ? (
                     <div>
@@ -2780,16 +2885,18 @@ function CatchTab({ profile, T }) {
 
               <button
                 onClick={function() { setStep(4); }}
-                disabled={!form.species || !form.length || !form.spot}
+                disabled={!canContinueToReview}
                 style={Object.assign({}, primaryBtnStyle, {
-                  background:(!form.species || !form.length || !form.spot) ? th.dim : th.green,
-                  cursor:(!form.species || !form.length || !form.spot) ? "not-allowed" : "pointer"
+                  background:!canContinueToReview ? th.dim : th.green,
+                  cursor:!canContinueToReview ? "not-allowed" : "pointer"
                 })}
               >
                 Continue to Review
               </button>
-              {(!form.species || !form.length || !form.spot) ? (
-                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>Pick Species, Length, and Spot to continue.</div>
+              {!canContinueToReview ? (
+                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>
+                  {requiresManualTimeLocation ? "Pick Species, Length, Spot, Date, and Time to continue." : "Pick Species, Length, and Spot to continue."}
+                </div>
               ) : null}
             </div>
           )}
@@ -2799,7 +2906,7 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:320, objectFit:"contain", background:"#00000022" }} /> : null}
               <Card T={T}>
-                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
+                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Time",form.catchTime],["Location sharing", form.locationVisibility === "public" ? "Public" : "Private"],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
                     <div key={i} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, paddingBottom:6, borderBottom:"1px solid " + th.border }}>
                       <span style={{ fontSize:12, color:th.muted }}>{r[0]}</span>
@@ -2823,7 +2930,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to Riverside Fishing Club</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setPhotoLocation(null); setAiHint(""); setRequiresManualTimeLocation(false); setForm({ species:"", length:"", bait:"", spot:"", catchTime:"", locationVisibility:"private", rod:"", notes:"", date:new Date().toLocaleDateString(), dateISO:new Date().toISOString().slice(0, 10) }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
