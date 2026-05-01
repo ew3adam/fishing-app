@@ -2046,8 +2046,30 @@ function CatchTab({ profile, T }) {
   const [measureAxis, setMeasureAxis] = useState("x");
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
-  const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
+  const [form, setForm] = useState({
+    species:"",
+    length:"",
+    bait:"",
+    spot:"",
+    rod:"",
+    notes:"",
+    date:new Date().toLocaleDateString(),
+    dateISO:new Date().toISOString().slice(0, 10)
+  });
   const [rfcLink, setRfcLink] = useState("");
+  const speciesOptions = SPECIES.map(function(sp) { return sp.name; });
+  const popularBaits = [
+    "Nightcrawler",
+    "Minnow",
+    "Crankbait",
+    "Texas Rig",
+    "Drop Shot",
+    "Inline Spinner",
+    "PowerBait",
+    "Jig"
+  ];
+  const spotOptions = LOCAL_SPOTS.map(function(s) { return s.name; });
+  const commonLengths = ["8 inches","10 inches","12 inches","14 inches","16 inches","18 inches","20 inches"];
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function setAxisFromPhoto(dataUrl) {
@@ -2155,7 +2177,6 @@ function CatchTab({ profile, T }) {
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
   var axisLabel = measureAxis === "x" ? "left to right" : "top to bottom";
-
   function proceedToCatchDetails() {
     // On Next, always carry a photo-based estimate forward if length is empty.
     var fallbackEstimate = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredLengthLabel;
@@ -2422,14 +2443,59 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
-                return (
-                  <div key={k}>
-                    <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
-                    <input value={form[k]} onChange={function(e) { setF(k, e.target.value); }} style={inputStyle} />
-                  </div>
-                );
-              })}
+              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                <OBtn label={photo ? "Back to Photo Step" : "Back"} onClick={function() { setStep(photo ? 2 : 0); }} color={th.muted} />
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Species</div>
+                <input list="species-options" value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
+                <datalist id="species-options">
+                  {speciesOptions.map(function(v) { return <option key={v} value={v} />; })}
+                </datalist>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                  {speciesOptions.slice(0, 6).map(function(v) {
+                    return (
+                      <button key={v} onClick={function() { setF("species", v); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"4px 9px", color:th.white, cursor:"pointer", fontSize:11 }}>
+                        {v}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Length</div>
+                <select value={form.length} onChange={function(e) { setF("length", e.target.value); }} style={Object.assign({}, inputStyle, { background:th.card })}>
+                  <option value="">Select length...</option>
+                  {commonLengths.map(function(v) { return <option key={v} value={v}>{v}</option>; })}
+                  {form.length && commonLengths.indexOf(form.length) === -1 ? <option value={form.length}>{form.length}</option> : null}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Bait</div>
+                <input list="bait-options" value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} style={inputStyle} />
+                <datalist id="bait-options">
+                  {popularBaits.map(function(v) { return <option key={v} value={v} />; })}
+                </datalist>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot</div>
+                <input list="spot-options" value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} style={inputStyle} />
+                <datalist id="spot-options">
+                  {spotOptions.map(function(v) { return <option key={v} value={v} />; })}
+                </datalist>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Date</div>
+                <input type="date" value={form.dateISO || ""} onChange={function(e) {
+                  var iso = e.target.value;
+                  setForm(function(f) {
+                    return Object.assign({}, f, {
+                      dateISO:iso,
+                      date:iso ? new Date(iso + "T00:00:00").toLocaleDateString() : f.date
+                    });
+                  });
+                }} style={inputStyle} />
+              </div>
               {gear.length > 0 ? (
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
@@ -2441,7 +2507,26 @@ function CatchTab({ profile, T }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes (optional)</div>
               <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
-              <button onClick={function() { setStep(4); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
+              <button
+                onClick={function() { setStep(4); }}
+                disabled={!form.species || !form.length || !form.spot}
+                style={{
+                  width:"100%",
+                  background:(!form.species || !form.length || !form.spot) ? th.dim : th.green,
+                  color:"#000",
+                  border:"none",
+                  borderRadius:8,
+                  padding:"11px 0",
+                  cursor:(!form.species || !form.length || !form.spot) ? "not-allowed" : "pointer",
+                  fontSize:14,
+                  fontWeight:700
+                }}
+              >
+                Review
+              </button>
+              {(!form.species || !form.length || !form.spot) ? (
+                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>Fill Species, Length, and Spot to continue.</div>
+              ) : null}
             </div>
           )}
 
