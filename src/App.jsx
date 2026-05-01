@@ -2026,42 +2026,70 @@ function CatchTab({ profile, T }) {
   const th = THEMES[T];
   const [view, setView] = useState("feed");
   const fileRef = useRef();
+  const multiFileRef = useRef();
+  const refFileRef = useRef();
   const [catches, setCatches] = useState([
     { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
     { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
   ]);
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
+  const [referencePhotos, setReferencePhotos] = useState([]);
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [measurementOption, setMeasurementOption] = useState("1_ruler");
   const [rulerMaxInches, setRulerMaxInches] = useState(24);
+  const [referenceInches, setReferenceInches] = useState("3.37");
+  const [refStartPct, setRefStartPct] = useState(20);
+  const [refEndPct, setRefEndPct] = useState(34);
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function readImageFile(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var full = ev.target.result;
+        resolve({ full:full, b64:(full && full.split(",")[1]) || "", type:file.type || "image/jpeg" });
+      };
+      reader.onerror = function() { reject(new Error("read_failed")); };
+      reader.readAsDataURL(file);
+    });
+  }
 
   function handlePhoto(e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(ev) {
-      var full = ev.target.result;
-      var b64 = full.split(",")[1];
-      setPhoto(full);
-      setPhotoB64(b64);
+    var files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    var primary = files[0];
+    readImageFile(primary).then(function(img) {
+      setPhoto(img.full);
+      setPhotoB64(img.b64);
+      setMeasurementOption("1_ruler");
       setRulerMaxInches(24);
+      setReferenceInches("3.37");
+      setRefStartPct(20);
+      setRefEndPct(34);
       setMouthPct(10);
       setTailPct(90);
       setStep(2);
+      // If multiple images are uploaded together, treat extras as reference shots.
+      if (files.length > 1) {
+        Promise.all(files.slice(1).map(readImageFile)).then(function(extra) {
+          setReferencePhotos(extra.map(function(x) { return x.full; }).slice(0, 4));
+        }).catch(function() { setReferencePhotos([]); });
+      } else {
+        setReferencePhotos([]);
+      }
       setAiLoading(true);
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
           messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},
+            {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
             {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
           ]}]
         })
@@ -2075,8 +2103,19 @@ function CatchTab({ profile, T }) {
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
-    };
-    reader.readAsDataURL(file);
+    }).catch(function() {});
+    e.target.value = "";
+  }
+
+  function handleReferencePhotos(e) {
+    var files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    Promise.all(files.map(readImageFile)).then(function(extra) {
+      setReferencePhotos(function(prev) {
+        return prev.concat(extra.map(function(x) { return x.full; })).slice(0, 4);
+      });
+    }).catch(function() {});
+    e.target.value = "";
   }
 
   function submitCatch() {
@@ -2091,9 +2130,19 @@ function CatchTab({ profile, T }) {
   var gear = (profile && profile.gear) || [];
   // Clamp ruler input so the overlay always has a valid scale.
   var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || 24));
+  var usesObjectReference = measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth";
+  var fishSpanPct = Math.abs(tailPct - mouthPct);
+  var refSpanPct = Math.max(0.1, Math.abs(refEndPct - refStartPct));
+  var customReferenceLen = Math.max(0, parseFloat(referenceInches) || 0);
+  var referenceLenInches = measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : customReferenceLen;
   // Convert marker distance (percentage of image width) into inches.
-  var measuredInches = (Math.abs(tailPct - mouthPct) / 100) * rulerInches;
-  var measuredLengthLabel = measuredInches.toFixed(1) + " inches";
+  var measuredByRuler = (fishSpanPct / 100) * rulerInches;
+  var measuredByReference = (fishSpanPct / refSpanPct) * referenceLenInches;
+  var measuredInches = usesObjectReference && referenceLenInches > 0 ? measuredByReference : measuredByRuler;
+  var estimatedLengthLabel = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredByRuler.toFixed(1) + " inches (estimate)";
+  var measuredLengthLabel = measurementOption === "5_none" ? estimatedLengthLabel : measuredInches.toFixed(1) + " inches";
+  var needsMorePhotos = !!photo && referencePhotos.length === 0;
+  var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
 
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
 
@@ -2174,12 +2223,83 @@ function CatchTab({ profile, T }) {
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
                       Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
                     </div>
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Visible ruler inches in photo</div>
-                    <input type="number" min="10" max="60" value={rulerInches} onChange={function(e) { setRulerMaxInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                    <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
+                      {[
+                        ["1_ruler","1. Ruler in photo"],
+                        ["2_card","2. Credit card ref"],
+                        ["3_coin","3. Quarter ref"],
+                        ["4_custom","4. Custom ref size"],
+                        ["5_none","5. No reference (estimate)"],
+                        ["6_depth","6. Multi-photo depth assist"],
+                      ].map(function(opt) {
+                        return (
+                          <button
+                            key={opt[0]}
+                            onClick={function() { setMeasurementOption(opt[0]); }}
+                            style={{
+                              background:measurementOption === opt[0] ? th.green + "33" : "transparent",
+                              border:"1px solid " + (measurementOption === opt[0] ? th.green : th.border),
+                              color:measurementOption === opt[0] ? th.green : th.muted,
+                              borderRadius:7,
+                              padding:"7px 8px",
+                              cursor:"pointer",
+                              fontSize:11,
+                              textAlign:"left"
+                            }}
+                          >
+                            {opt[1]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {measurementOption === "1_ruler" ? (
+                      <div>
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Visible ruler inches in photo</div>
+                        <input type="number" min="10" max="60" value={rulerInches} onChange={function(e) { setRulerMaxInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                      </div>
+                    ) : null}
+                    {measurementOption === "4_custom" ? (
+                      <div>
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference object length (inches)</div>
+                        <input type="number" min="0.1" max="24" step="0.01" value={referenceInches} onChange={function(e) { setReferenceInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                      </div>
+                    ) : null}
                     <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Mouth marker position</div>
                     <input type="range" min="0" max="100" step="1" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
                     <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Tail marker position</div>
-                    <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10 }} />
+                    <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
+                    {usesObjectReference ? (
+                      <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:4 }}>
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference start marker</div>
+                        <input type="range" min="0" max="100" step="1" value={refStartPct} onChange={function(e) { setRefStartPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference end marker</div>
+                        <input type="range" min="0" max="100" step="1" value={refEndPct} onChange={function(e) { setRefEndPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10 }} />
+                      </div>
+                    ) : null}
+                    <input type="file" accept="image/*" ref={refFileRef} multiple onChange={handleReferencePhotos} style={{ display:"none" }} />
+                    {needsMorePhotos ? (
+                      <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "55", borderRadius:8, padding:10, marginBottom:10 }}>
+                        <div style={{ fontSize:12, color:th.white, lineHeight:1.45, marginBottom:7 }}>
+                          To improve accuracy, add at least one more photo with a known object (ruler, credit card, or quarter) next to the fish.
+                        </div>
+                        <button onClick={function() { refFileRef.current.click(); }} style={{ background:th.orange, color:"#120900", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                          Add reference photo
+                        </button>
+                      </div>
+                    ) : null}
+                    {needsDepthPhotos ? (
+                      <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "55", borderRadius:8, padding:10, marginBottom:10, fontSize:12, color:th.white, lineHeight:1.45 }}>
+                        Option 6 works best with 2+ extra photos from slightly different angles. Add more reference photos to proceed confidently.
+                      </div>
+                    ) : null}
+                    {referencePhotos.length > 0 ? (
+                      <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:10 }}>
+                        {referencePhotos.map(function(src, idx) {
+                          return <img key={idx} src={src} alt={"reference_" + idx} style={{ width:72, height:72, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border }} />;
+                        })}
+                      </div>
+                    ) : null}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
                       <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Measured length: {measuredLengthLabel}</div>
                       <button onClick={function() { setF("length", measuredLengthLabel); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
