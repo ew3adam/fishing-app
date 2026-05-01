@@ -2043,12 +2043,22 @@ function CatchTab({ profile, T }) {
   const [referenceInches, setReferenceInches] = useState("3.37");
   const [refStartPct, setRefStartPct] = useState(20);
   const [refEndPct, setRefEndPct] = useState(34);
+  const [measureAxis, setMeasureAxis] = useState("x");
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function setAxisFromPhoto(dataUrl) {
+    var probe = new Image();
+    probe.onload = function() {
+      // Portrait photos default to top-to-bottom measurement.
+      setMeasureAxis(probe.height > probe.width ? "y" : "x");
+    };
+    probe.onerror = function() { setMeasureAxis("x"); };
+    probe.src = dataUrl;
+  }
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -2068,6 +2078,7 @@ function CatchTab({ profile, T }) {
     readImageFile(primary).then(function(img) {
       setPhoto(img.full);
       setPhotoB64(img.b64);
+      setAxisFromPhoto(img.full);
       setMeasurementOption("1_ruler");
       setRulerMaxInches(24);
       setReferenceInches("3.37");
@@ -2143,6 +2154,19 @@ function CatchTab({ profile, T }) {
   var measuredLengthLabel = measurementOption === "5_none" ? estimatedLengthLabel : measuredInches.toFixed(1) + " inches";
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
+  var axisLabel = measureAxis === "x" ? "left to right" : "top to bottom";
+
+  function proceedToCatchDetails() {
+    // On Next, always carry a photo-based estimate forward if length is empty.
+    var fallbackEstimate = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredLengthLabel;
+    setForm(function(f) {
+      return Object.assign({}, f, {
+        species:f.species || (aiResult && aiResult.species) || "",
+        length:f.length || fallbackEstimate
+      });
+    });
+    setStep(3);
+  }
 
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
 
@@ -2202,28 +2226,88 @@ function CatchTab({ profile, T }) {
                 <div style={{ marginBottom:12 }}>
                   <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
                     <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
-                    <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                      {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                        var left = (i / rulerInches) * 100;
-                        var major = i % 5 === 0;
-                        return (
-                          <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                            {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                          </div>
-                        );
-                      })}
-                      {/* Mouth and tail markers define the measured fish span. */}
-                      <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
-                        <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                    {measureAxis === "x" ? (
+                      <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                          var left = (i / rulerInches) * 100;
+                          var major = i % 5 === 0;
+                          return (
+                            <div key={"tick_x_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                              {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
-                        <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                    ) : (
+                      <div style={{ position:"absolute", right:10, top:10, bottom:10, width:38, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                          var top = (i / rulerInches) * 100;
+                          var major = i % 5 === 0;
+                          return (
+                            <div key={"tick_y_" + i} style={{ position:"absolute", top:top + "%", right:0, height:1, width:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                              {major ? <div style={{ position:"absolute", top:-7, left:-13, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
+                    )}
+                    {/* Mouth and tail markers define the measured fish span. */}
+                    {measureAxis === "x" ? (
+                      <>
+                        <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
+                          <div style={{ position:"absolute", top:8, left:4, fontSize:10, color:th.green, fontWeight:700, background:"rgba(0,0,0,0.5)", padding:"2px 4px", borderRadius:4 }}>MOUTH</div>
+                        </div>
+                        <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
+                          <div style={{ position:"absolute", top:8, left:4, fontSize:10, color:th.orange, fontWeight:700, background:"rgba(0,0,0,0.5)", padding:"2px 4px", borderRadius:4 }}>TAIL</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green }}>
+                          <div style={{ position:"absolute", top:-16, left:8, fontSize:10, color:th.green, fontWeight:700, background:"rgba(0,0,0,0.5)", padding:"2px 4px", borderRadius:4 }}>MOUTH</div>
+                        </div>
+                        <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange }}>
+                          <div style={{ position:"absolute", top:-16, left:8, fontSize:10, color:th.orange, fontWeight:700, background:"rgba(0,0,0,0.5)", padding:"2px 4px", borderRadius:4 }}>TAIL</div>
+                        </div>
+                      </>
+                    )}
                   </div>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
-                      Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                      Move markers {axisLabel} so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                    </div>
+                    <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Photo direction</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
+                      <button
+                        onClick={function() { setMeasureAxis("x"); }}
+                        style={{
+                          background:measureAxis === "x" ? th.green + "33" : "transparent",
+                          border:"1px solid " + (measureAxis === "x" ? th.green : th.border),
+                          color:measureAxis === "x" ? th.green : th.muted,
+                          borderRadius:7,
+                          padding:"7px 8px",
+                          cursor:"pointer",
+                          fontSize:11,
+                          textAlign:"left"
+                        }}
+                      >
+                        Horizontal photo / fish
+                      </button>
+                      <button
+                        onClick={function() { setMeasureAxis("y"); }}
+                        style={{
+                          background:measureAxis === "y" ? th.green + "33" : "transparent",
+                          border:"1px solid " + (measureAxis === "y" ? th.green : th.border),
+                          color:measureAxis === "y" ? th.green : th.muted,
+                          borderRadius:7,
+                          padding:"7px 8px",
+                          cursor:"pointer",
+                          fontSize:11,
+                          textAlign:"left"
+                        }}
+                      >
+                        Vertical photo / fish
+                      </button>
                     </div>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
@@ -2308,6 +2392,9 @@ function CatchTab({ profile, T }) {
                         Use this length
                       </button>
                     </div>
+                    <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>
+                      Tip: for vertical fish photos, switch to Vertical (mouth to tail) and align markers top-to-bottom.
+                    </div>
                   </Card>
                 </div>
               ) : null}
@@ -2328,7 +2415,7 @@ function CatchTab({ profile, T }) {
               <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
               <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
-              <button onClick={function() { setStep(3); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
+              <button onClick={proceedToCatchDetails} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
             </div>
           )}
 
