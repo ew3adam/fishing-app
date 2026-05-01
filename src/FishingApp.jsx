@@ -1,5 +1,36 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+var RFC_LOGO_CANDIDATES = ["/fishing-app/rfc-logo.png", "/fishing-app/rfc-logo.jpg", "/fishing-app/rfc-logo.jpeg", "/fishing-app/rfc-logo.webp", "/fishing-app/rfc-logo.svg"];
+
+function RfcLogoMark(props) {
+  var size = (props && props.size) || 36;
+  var style = (props && props.style) || {};
+  var alt = (props && props.alt) || "Riverside Fishing Club";
+  var fallbackText = (props && props.fallbackText) || "RFC";
+  var [idx, setIdx] = useState(0);
+  var [failed, setFailed] = useState(false);
+  var src = RFC_LOGO_CANDIDATES[idx];
+
+  if (!failed) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        onError={function() {
+          if (idx < RFC_LOGO_CANDIDATES.length - 1) setIdx(idx + 1);
+          else setFailed(true);
+        }}
+        style={{ width:size, height:size, objectFit:"contain", borderRadius:8, display:"block", ...style }}
+      />
+    );
+  }
+  return (
+    <div style={{ width:size, height:size, borderRadius:8, background:"#226834", color:"#f0ece0", fontWeight:700, fontSize:Math.max(10, Math.round(size * 0.36)), display:"flex", alignItems:"center", justifyContent:"center", ...style }}>
+      {fallbackText}
+    </div>
+  );
+}
+
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
   dark:      { bg:"#0d1a0d", card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", dim:"#3a6a3a", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a", blue:"#5a9fd4", red:"#e05050", orange:"#e09030", teal:"#4ab8a0", indigo:"#5a6fd4", nav:"rgba(13,26,13,0.97)" },
@@ -576,7 +607,10 @@ function HomeTab({ profile, T }) {
   return (
     <div style={{ paddingBottom:8 }}>
       <div style={{ textAlign:"center", padding:"18px 0 12px" }}>
-        <div style={{ fontSize:36 }}>🎣</div>
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:4 }}>
+          {/* Uses uploaded RFC logo if available, otherwise safe RFC fallback. */}
+          <RfcLogoMark size={40} />
+        </div>
         <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
         <div style={{ fontSize:12, color:th.muted }}>Riverside Fishing Club · Lake Michigan Corridor</div>
       </div>

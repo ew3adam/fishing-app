@@ -676,6 +676,7 @@ function Pill({ label, color }) {
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
 function HomeTab({ profile, T }) {
   const th = THEMES[T];
+  const [logoMissing, setLogoMissing] = useState(false);
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
   const [loading, setLoading] = useState(true);
@@ -716,7 +717,18 @@ function HomeTab({ profile, T }) {
   return (
     <div style={{ paddingBottom:8 }}>
       <div style={{ textAlign:"center", padding:"18px 0 12px" }}>
-        <div style={{ fontSize:36 }}>🎣</div>
+        {logoMissing ? (
+          <div style={{ fontSize:36 }}>🎣</div>
+        ) : (
+          <img
+            src="/fishing-app/rfc-logo-192.png"
+            alt="Riverside Fishing Club logo"
+            loading="lazy"
+            decoding="async"
+            onError={function() { setLogoMissing(true); }}
+            style={{ width:56, height:56, borderRadius:12, objectFit:"cover", border:"1px solid " + th.border, background:th.card, margin:"0 auto" }}
+          />
+        )}
         <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
         <div style={{ fontSize:12, color:th.muted }}>Riverside Fishing Club · Lake Michigan Corridor</div>
       </div>
