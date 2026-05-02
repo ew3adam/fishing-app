@@ -8,7 +8,7 @@
   "theme_color": "#1a2a3a",
   "orientation": "portrait",
   "icons": [
-    { "src": "/fishing-app/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/fishing-app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/fishing-app/icon-rfc-orange-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/fishing-app/icon-rfc-orange-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }
