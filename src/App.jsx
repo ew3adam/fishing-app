@@ -1068,6 +1068,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastManualLng, setPastManualLng] = useState("");
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
+  const [droppedPin, setDroppedPin] = useState(null);
   const [memberSearch, setMemberSearch] = useState("");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
@@ -1156,6 +1157,42 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       areaTerms(s.addr),
     ].join(" ").toLowerCase();
     return q.split(/\s+/).every(function(part) { return hay.indexOf(part) >= 0; });
+  }
+
+  function allKnownWaters() {
+    return LOCAL_SPOTS.concat(SALMON_SPOTS).concat(LAKES);
+  }
+
+  function distanceMiles(aLat, aLng, bLat, bLng) {
+    var toRad = Math.PI / 180;
+    var dLat = (bLat - aLat) * toRad;
+    var dLng = (bLng - aLng) * toRad;
+    var s1 = Math.sin(dLat / 2);
+    var s2 = Math.sin(dLng / 2);
+    var aa = s1 * s1 + Math.cos(aLat * toRad) * Math.cos(bLat * toRad) * s2 * s2;
+    return 3958.8 * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+  }
+
+  function nearestKnownWater(lat, lng) {
+    var list = allKnownWaters();
+    var best = null;
+    list.forEach(function(w) {
+      if (typeof w.lat !== "number" || typeof w.lng !== "number") return;
+      var dist = distanceMiles(lat, lng, w.lat, w.lng);
+      if (!best || dist < best.dist) best = { water:w, dist:dist };
+    });
+    return best;
+  }
+
+  function openDroppedPin(lat, lng) {
+    var near = nearestKnownWater(lat, lng);
+    setDroppedPin({
+      lat:lat,
+      lng:lng,
+      nearest:near,
+      name:near && near.dist <= 0.4 ? near.water.name : "Dropped fishing pin",
+    });
+    setPrivView("pin");
   }
 
   function openSaveWithCoords(lat, lng) {
@@ -1304,6 +1341,55 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     );
   }
 
+  if (privView === "pin") {
+    var pin = droppedPin || { lat:41.826, lng:-87.845, nearest:null, name:"Dropped fishing pin" };
+    var nearestLabel = pin.nearest ? pin.nearest.water.name + " (" + pin.nearest.dist.toFixed(1) + " mi away)" : "No known water nearby";
+    var applePin = "maps://maps.apple.com/?q=" + encodeURIComponent(pin.name) + "&ll=" + pin.lat + "," + pin.lng;
+    var googlePin = "https://maps.google.com/?q=" + pin.lat + "," + pin.lng;
+    return (
+      <div>
+        <OBtn label="Back to save options" onClick={function() { setPrivView("past"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Dropped fishing pin</div>
+        <Card T={T} borderColor={th.green + "44"}>
+          <SecLabel text="Nearest match" T={T} />
+          <div style={{ fontSize:15, color:th.white, fontWeight:800, marginBottom:4 }}>{nearestLabel}</div>
+          <div style={{ fontSize:12, color:th.muted, lineHeight:1.5 }}>If this is not an identified body of water, save it as your own spot and rename it.</div>
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Pin coordinates" T={T} />
+          <div style={{ fontSize:12, color:th.white, fontFamily:"monospace", marginBottom:10 }}>{pin.lat.toFixed(6)}, {pin.lng.toFixed(6)}</div>
+          <div style={{ position:"relative", height:170, borderRadius:10, border:"1px solid " + th.border, overflow:"hidden", background:"linear-gradient(135deg,#14372f,#1f564c)" }}>
+            <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at 34% 42%, rgba(90,159,212,0.42), transparent 20%), radial-gradient(circle at 70% 64%, rgba(44,122,110,0.5), transparent 23%)" }} />
+            <div style={{ position:"absolute", left:"8%", right:"8%", top:"48%", height:12, borderRadius:999, background:"rgba(90,159,212,0.72)", transform:"rotate(-13deg)" }} />
+            <div style={{ position:"absolute", left:"50%", top:"42%", transform:"translate(-50%,-100%)", fontSize:34 }}>📍</div>
+            <div style={{ position:"absolute", left:12, right:12, bottom:12, background:"rgba(0,0,0,0.45)", borderRadius:8, padding:8, color:"#fff", fontSize:12, fontWeight:800, textAlign:"center" }}>Dropped pin saved here</div>
+          </div>
+        </Card>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+          <a href={applePin} style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center", color:th.green, fontWeight:800, fontSize:13 }}>Apple Maps</a>
+          <a href={googlePin} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center", color:th.blue, fontWeight:800, fontSize:13 }}>Google Maps</a>
+        </div>
+        <button type="button" onClick={function() {
+          setSaveDraft({
+            name:pin.name || "Dropped fishing pin",
+            lat:pin.lat,
+            lng:pin.lng,
+            notes:pin.nearest ? "Nearest known water: " + pin.nearest.water.name + " (" + pin.nearest.dist.toFixed(1) + " mi)." : "Dropped pin from interactive map.",
+            species_present:[],
+            access_info:"",
+            shareClub:false,
+            sharedWith:[],
+          });
+          setPrivSpotId(null);
+          setSaveErr("");
+          setPrivView("save");
+        }} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:16, fontWeight:800 }}>
+          Use dropped pin and save
+        </button>
+      </div>
+    );
+  }
+
   if (privView === "save" && saveDraft) {
     var inp = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
     return (
@@ -1403,6 +1489,41 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <Card T={T} borderColor={th.blue + "44"}>
           <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>
             iPhone Significant Locations and Google Location History are not available to websites. This app only reads <strong style={{ color:th.green }}>a simple trail you collect here</strong> (GPS points while you use Spots) — it stays on your phone until you save a spot.
+          </div>
+        </Card>
+        <Card T={T} borderColor={th.teal + "44"}>
+          <SecLabel text="Interactive map pin" T={T} />
+          <div style={{ fontSize:13, color:th.white, lineHeight:1.55, marginBottom:10 }}>
+            Tap the map where you are fishing. The app marks that pin and shows the nearest known water if one is close.
+          </div>
+          <button
+            type="button"
+            aria-label="Tap map to drop a fishing pin"
+            onClick={function(e) {
+              var r = e.currentTarget.getBoundingClientRect();
+              var x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+              var y = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+              // Simple local map bounds around North Riverside and nearby waters.
+              openDroppedPin(41.95 - y * 0.35, -88.02 + x * 0.58);
+            }}
+            style={{ position:"relative", width:"100%", height:220, borderRadius:12, overflow:"hidden", border:"1px solid " + th.border, background:"linear-gradient(135deg,#163c34,#1d4f45)", cursor:"crosshair", marginBottom:10, padding:0, display:"block" }}
+          >
+            <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at 30% 35%, rgba(90,159,212,0.45), transparent 18%), radial-gradient(circle at 70% 65%, rgba(44,122,110,0.55), transparent 20%)" }} />
+            <div style={{ position:"absolute", left:"8%", right:"8%", top:"47%", height:14, borderRadius:999, background:"rgba(90,159,212,0.72)", transform:"rotate(-13deg)" }} />
+            <div style={{ position:"absolute", left:"58%", top:"17%", width:86, height:58, borderRadius:"50%", background:"rgba(90,159,212,0.58)" }} />
+            {allKnownWaters().slice(0, 8).map(function(w) {
+              var left = ((w.lng + 88.02) / 0.58) * 100;
+              var top = ((41.95 - w.lat) / 0.35) * 100;
+              if (left < 0 || left > 100 || top < 0 || top > 100) return null;
+              return <div key={w.name} title={w.name} style={{ position:"absolute", left:left + "%", top:top + "%", transform:"translate(-50%,-50%)", width:10, height:10, borderRadius:"50%", background:th.orange, border:"2px solid #fff" }} />;
+            })}
+            <div style={{ position:"absolute", left:12, right:12, bottom:12, background:"rgba(0,0,0,0.52)", borderRadius:10, padding:9, color:"#fff", fontSize:12, fontWeight:700 }}>
+              Tap map to drop a fishing pin
+            </div>
+          </button>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <a href="maps://maps.apple.com/?q=North%20Riverside%20IL" style={{ textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.green, textDecoration:"none", fontWeight:700, fontSize:12 }}>Open Apple Maps</a>
+            <a href="https://maps.google.com/?q=North+Riverside+IL+fishing" target="_blank" rel="noopener noreferrer" style={{ textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.blue, textDecoration:"none", fontWeight:700, fontSize:12 }}>Open Google Maps</a>
           </div>
         </Card>
         <Card T={T}>
@@ -1974,7 +2095,14 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         ) : null}
       </div>
 
-      <input value={spotSearch} onChange={function(e) { setSpotSearch(e.target.value); }} placeholder="Search city, state, ZIP, river, lake..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"12px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"0 0 10px" }} />
+      <div style={{ display:"flex", gap:8, margin:"0 0 10px" }}>
+        <input value={spotSearch} onChange={function(e) { setSpotSearch(e.target.value); }} placeholder="Search city, state, ZIP, river, lake..." style={{ flex:1, minWidth:0, background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"12px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none" }} />
+        {spotSearch ? (
+          <button type="button" onClick={function() { setSpotSearch(""); }} style={{ minWidth:72, background:th.card, border:"1px solid " + th.green, color:th.green, borderRadius:10, padding:"0 12px", cursor:"pointer", fontSize:13, fontWeight:800 }}>
+            Clear
+          </button>
+        ) : null}
+      </div>
       <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Examples: Des Plaines, River Forest, 60525, Hammond IN</div>
 
       {view === "all" && (
