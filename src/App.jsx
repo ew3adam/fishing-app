@@ -728,6 +728,19 @@ function Pill({ label, color }) {
   return <span style={{ background:color + "22", color:color, border:"1px solid " + color + "44", borderRadius:20, padding:"2px 8px", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>;
 }
 
+function PinMapPreview({ src, lat, lng, alt, T }) {
+  const th = THEMES[T || "dark"];
+  return (
+    <div style={{ position:"relative", minHeight:190, borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"linear-gradient(135deg, " + th.card + ", " + th.green + "22)" }}>
+      <img src={src} alt={alt || ""} style={{ width:"100%", minHeight:190, objectFit:"cover", display:"block", opacity:0.86 }} />
+      <div aria-hidden style={{ position:"absolute", left:"50%", top:"50%", transform:"translate(-50%, -100%)", fontSize:34, textShadow:"0 2px 8px rgba(0,0,0,0.8)" }}>📍</div>
+      <div style={{ position:"absolute", left:10, bottom:10, background:"rgba(0,0,0,0.65)", color:"#fff", borderRadius:8, padding:"5px 8px", fontSize:11, fontFamily:"monospace" }}>
+        {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}
+      </div>
+    </div>
+  );
+}
+
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
 function HomeTab({ profile, T }) {
   const th = THEMES[T];
@@ -1367,7 +1380,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <OBtn label="Back" onClick={function() { setPrivView("my"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>{selectedSpot.name}</div>
         <div style={{ fontSize:11, color:th.gold, marginBottom:12 }}>{shareLabel}</div>
-        <img src={mapImg} alt="" style={{ width:"100%", borderRadius:10, border:"1px solid " + th.border, marginBottom:12 }} />
+        <div style={{ position:"relative", marginBottom:12 }}>
+          <img src={mapImg} alt="" style={{ width:"100%", minHeight:120, display:"block", borderRadius:10, border:"1px solid " + th.border, background:th.card }} />
+          <div aria-label="Dropped pin" style={{ position:"absolute", left:"50%", top:"50%", transform:"translate(-50%, -95%)", fontSize:32, textShadow:"0 2px 8px rgba(0,0,0,0.9)" }}>📍</div>
+        </div>
         <div style={{ display:"flex", gap:8, marginBottom:12 }}>
           <a href={"https://maps.google.com/?q=" + selectedSpot.lat + "," + selectedSpot.lng} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
           <a href={"maps://maps.apple.com/?daddr=" + selectedSpot.lat + "," + selectedSpot.lng} style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
