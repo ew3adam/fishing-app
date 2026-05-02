@@ -1018,6 +1018,7 @@ function SpeciesTab({ T }) {
 function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
+  const [spotSearch, setSpotSearch] = useState("");
   const [mapSpot, setMapSpot] = useState(null);
   const [privView, setPrivView] = useState("main");
   const [privSpotId, setPrivSpotId] = useState(null);
@@ -1059,6 +1060,35 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   function toggleFav(name) {
     var updated = favSpots.includes(name) ? favSpots.filter(function(s) { return s !== name; }) : favSpots.concat([name]);
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
+  }
+
+  function areaTerms(addr) {
+    var a = (addr || "").toLowerCase();
+    var terms = "";
+    if (a.indexOf("brookfield") >= 0 || a.indexOf("north riverside") >= 0) terms += " 60513 60546 60526 riverside lyons";
+    if (a.indexOf("river forest") >= 0) terms += " 60305 60301 oak park forest park";
+    if (a.indexOf("willow springs") >= 0) terms += " 60480 60525";
+    if (a.indexOf("hodgkins") >= 0) terms += " 60525 60402";
+    if (a.indexOf("palos") >= 0) terms += " 60465 60464 60463";
+    if (a.indexOf("hammond") >= 0) terms += " 46320 46327 indiana";
+    if (a.indexOf("chicago") >= 0) terms += " 606 60617 60633 illinois";
+    return terms;
+  }
+
+  function spotMatchesSearch(s) {
+    var q = spotSearch.trim().toLowerCase();
+    if (!q) return true;
+    var hay = [
+      s.name,
+      s.addr,
+      s.tag,
+      s.dist,
+      s.season,
+      s.tip,
+      (s.species || []).join(" "),
+      areaTerms(s.addr),
+    ].join(" ").toLowerCase();
+    return q.split(/\s+/).every(function(part) { return hay.indexOf(part) >= 0; });
   }
 
   function openSaveWithCoords(lat, lng) {
@@ -1810,6 +1840,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         >
           Salmon trail
         </button>
+        <button
+          type="button"
+          onClick={function() { setView("lakes"); }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="lakes" ? th.teal : th.border),
+            background:view==="lakes" ? th.teal + "35" : "transparent",
+            color:view==="lakes" ? th.teal : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Lakes / water
+        </button>
         {favSpots.length > 0 ? (
           <button
             type="button"
@@ -1830,7 +1876,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         ) : null}
       </div>
 
-      {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+      <input value={spotSearch} onChange={function(e) { setSpotSearch(e.target.value); }} placeholder="Search city, state, ZIP, river, lake..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"12px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"0 0 10px" }} />
+      <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Examples: Des Plaines, River Forest, 60525, Hammond IN</div>
+
+      {view === "local" && LOCAL_SPOTS.filter(spotMatchesSearch).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
@@ -1841,22 +1890,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
             <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
           </div>
-          {SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
+          {SALMON_SPOTS.filter(spotMatchesSearch).map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
         </div>
       )}
+      {view === "lakes" && <LakesTab T={T} searchOverride={spotSearch} embedded />}
       {view === "fav" && (
         <div>
-          {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+          {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name) && spotMatchesSearch(s); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
         </div>
       )}
 
-      <StickySaveBar />
     </div>
   );
 }
 
 // ─── LAKES TAB ────────────────────────────────────────────────────────────────
-function LakesTab({ T }) {
+function LakesTab({ T, searchOverride, embedded }) {
   const th = THEMES[T];
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
@@ -1864,9 +1913,33 @@ function LakesTab({ T }) {
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
+  var activeSearch = typeof searchOverride === "string" ? searchOverride : search;
+
+  function lakeAreaTerms(addr) {
+    var a = (addr || "").toLowerCase();
+    var terms = "";
+    if (a.indexOf("palos") >= 0) terms += " 60465 60464 60463 palos hills palos park";
+    if (a.indexOf("hammond") >= 0 || a.indexOf("chicago") >= 0) terms += " 60617 60633 46320 46327 illinois indiana";
+    if (a.indexOf("cook") >= 0) terms += " cook county illinois";
+    return terms;
+  }
 
   var filtered = LAKES.filter(function(l) {
-    return !search || l.name.toLowerCase().includes(search.toLowerCase());
+    var q = activeSearch.trim().toLowerCase();
+    if (!q) return true;
+    var hay = [
+      l.name,
+      l.aka,
+      l.addr,
+      l.dist,
+      l.primary,
+      l.stateNote,
+      (l.species || []).join(" "),
+      (l.bankSpots || []).map(function(s) { return s.name + " " + s.tip; }).join(" "),
+      (l.zones || []).map(function(z) { return z.loc + " " + z.tip; }).join(" "),
+      lakeAreaTerms(l.addr),
+    ].join(" ").toLowerCase();
+    return q.split(/\s+/).every(function(part) { return hay.indexOf(part) >= 0; });
   });
 
   if (sel) {
@@ -1987,8 +2060,9 @@ function LakesTab({ T }) {
 
   return (
     <div>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} />
-      <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
+      {!embedded ? <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by lake, city, state, ZIP..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} /> : null}
+      <SecLabel text={filtered.length + " Bodies of Water"} T={T} />
+      {filtered.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No water found. Try a nearby city, state, ZIP, or species.</div></Card> : null}
       {filtered.map(function(lake, i) {
         return (
           <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
@@ -2810,7 +2884,6 @@ var NAV = [
   {id:"home",emoji:"🏠",label:"Home"},
   {id:"fish",emoji:"🐟",label:"Fish"},
   {id:"spots",emoji:"📍",label:"Spots"},
-  {id:"lakes",emoji:"🌊",label:"Lakes"},
   {id:"catalogue",emoji:"📚",label:"Tackle"},
   {id:"catch",emoji:"📸",label:"Catch"},
   {id:"learn",emoji:"📖",label:"Learn"},
@@ -2842,13 +2915,12 @@ export default function App() {
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
-        {tab==="lakes"     && <LakesTab T={theme} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
       </div>
-      <div className="bottom-nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:1040, background:th.nav, border:"1px solid " + th.border, borderBottom:"none", borderRadius:"22px 22px 0 0", display:"grid", gridTemplateColumns:"repeat(4, minmax(0, 1fr))", backdropFilter:"blur(12px)", padding:"6px 8px 8px", gap:4 }}>
+      <div className="bottom-nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:1040, background:th.nav, border:"1px solid " + th.border, borderBottom:"none", borderRadius:"22px 22px 0 0", display:"grid", gridTemplateColumns:"repeat(7, minmax(0, 1fr))", backdropFilter:"blur(12px)", padding:"6px 8px 8px", gap:4 }}>
         {NAV.map(function(n) {
           var isActive = tab === n.id;
           return (
