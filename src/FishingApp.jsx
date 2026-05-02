@@ -1,3 +1,9 @@
+/**
+ * Legacy module note:
+ * - This file currently mirrors a prior single-file implementation.
+ * - Active app entry uses src/App.jsx from src/main.jsx.
+ * - Kept for rollback/reference while the primary module is hardened.
+ */
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
@@ -578,7 +584,7 @@ function HomeTab({ profile, T }) {
       <div style={{ textAlign:"center", padding:"18px 0 12px" }}>
         <div style={{ fontSize:36 }}>🎣</div>
         <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
-        <div style={{ fontSize:12, color:th.muted }}>North Riverside · Lake Michigan Corridor</div>
+        <div style={{ fontSize:12, color:th.muted }}>Riverside Fishing Club · Lake Michigan Corridor</div>
       </div>
 
       {showRefresh && (
@@ -2118,7 +2124,7 @@ function CatchTab({ profile, T }) {
               <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:10, padding:16, marginBottom:16, textAlign:"left" }}>
                 <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Share with Riverside Fishing Club?</div>
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
-                <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
+                <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to Riverside Fishing Club</a>
               </div>
               <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
