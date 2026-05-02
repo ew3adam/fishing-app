@@ -372,8 +372,11 @@ function normalizeProfile(raw) {
   out.email = typeof p.email === "string" ? p.email : "";
   out.level = p.level || "Beginner";
   out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
+  out.speciesCardOrder = Array.isArray(p.speciesCardOrder) ? p.speciesCardOrder : [];
   out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
+  out.speciesCardOrder = Array.isArray(p.speciesCardOrder) ? p.speciesCardOrder : [];
   out.spotCardOrder = p.spotCardOrder && typeof p.spotCardOrder === "object" ? p.spotCardOrder : {};
+  out.speciesCardOrder = Array.isArray(p.speciesCardOrder) ? p.speciesCardOrder : [];
   out.gear = Array.isArray(p.gear) ? p.gear : [];
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
   out.spotActivityLog = Array.isArray(p.spotActivityLog) ? p.spotActivityLog : [];
@@ -904,11 +907,37 @@ function HomeTab({ profile, T }) {
 }
 
 // ─── SPECIES TAB ──────────────────────────────────────────────────────────────
-function SpeciesTab({ T }) {
+function SpeciesTab({ T, profile, setProfile }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
   const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
+  const speciesOrder = (profile && profile.speciesCardOrder) || [];
+
+  function orderedSpecies() {
+    var rank = {};
+    speciesOrder.forEach(function(id, i) { rank[id] = i; });
+    return SPECIES.slice().sort(function(a, b) {
+      var ar = Object.prototype.hasOwnProperty.call(rank, a.id) ? rank[a.id] : 10000 + SPECIES.indexOf(a);
+      var br = Object.prototype.hasOwnProperty.call(rank, b.id) ? rank[b.id] : 10000 + SPECIES.indexOf(b);
+      return ar - br;
+    });
+  }
+
+  function moveSpecies(index, dir) {
+    if (typeof setProfile !== "function") return;
+    var list = orderedSpecies();
+    var nextIndex = index + dir;
+    if (nextIndex < 0 || nextIndex >= list.length) return;
+    var swapped = list.slice();
+    var temp = swapped[index];
+    swapped[index] = swapped[nextIndex];
+    swapped[nextIndex] = temp;
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      return Object.assign({}, base, { speciesCardOrder:swapped.map(function(sp) { return sp.id; }) });
+    });
+  }
 
   useEffect(function() {
     setSpeciesPhotoFailed(false);
@@ -999,15 +1028,23 @@ function SpeciesTab({ T }) {
     <div>
       <SecLabel text="Tap a Fish for Full Details" T={T} />
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
-        {SPECIES.map(function(sp) {
+        {orderedSpecies().map(function(sp, i, arr) {
+          var canMoveUp = i > 0;
+          var canMoveDown = i < arr.length - 1;
           return (
-            <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
-              <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
-              {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
-            </button>
+            <div key={sp.id} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", color:th.white }}>
+              <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ width:"100%", background:"transparent", border:"none", padding:0, cursor:"pointer", textAlign:"left", color:th.white }}>
+                <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
+                <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
+                <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
+              </button>
+              <div style={{ display:"flex", gap:5, marginTop:9 }}>
+                <button type="button" disabled={!canMoveUp} onClick={function() { moveSpecies(i, -1); }} style={{ flex:1, background:canMoveUp ? th.green + "22" : th.border, border:"1px solid " + (canMoveUp ? th.green : th.border), color:canMoveUp ? th.green : th.muted, borderRadius:7, padding:"7px 4px", cursor:canMoveUp ? "pointer" : "not-allowed", fontSize:10, fontWeight:700 }}>Move up</button>
+                <button type="button" disabled={!canMoveDown} onClick={function() { moveSpecies(i, 1); }} style={{ flex:1, background:canMoveDown ? th.green + "22" : th.border, border:"1px solid " + (canMoveDown ? th.green : th.border), color:canMoveDown ? th.green : th.muted, borderRadius:7, padding:"7px 4px", cursor:canMoveDown ? "pointer" : "not-allowed", fontSize:10, fontWeight:700 }}>Move down</button>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -2978,7 +3015,7 @@ export default function App() {
     <div className="app-shell" style={{ background:th.bg, minHeight:"100vh", fontFamily:"Inter, system-ui, -apple-system, sans-serif", color:th.white, paddingBottom:144 }}>
       <div className="app-frame" style={{ margin:"0 auto", padding:"0 16px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
-        {tab==="fish"      && <SpeciesTab T={theme} />}
+        {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setProfile={setProfile} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
