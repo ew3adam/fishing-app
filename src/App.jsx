@@ -1040,9 +1040,9 @@ function SpeciesTab({ T, profile, setProfile }) {
                 <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
                 {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
               </button>
-              <div style={{ display:"flex", gap:5, marginTop:9 }}>
-                <button type="button" disabled={!canMoveUp} onClick={function() { moveSpecies(i, -1); }} style={{ flex:1, background:canMoveUp ? th.green + "22" : th.border, border:"1px solid " + (canMoveUp ? th.green : th.border), color:canMoveUp ? th.green : th.muted, borderRadius:7, padding:"7px 4px", cursor:canMoveUp ? "pointer" : "not-allowed", fontSize:10, fontWeight:700 }}>Move up</button>
-                <button type="button" disabled={!canMoveDown} onClick={function() { moveSpecies(i, 1); }} style={{ flex:1, background:canMoveDown ? th.green + "22" : th.border, border:"1px solid " + (canMoveDown ? th.green : th.border), color:canMoveDown ? th.green : th.muted, borderRadius:7, padding:"7px 4px", cursor:canMoveDown ? "pointer" : "not-allowed", fontSize:10, fontWeight:700 }}>Move down</button>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:6, marginTop:10 }}>
+                <button type="button" disabled={!canMoveUp} onClick={function() { moveSpecies(i, -1); }} style={{ width:"100%", minHeight:44, background:canMoveUp ? th.green + "22" : th.border, border:"1px solid " + (canMoveUp ? th.green : th.border), color:canMoveUp ? th.green : th.muted, borderRadius:10, padding:"10px 6px", cursor:canMoveUp ? "pointer" : "not-allowed", fontSize:13, fontWeight:800 }}>↑ Move up</button>
+                <button type="button" disabled={!canMoveDown} onClick={function() { moveSpecies(i, 1); }} style={{ width:"100%", minHeight:44, background:canMoveDown ? th.green + "22" : th.border, border:"1px solid " + (canMoveDown ? th.green : th.border), color:canMoveDown ? th.green : th.muted, borderRadius:10, padding:"10px 6px", cursor:canMoveDown ? "pointer" : "not-allowed", fontSize:13, fontWeight:800 }}>↓ Move down</button>
               </div>
             </div>
           );
@@ -1055,7 +1055,7 @@ function SpeciesTab({ T, profile, setProfile }) {
 // ─── SPOTS TAB ────────────────────────────────────────────────────────────────
 function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection }) {
   const th = THEMES[T];
-  const [view, setView] = useState("local");
+  const [view, setView] = useState("all");
   const [spotSearch, setSpotSearch] = useState("");
   const [mapSpot, setMapSpot] = useState(null);
   const [privView, setPrivView] = useState("main");
@@ -1892,6 +1892,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
         <button
           type="button"
+          onClick={function() { setView("all"); }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="all" ? th.green : th.border),
+            background:view==="all" ? th.green + "35" : "transparent",
+            color:view==="all" ? th.green : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          All spots
+        </button>
+        <button
+          type="button"
           onClick={function() { setView("local"); }}
           style={{
             padding:"10px 14px",
@@ -1961,6 +1977,16 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <input value={spotSearch} onChange={function(e) { setSpotSearch(e.target.value); }} placeholder="Search city, state, ZIP, river, lake..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"12px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"0 0 10px" }} />
       <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Examples: Des Plaines, River Forest, 60525, Hammond IN</div>
 
+      {view === "all" && (
+        <div>
+          <SecLabel text="Local rivers and ponds" T={T} />
+          {orderedCards("local", LOCAL_SPOTS.filter(spotMatchesSearch)).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("local", LOCAL_SPOTS.filter(spotMatchesSearch), i, dir); }} />; })}
+          <SecLabel text="Lakes and bodies of water" T={T} />
+          <LakesTab T={T} searchOverride={spotSearch} embedded orderKind="lakes" orderMap={spotCardOrder} onMoveCard={moveSpotCard} />
+          <SecLabel text="Salmon trail" T={T} />
+          {orderedCards("salmon", SALMON_SPOTS.filter(spotMatchesSearch)).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} salmon moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("salmon", SALMON_SPOTS.filter(spotMatchesSearch), i, dir); }} />; })}
+        </div>
+      )}
       {view === "local" && orderedCards("local", LOCAL_SPOTS.filter(spotMatchesSearch)).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("local", LOCAL_SPOTS.filter(spotMatchesSearch), i, dir); }} />; })}
       {view === "salmon" && (
         <div>
