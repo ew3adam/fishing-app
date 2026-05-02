@@ -373,6 +373,7 @@ function normalizeProfile(raw) {
   out.level = p.level || "Beginner";
   out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
   out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
+  out.spotCardOrder = p.spotCardOrder && typeof p.spotCardOrder === "object" ? p.spotCardOrder : {};
   out.gear = Array.isArray(p.gear) ? p.gear : [];
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
   out.spotActivityLog = Array.isArray(p.spotActivityLog) ? p.spotActivityLog : [];
@@ -1033,6 +1034,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [memberSearch, setMemberSearch] = useState("");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
+  const spotCardOrder = (profile && profile.spotCardOrder) || {};
 
   useEffect(function() {
     if (spotsOpenSection === "my_spots") {
@@ -1060,6 +1062,34 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   function toggleFav(name) {
     var updated = favSpots.includes(name) ? favSpots.filter(function(s) { return s !== name; }) : favSpots.concat([name]);
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
+  }
+
+  function orderedCards(kind, cards) {
+    var saved = Array.isArray(spotCardOrder[kind]) ? spotCardOrder[kind] : [];
+    var rank = {};
+    saved.forEach(function(id, i) { rank[id] = i; });
+    return cards.slice().sort(function(a, b) {
+      var ar = Object.prototype.hasOwnProperty.call(rank, a.name) ? rank[a.name] : 10000 + cards.indexOf(a);
+      var br = Object.prototype.hasOwnProperty.call(rank, b.name) ? rank[b.name] : 10000 + cards.indexOf(b);
+      return ar - br;
+    });
+  }
+
+  function moveSpotCard(kind, cards, index, dir) {
+    var ordered = orderedCards(kind, cards);
+    var nextIndex = index + dir;
+    if (nextIndex < 0 || nextIndex >= ordered.length) return;
+    var swapped = ordered.slice();
+    var temp = swapped[index];
+    swapped[index] = swapped[nextIndex];
+    swapped[nextIndex] = temp;
+    var ids = swapped.map(function(s) { return s.name; });
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var order = Object.assign({}, base.spotCardOrder || {});
+      order[kind] = ids;
+      return Object.assign({}, base, { spotCardOrder:order });
+    });
   }
 
   function areaTerms(addr) {
@@ -1589,6 +1619,9 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   function SpotCard(props) {
     var s = props.s;
+    var moveKey = props.moveKey || s.name;
+    var canMoveUp = typeof props.onMove === "function" && props.index > 0;
+    var canMoveDown = typeof props.onMove === "function" && props.index < props.total - 1;
     return (
       <Card T={T} borderColor={s.color + "44"} style={{ borderLeft:"3px solid " + s.color }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -1612,7 +1645,19 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         ) : null}
         <div style={{ fontSize:13, color:th.white, marginBottom:8, lineHeight:1.55 }}>💡 {s.tip}</div>
         {s.alert ? <div style={{ fontSize:11, color:th.orange, marginBottom:8 }}>⚠️ {s.alert}</div> : null}
-        <OBtn label="Open directions" onClick={function() { setMapSpot(s); }} color={th.blue} style={{ fontSize:13, padding:"8px 14px" }} />
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          <OBtn label="Open directions" onClick={function() { setMapSpot(s); }} color={th.blue} style={{ fontSize:13, padding:"8px 14px" }} />
+          {typeof props.onMove === "function" ? (
+            <button type="button" disabled={!canMoveUp} onClick={function() { props.onMove(moveKey, -1); }} style={{ background:canMoveUp ? th.green + "22" : th.border, border:"1px solid " + (canMoveUp ? th.green : th.border), color:canMoveUp ? th.green : th.muted, borderRadius:8, padding:"8px 10px", cursor:canMoveUp ? "pointer" : "not-allowed", fontSize:12, fontWeight:700 }}>
+              Move up
+            </button>
+          ) : null}
+          {typeof props.onMove === "function" ? (
+            <button type="button" disabled={!canMoveDown} onClick={function() { props.onMove(moveKey, 1); }} style={{ background:canMoveDown ? th.green + "22" : th.border, border:"1px solid " + (canMoveDown ? th.green : th.border), color:canMoveDown ? th.green : th.muted, borderRadius:8, padding:"8px 10px", cursor:canMoveDown ? "pointer" : "not-allowed", fontSize:12, fontWeight:700 }}>
+              Move down
+            </button>
+          ) : null}
+        </div>
       </Card>
     );
   }
@@ -1879,7 +1924,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <input value={spotSearch} onChange={function(e) { setSpotSearch(e.target.value); }} placeholder="Search city, state, ZIP, river, lake..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"12px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"0 0 10px" }} />
       <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Examples: Des Plaines, River Forest, 60525, Hammond IN</div>
 
-      {view === "local" && LOCAL_SPOTS.filter(spotMatchesSearch).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+      {view === "local" && orderedCards("local", LOCAL_SPOTS.filter(spotMatchesSearch)).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("local", LOCAL_SPOTS.filter(spotMatchesSearch), i, dir); }} />; })}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
@@ -1890,13 +1935,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
             <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
           </div>
-          {SALMON_SPOTS.filter(spotMatchesSearch).map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
+          {orderedCards("salmon", SALMON_SPOTS.filter(spotMatchesSearch)).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} salmon moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("salmon", SALMON_SPOTS.filter(spotMatchesSearch), i, dir); }} />; })}
         </div>
       )}
-      {view === "lakes" && <LakesTab T={T} searchOverride={spotSearch} embedded />}
+      {view === "lakes" && <LakesTab T={T} searchOverride={spotSearch} embedded orderKind="lakes" orderMap={spotCardOrder} onMoveCard={moveSpotCard} />}
       {view === "fav" && (
         <div>
-          {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name) && spotMatchesSearch(s); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+          {orderedCards("fav", LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name) && spotMatchesSearch(s); })).map(function(s, i, arr) { return <SpotCard key={s.name} s={s} moveKey={s.name} index={i} total={arr.length} onMove={function(_, dir) { moveSpotCard("fav", LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(x) { return favSpots.includes(x.name) && spotMatchesSearch(x); }), i, dir); }} />; })}
         </div>
       )}
 
@@ -1905,7 +1950,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 }
 
 // ─── LAKES TAB ────────────────────────────────────────────────────────────────
-function LakesTab({ T, searchOverride, embedded }) {
+function LakesTab({ T, searchOverride, embedded, orderKind, orderMap, onMoveCard }) {
   const th = THEMES[T];
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
@@ -1941,6 +1986,16 @@ function LakesTab({ T, searchOverride, embedded }) {
     ].join(" ").toLowerCase();
     return q.split(/\s+/).every(function(part) { return hay.indexOf(part) >= 0; });
   });
+  if (orderKind && orderMap) {
+    var savedOrder = Array.isArray(orderMap[orderKind]) ? orderMap[orderKind] : [];
+    var rank = {};
+    savedOrder.forEach(function(id, i) { rank[id] = i; });
+    filtered = filtered.slice().sort(function(a, b) {
+      var ar = Object.prototype.hasOwnProperty.call(rank, a.name) ? rank[a.name] : 10000 + LAKES.indexOf(a);
+      var br = Object.prototype.hasOwnProperty.call(rank, b.name) ? rank[b.name] : 10000 + LAKES.indexOf(b);
+      return ar - br;
+    });
+  }
 
   if (sel) {
     var lake = sel;
@@ -2064,8 +2119,11 @@ function LakesTab({ T, searchOverride, embedded }) {
       <SecLabel text={filtered.length + " Bodies of Water"} T={T} />
       {filtered.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No water found. Try a nearby city, state, ZIP, or species.</div></Card> : null}
       {filtered.map(function(lake, i) {
+        var canMoveUp = orderKind && typeof onMoveCard === "function" && i > 0;
+        var canMoveDown = orderKind && typeof onMoveCard === "function" && i < filtered.length - 1;
         return (
-          <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
+          <div key={lake.name} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10 }}>
+            <div onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ cursor:"pointer" }}>
             <div style={{ display:"flex", justifyContent:"space-between" }}>
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
@@ -2081,6 +2139,13 @@ function LakesTab({ T, searchOverride, embedded }) {
               {lake.species.slice(0,4).map(function(s) { return <Pill key={s} label={s} color={th.green} />; })}
             </div>
             <div style={{ fontSize:11, color:th.green, marginTop:6, textAlign:"right" }}>Tap for depth map + briefing →</div>
+            </div>
+            {orderKind && typeof onMoveCard === "function" ? (
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:10 }}>
+                <button type="button" disabled={!canMoveUp} onClick={function() { onMoveCard(orderKind, filtered, i, -1); }} style={{ background:canMoveUp ? th.green + "22" : th.border, border:"1px solid " + (canMoveUp ? th.green : th.border), color:canMoveUp ? th.green : th.muted, borderRadius:8, padding:"8px 10px", cursor:canMoveUp ? "pointer" : "not-allowed", fontSize:12, fontWeight:700 }}>Move up</button>
+                <button type="button" disabled={!canMoveDown} onClick={function() { onMoveCard(orderKind, filtered, i, 1); }} style={{ background:canMoveDown ? th.green + "22" : th.border, border:"1px solid " + (canMoveDown ? th.green : th.border), color:canMoveDown ? th.green : th.muted, borderRadius:8, padding:"8px 10px", cursor:canMoveDown ? "pointer" : "not-allowed", fontSize:12, fontWeight:700 }}>Move down</button>
+              </div>
+            ) : null}
           </div>
         );
       })}
