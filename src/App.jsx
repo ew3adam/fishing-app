@@ -329,6 +329,49 @@ function saveLocationTrail(points) {
   } catch (e) {}
 }
 
+function resizePrivateSpotImage(file) {
+  return new Promise(function(resolve, reject) {
+    if (!file || !/^image\//i.test(file.type || "")) {
+      reject(new Error("Choose an image file."));
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function() {
+      var img = new Image();
+      img.onload = function() {
+        var maxSide = 1200;
+        var ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * ratio));
+        canvas.height = Math.max(1, Math.round(img.height * ratio));
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve({
+          id:"img_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+          name:sanitizeStr(file.name || "spot photo", 120),
+          src:canvas.toDataURL("image/jpeg", 0.72),
+          width:canvas.width,
+          height:canvas.height,
+          created_at:new Date().toISOString(),
+        });
+      };
+      img.onerror = function() { reject(new Error("Could not read that image.")); };
+      img.src = reader.result;
+    };
+    reader.onerror = function() { reject(new Error("Could not open that image.")); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildPrivateSpotShareText(spot) {
+  if (!spot) return "";
+  var name = sanitizeStr(spot.name || "Fishing spot", 160);
+  var lat = typeof spot.lat === "number" ? spot.lat : parseCoordNum(spot.lat);
+  var lng = typeof spot.lng === "number" ? spot.lng : parseCoordNum(spot.lng);
+  var maps = "https://maps.google.com/?q=" + lat + "," + lng;
+  return name + "\n" + lat.toFixed(6) + ", " + lng.toFixed(6) + "\n" + maps;
+}
+
 function pruneTrailPoints(points, nowMs) {
   var cutoff = nowMs - 48 * 60 * 60 * 1000;
   return points.filter(function(p) {
@@ -430,6 +473,7 @@ function savePrivateSpotFull(setProfile, draft, editId) {
     notes:sanitizeStr(draft.notes || "", 2000),
     species_present:species,
     access_info:sanitizeStr(draft.access_info || "", 2000),
+    images:Array.isArray(draft.images) ? draft.images.filter(function(img) { return img && typeof img.src === "string"; }).slice(0, 4) : [],
     is_shared:!!(draft.shareClub || (draft.sharedWith && draft.sharedWith.length)),
     shareClub:!!draft.shareClub,
     sharedWith:Array.isArray(draft.sharedWith) ? draft.sharedWith : [],
@@ -478,6 +522,49 @@ function formatLongShareDate(iso) {
   } catch (e) {
     return "";
   }
+}
+
+function spotShareText(spot) {
+  if (!spot) return "";
+  var name = sanitizeStr(spot.name || "Fishing spot", 200);
+  var lat = typeof spot.lat === "number" ? spot.lat : parseCoordNum(spot.lat);
+  var lng = typeof spot.lng === "number" ? spot.lng : parseCoordNum(spot.lng);
+  var maps = "https://maps.google.com/?q=" + lat + "," + lng;
+  return name + "\n" + lat.toFixed(6) + ", " + lng.toFixed(6) + "\n" + maps;
+}
+
+function downsizeSpotImage(file) {
+  return new Promise(function(resolve, reject) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+      reject(new Error("Choose an image file."));
+      return;
+    }
+    var reader = new FileReader();
+    reader.onerror = function() { reject(new Error("Could not read that image.")); };
+    reader.onload = function() {
+      var img = new Image();
+      img.onerror = function() { reject(new Error("Could not load that image.")); };
+      img.onload = function() {
+        var maxSide = 1000;
+        var scale = Math.min(1, maxSide / Math.max(img.width || maxSide, img.height || maxSide));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round((img.width || maxSide) * scale));
+        canvas.height = Math.max(1, Math.round((img.height || maxSide) * scale));
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve({
+          id:"img_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+          name:sanitizeStr(file.name || "Spot image", 120),
+          data:canvas.toDataURL("image/jpeg", 0.72),
+          width:canvas.width,
+          height:canvas.height,
+          dpiNote:"Downsized for phone storage; browser canvas output targets screen use, not print DPI metadata.",
+        });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // ─── LAKES DATABASE ───────────────────────────────────────────────────────────
@@ -919,6 +1006,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const spotImageRef = useRef(null);
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -959,6 +1047,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       notes:"",
       species_present:[],
       access_info:"",
+      images:[],
       shareClub:false,
       sharedWith:[],
     });
@@ -1025,6 +1114,28 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     });
   }
 
+  function handleSpotImages(e) {
+    var files = Array.from(e.target.files || []).slice(0, 4);
+    if (!files.length) return;
+    setSaveErr("");
+    Promise.all(files.map(resizePrivateSpotImage)).then(function(imgs) {
+      setSaveDraft(function(d) {
+        if (!d) return d;
+        return Object.assign({}, d, { images:(d.images || []).concat(imgs).slice(0, 4) });
+      });
+    }).catch(function(err) {
+      setSaveErr((err && err.message) || "Could not add that image.");
+    });
+    e.target.value = "";
+  }
+
+  function removeSpotImage(id) {
+    setSaveDraft(function(d) {
+      if (!d) return d;
+      return Object.assign({}, d, { images:(d.images || []).filter(function(img) { return img.id !== id; }) });
+    });
+  }
+
   function openEditSpot(id) {
     var s = mySpots.find(function(x) { return x.id === id; });
     if (!s) return;
@@ -1035,6 +1146,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       notes:s.notes || "",
       species_present:(s.species_present || []).slice(),
       access_info:s.access_info || "",
+      images:(s.images || []).slice(),
       shareClub:!!s.shareClub,
       sharedWith:(s.sharedWith || []).slice(),
     });
@@ -1074,6 +1186,24 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     }
     patchPrivateSpot(setProfile, selectedSpot.id, { sharedWith:nextList });
     appendSpotActivity(setProfile, msg);
+  }
+
+  function spotShareText(spot) {
+    var name = sanitizeStr((spot && spot.name) || "Fishing spot", 160);
+    var lat = Number(spot && spot.lat);
+    var lng = Number(spot && spot.lng);
+    var coords = isFinite(lat) && isFinite(lng) ? lat.toFixed(6) + ", " + lng.toFixed(6) : "";
+    var maps = isFinite(lat) && isFinite(lng) ? "https://maps.google.com/?q=" + lat + "," + lng : "";
+    return name + (coords ? "\nCoordinates: " + coords : "") + (maps ? "\nMap: " + maps : "");
+  }
+
+  function shareSpotNative(spot) {
+    var text = spotShareText(spot);
+    if (navigator.share) {
+      navigator.share({ title:sanitizeStr(spot.name, 160), text:text }).catch(function() {});
+      return;
+    }
+    window.location.href = "mailto:?subject=" + encodeURIComponent("Fishing spot: " + sanitizeStr(spot.name, 120)) + "&body=" + encodeURIComponent(text);
   }
 
   if (mapSpot) {
@@ -1138,6 +1268,26 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <Card T={T}>
           <SecLabel text="Access (parking, trail, shore vs boat)" T={T} />
           <textarea value={saveDraft.access_info} onChange={function(e) { setDraftField("access_info", e.target.value); }} placeholder="Where to park, path in, bank vs wading…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
+        </Card>
+        <Card T={T}>
+          <SecLabel text="Spot images" T={T} />
+          <input ref={spotImageRef} type="file" accept="image/*" multiple onChange={handleSpotImages} style={{ display:"none" }} />
+          <button type="button" onClick={function() { if (spotImageRef.current) spotImageRef.current.click(); }} style={{ width:"100%", background:th.blue + "22", border:"1px solid " + th.blue, color:th.blue, borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:13, fontWeight:800, marginBottom:10 }}>
+            Add images from phone
+          </button>
+          <div style={{ fontSize:11, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Images are resized for phone storage. Browser apps can reduce image size, but do not reliably write 72 DPI print metadata.</div>
+          {(saveDraft.images || []).length ? (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {(saveDraft.images || []).map(function(img) {
+                return (
+                  <div key={img.id} style={{ border:"1px solid " + th.border, borderRadius:8, overflow:"hidden", background:th.card }}>
+                    <img src={img.src} alt={img.name || "Spot"} style={{ width:"100%", height:96, objectFit:"cover", display:"block" }} />
+                    <button type="button" onClick={function() { removeSpotImage(img.id); }} style={{ width:"100%", background:"transparent", border:"none", borderTop:"1px solid " + th.border, color:th.red, padding:7, cursor:"pointer", fontSize:11 }}>Remove</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <div style={{ fontSize:12, color:th.muted }}>No images added yet.</div>}
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
         <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
@@ -1286,6 +1436,27 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         {selectedSpot.access_info ? (
           <Card T={T}><SecLabel text="Access" T={T} /><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{selectedSpot.access_info}</div></Card>
         ) : null}
+        {selectedSpot.images && selectedSpot.images.length ? (
+          <Card T={T}>
+            <SecLabel text="Spot images" T={T} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {selectedSpot.images.map(function(img) {
+                return <img key={img.id} src={img.src} alt={img.name || "Spot"} style={{ width:"100%", height:112, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border }} />;
+              })}
+            </div>
+          </Card>
+        ) : null}
+        <Card T={T} borderColor={th.blue + "44"}>
+          <SecLabel text="Share with anybody" T={T} />
+          <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Send this spot location by email or text. The other person does not need to be a club member.</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <a href={"mailto:?subject=" + encodeURIComponent("Fishing spot: " + sanitizeStr(selectedSpot.name, 120)) + "&body=" + encodeURIComponent(spotShareText(selectedSpot))} style={{ textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:800 }}>Email</a>
+            <a href={"sms:?&body=" + encodeURIComponent(spotShareText(selectedSpot))} style={{ textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:800 }}>Text</a>
+          </div>
+          <button type="button" onClick={function() { shareSpotNative(selectedSpot); }} style={{ width:"100%", marginTop:8, background:th.blue + "22", border:"1px solid " + th.blue, color:th.blue, borderRadius:8, padding:10, cursor:"pointer", fontSize:12, fontWeight:800 }}>
+            Phone share menu
+          </button>
+        </Card>
         <Card T={T}>
           <SecLabel text="Sharing" T={T} />
           <label style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, cursor:"pointer" }}>
