@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -284,6 +286,27 @@ function isValidLatLng(lat, lng) {
   return isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
+function spotHasCoords(spot) {
+  return spot && isValidLatLng(parseCoordNum(spot.lat), parseCoordNum(spot.lng));
+}
+
+function distanceMilesBetween(lat1, lng1, lat2, lng2) {
+  var rad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * rad;
+  var dLng = (lng2 - lng1) * rad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatSpotDistance(spot, origin) {
+  if (!origin || !spotHasCoords(spot)) return "";
+  return distanceMilesBetween(origin.lat, origin.lng, parseCoordNum(spot.lat), parseCoordNum(spot.lng)).toFixed(1) + " mi away";
+}
+
+const SPOT_CATEGORIES = ["Bank access", "Wadeable", "Kayak launch", "Boat ramp", "Secret hole"];
+
 /** Pull lat,lng from pasted Google Maps URLs or plain "lat, lng" text. Short goo.gl links are not expanded here. */
 function extractLatLngFromMapsText(raw) {
   if (!raw || typeof raw !== "string") return null;
@@ -412,24 +435,44 @@ function deletePrivateSpotById(setProfile, id) {
   });
 }
 
+function readImageAsDataUrl(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(ev) { resolve(ev.target.result); };
+    reader.onerror = function() { reject(new Error("read_failed")); };
+    reader.readAsDataURL(file);
+  });
+}
+
 function savePrivateSpotFull(setProfile, draft, editId) {
   var lat = parseCoordNum(draft.lat);
   var lng = parseCoordNum(draft.lng);
-  if (!draft.name || !sanitizeStr(draft.name, 1)) return { error:"Add a spot name." };
-  if (!isFinite(lat) || lat < -90 || lat > 90) return { error:"Latitude must be between -90 and 90." };
-  if (!isFinite(lng) || lng < -180 || lng > 180) return { error:"Longitude must be between -180 and 180." };
+  var hasCoords = isFinite(lat) && isFinite(lng);
+  var cleanName = sanitizeStr(draft.name, 50);
+  var cleanDescription = sanitizeStr(draft.description || draft.notes || "", 2000);
+  var cleanCategory = sanitizeStr(draft.category || "", 50);
+  if (!cleanName) return { error:"Add a spot name." };
+  if (cleanName.length > 50) return { error:"Spot name must be 50 characters or less." };
+  if (!cleanDescription) return { error:"Add a description." };
+  if (SPOT_CATEGORIES.indexOf(cleanCategory) < 0) return { error:"Choose a category." };
+  if ((isFinite(lat) || isFinite(lng)) && !isValidLatLng(lat, lng)) return { error:"Use valid coordinates or choose Describe location." };
   var nowIso = new Date().toISOString();
   var id = editId || ("ps_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9));
   var species = Array.isArray(draft.species_present) ? draft.species_present.filter(function(x) { return typeof x === "string"; }) : [];
+  var photos = Array.isArray(draft.photos) ? draft.photos.filter(function(x) { return typeof x === "string"; }).slice(0, 4) : [];
   var spot = {
     id:id,
     member_id:null,
-    name:sanitizeStr(draft.name, 200),
-    lat:lat,
-    lng:lng,
-    notes:sanitizeStr(draft.notes || "", 2000),
+    name:cleanName,
+    lat:hasCoords ? lat : null,
+    lng:hasCoords ? lng : null,
+    description:cleanDescription,
+    category:cleanCategory,
+    location_mode:draft.location_mode || (hasCoords ? "coordinates" : "description"),
+    notes:cleanDescription,
     species_present:species,
     access_info:sanitizeStr(draft.access_info || "", 2000),
+    photos:photos,
     is_shared:!!(draft.shareClub || (draft.sharedWith && draft.sharedWith.length)),
     shareClub:!!draft.shareClub,
     sharedWith:Array.isArray(draft.sharedWith) ? draft.sharedWith : [],
@@ -646,6 +689,42 @@ async function loadTackleImage(itemName) {
   } catch(e) { return null; }
 }
 
+function articleCheckProxyUrl(url) {
+  return "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+}
+
+function openExternalUrl(url) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function verifyLiveArticleUrl(url) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, 8000);
+  try {
+    var direct = await fetch(url, { method:"HEAD", redirect:"follow", signal:controller.signal });
+    if (direct.ok) return { ok:true };
+    if (direct.status === 404) return { ok:false, message:"This article page returned 404." };
+  } catch (e) {
+    // Some article sites block browser status checks, so use a read-only fetch proxy as a fallback.
+  } finally {
+    clearTimeout(timer);
+  }
+
+  controller = new AbortController();
+  timer = setTimeout(function() { controller.abort(); }, 10000);
+  try {
+    var proxied = await fetch(articleCheckProxyUrl(url), { signal:controller.signal });
+    if (!proxied.ok) return { ok:false, message:"Could not verify this article is live." };
+    var data = await proxied.json();
+    if (data && typeof data.contents === "string" && data.contents.trim().length > 0) return { ok:true };
+  } catch (e) {
+    return { ok:false, message:"Could not verify this article is live." };
+  } finally {
+    clearTimeout(timer);
+  }
+  return { ok:false, message:"Could not verify this article is live." };
+}
+
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function Card({ children, style, borderColor, T }) {
   const th = THEMES[T || "dark"];
@@ -673,6 +752,68 @@ function Pill({ label, color }) {
   return <span style={{ background:color + "22", color:color, border:"1px solid " + color + "44", borderRadius:20, padding:"2px 8px", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>;
 }
 
+function PinMapPreview({ src, lat, lng, alt, T }) {
+  const th = THEMES[T || "dark"];
+  return (
+    <div style={{ position:"relative", minHeight:190, borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"linear-gradient(135deg, " + th.card + ", " + th.green + "22)" }}>
+      <img src={src} alt={alt || ""} style={{ width:"100%", minHeight:190, objectFit:"cover", display:"block", opacity:0.86 }} />
+      <div aria-hidden style={{ position:"absolute", left:"50%", top:"50%", transform:"translate(-50%, -100%)", fontSize:34, textShadow:"0 2px 8px rgba(0,0,0,0.8)" }}>📍</div>
+      <div style={{ position:"absolute", left:10, bottom:10, background:"rgba(0,0,0,0.65)", color:"#fff", borderRadius:8, padding:"5px 8px", fontSize:11, fontFamily:"monospace" }}>
+        {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}
+      </div>
+    </div>
+  );
+}
+
+function LeafletSpotPicker({ lat, lng, onPick, T }) {
+  const th = THEMES[T || "dark"];
+  const mapRef = useRef(null);
+  const elRef = useRef(null);
+
+  useEffect(function() {
+    if (!elRef.current || mapRef.current) return;
+    var parsedLat = parseCoordNum(lat);
+    var parsedLng = parseCoordNum(lng);
+    var hasStartCoords = isValidLatLng(parsedLat, parsedLng);
+    var startLat = hasStartCoords ? parsedLat : 41.84;
+    var startLng = hasStartCoords ? parsedLng : -87.83;
+    var map = L.map(elRef.current).setView([startLat, startLng], 12);
+    var marker = L.marker([startLat, startLng], { draggable:true }).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom:19,
+      attribution:"&copy; OpenStreetMap contributors"
+    }).addTo(map);
+    marker.on("dragend", function() {
+      var p = marker.getLatLng();
+      onPick(p.lat, p.lng);
+    });
+    map.on("click", function(e) {
+      marker.setLatLng(e.latlng);
+      onPick(e.latlng.lat, e.latlng.lng);
+    });
+    mapRef.current = { map:map, marker:marker };
+    setTimeout(function() { map.invalidateSize(); }, 150);
+    return function() {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(function() {
+    if (!mapRef.current || !isValidLatLng(parseCoordNum(lat), parseCoordNum(lng))) return;
+    var next = [parseCoordNum(lat), parseCoordNum(lng)];
+    mapRef.current.marker.setLatLng(next);
+    mapRef.current.map.setView(next, mapRef.current.map.getZoom());
+  }, [lat, lng]);
+
+  return (
+    <div>
+      <div ref={elRef} style={{ height:260, borderRadius:10, border:"1px solid " + th.border, overflow:"hidden", marginBottom:8 }} />
+      <div style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>Tap the map or drag the marker to set the spot.</div>
+    </div>
+  );
+}
+
 // ─── HOME TAB ─────────────────────────────────────────────────────────────────
 function HomeTab({ profile, T }) {
   const th = THEMES[T];
@@ -681,6 +822,7 @@ function HomeTab({ profile, T }) {
   const [loading, setLoading] = useState(true);
   const [showRefresh, setShowRefresh] = useState(false);
   const [expandArticles, setExpandArticles] = useState(false);
+  const [articleStatus, setArticleStatus] = useState({});
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
@@ -712,6 +854,26 @@ function HomeTab({ profile, T }) {
   var displayName = (profile && profile.name) ? ", " + profile.name.split(" ")[0] : "";
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
+
+  function openVerifiedArticle(article) {
+    var current = articleStatus[article.url];
+    if (current && current.state === "checking") return;
+    setArticleStatus(function(s) {
+      var n = Object.assign({}, s);
+      n[article.url] = { state:"checking", message:"Checking article..." };
+      return n;
+    });
+    verifyLiveArticleUrl(article.url).then(function(res) {
+      setArticleStatus(function(s) {
+        var n = Object.assign({}, s);
+        n[article.url] = res.ok
+          ? { state:"live", message:"Live page verified. Opening article..." }
+          : { state:"error", message:res.message || "Could not verify this article is live." };
+        return n;
+      });
+      if (res.ok) window.open(article.url, "_blank", "noopener,noreferrer");
+    });
+  }
 
   return (
     <div style={{ paddingBottom:8 }}>
@@ -776,14 +938,23 @@ function HomeTab({ profile, T }) {
           <OBtn label={expandArticles ? "My Species" : "All Topics"} onClick={function() { setExpandArticles(function(e) { return !e; }); }} color={th.green} style={{ fontSize:10, padding:"3px 8px" }} />
         </div>
         {articles.map(function(a, i) {
+          var st = articleStatus[a.url];
+          var isChecking = st && st.state === "checking";
           return (
-            <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display:"block", textDecoration:"none", borderBottom:"1px solid " + th.border, paddingBottom:8, marginBottom:8 }}>
+            <button
+              key={i}
+              type="button"
+              disabled={isChecking}
+              onClick={function() { openVerifiedArticle(a); }}
+              style={{ display:"block", width:"100%", textAlign:"left", background:"transparent", border:"none", borderBottom:"1px solid " + th.border, padding:"0 0 8px", marginBottom:8, cursor:isChecking ? "wait" : "pointer" }}
+            >
               <div style={{ fontSize:13, color:th.white, fontWeight:600 }}>{a.title}</div>
               <div style={{ display:"flex", gap:6, marginTop:3 }}>
                 <span style={{ fontSize:10, color:th.muted }}>{a.source}</span>
                 <Pill label={a.species} color={th.green} />
               </div>
-            </a>
+              {st ? <div style={{ fontSize:11, color:st.state === "error" ? th.orange : th.green, marginTop:5 }}>{st.message}</div> : null}
+            </button>
           );
         })}
       </Card>
@@ -914,11 +1085,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [saveErr, setSaveErr] = useState("");
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoErr, setGeoErr] = useState("");
-  const [pastManualLat, setPastManualLat] = useState("");
-  const [pastManualLng, setPastManualLng] = useState("");
-  const [pastMapsPaste, setPastMapsPaste] = useState("");
-  const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [userOrigin, setUserOrigin] = useState(null);
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -945,6 +1113,15 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     );
   }, []);
 
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) { setUserOrigin({ lat:pos.coords.latitude, lng:pos.coords.longitude }); },
+      function() {},
+      { enableHighAccuracy:false, maximumAge:300000, timeout:10000 }
+    );
+  }, []);
+
   function toggleFav(name) {
     var updated = favSpots.includes(name) ? favSpots.filter(function(s) { return s !== name; }) : favSpots.concat([name]);
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
@@ -954,9 +1131,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setSaveErr("");
     setSaveDraft({
       name:"",
+      description:"",
+      category:"",
+      location_mode:"gps",
       lat:lat,
       lng:lng,
       notes:"",
+      photos:[],
       species_present:[],
       access_info:"",
       shareClub:false,
@@ -964,6 +1145,47 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     });
     setPrivSpotId(null);
     setPrivView("save");
+  }
+
+  function openNewSpot(mode) {
+    var hasCoords = mode === "map";
+    setSaveErr("");
+    setSaveDraft({
+      name:"",
+      description:"",
+      category:"",
+      location_mode:mode,
+      lat:hasCoords ? 41.84 : "",
+      lng:hasCoords ? -87.83 : "",
+      notes:"",
+      photos:[],
+      species_present:[],
+      access_info:"",
+      shareClub:false,
+      sharedWith:[],
+    });
+    setPrivSpotId(null);
+    setPrivView("save");
+  }
+
+  function showNewSpotOptions() {
+    setSaveErr("");
+    setPrivSpotId(null);
+    setSaveDraft(null);
+    setPrivView("newspot");
+  }
+
+  function handleSpotPhotos(e) {
+    var files = Array.from(e.target.files || []).slice(0, 4);
+    if (!files.length) return;
+    Promise.all(files.map(readImageAsDataUrl)).then(function(imgs) {
+      setSaveDraft(function(d) {
+        if (!d) return d;
+        var existing = Array.isArray(d.photos) ? d.photos : [];
+        return Object.assign({}, d, { photos:existing.concat(imgs).slice(0, 4) });
+      });
+    }).catch(function() {});
+    e.target.value = "";
   }
 
   function startSaveCurrentGps() {
@@ -981,7 +1203,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+        setGeoErr("Could not read GPS. Choose Drop pin on map or Describe location.");
       },
       { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
     );
@@ -1030,9 +1252,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     if (!s) return;
     setSaveDraft({
       name:s.name,
+      description:s.description || s.notes || "",
+      category:s.category || "",
+      location_mode:s.location_mode || (spotHasCoords(s) ? "gps" : "description"),
       lat:s.lat,
       lng:s.lng,
       notes:s.notes || "",
+      photos:Array.isArray(s.photos) ? s.photos.slice() : [],
       species_present:(s.species_present || []).slice(),
       access_info:s.access_info || "",
       shareClub:!!s.shareClub,
@@ -1096,27 +1322,91 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     );
   }
 
+  if (privView === "newspot") {
+    return (
+      <div>
+        <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:21, color:th.white, fontWeight:800, marginBottom:8 }}>Add New Spot</div>
+        <p style={{ fontSize:13, color:th.muted, lineHeight:1.55, margin:"0 0 14px" }}>Choose how to set the location. A map is optional.</p>
+        <div style={{ display:"grid", gap:10 }}>
+          <button type="button" disabled={geoLoading} onClick={startSaveCurrentGps} style={{ textAlign:"left", background:th.green + "22", border:"2px solid " + th.green, color:th.white, borderRadius:12, padding:14, cursor:geoLoading ? "wait" : "pointer" }}>
+            <div style={{ fontSize:16, fontWeight:800 }}>{geoLoading ? "Finding current location..." : "Use current location"}</div>
+            <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Uses browser GPS.</div>
+          </button>
+          <button type="button" onClick={function() { openNewSpot("map"); }} style={{ textAlign:"left", background:th.blue + "18", border:"2px solid " + th.blue, color:th.white, borderRadius:12, padding:14, cursor:"pointer" }}>
+            <div style={{ fontSize:16, fontWeight:800 }}>Drop pin on map</div>
+            <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>OpenStreetMap and Leaflet, no API key.</div>
+          </button>
+          <button type="button" onClick={function() { openNewSpot("description"); }} style={{ textAlign:"left", background:th.card, border:"2px solid " + th.border, color:th.white, borderRadius:12, padding:14, cursor:"pointer" }}>
+            <div style={{ fontSize:16, fontWeight:800 }}>Describe location</div>
+            <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Text only, no coordinates.</div>
+          </button>
+        </div>
+        {geoErr ? <div style={{ color:th.orange, fontSize:12, marginTop:12 }}>{geoErr}</div> : null}
+      </div>
+    );
+  }
+
   if (privView === "save" && saveDraft) {
     var inp = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
+    var hasSaveCoords = isValidLatLng(parseCoordNum(saveDraft.lat), parseCoordNum(saveDraft.lng));
     return (
       <div>
         <OBtn label="Back" onClick={function() { setSaveErr(""); if (privSpotId) setPrivView("detail"); else setPrivView("main"); setSaveDraft(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>{privSpotId ? "Edit your spot" : "Name your fishing spot"}</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Give it a name you will recognize later. Coordinates fill in automatically — you can adjust them if needed.</p>
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>{privSpotId ? "Edit your spot" : "Add New Spot"}</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Choose GPS, drop a map pin, or describe a location without coordinates.</p>
         <Card T={T}>
-          <SecLabel text="Basics" T={T} />
-          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Spot name</div>
-          <input value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            <div>
-              <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Latitude</div>
-              <input value={String(saveDraft.lat)} onChange={function(e) { setDraftField("lat", e.target.value); }} style={inp} />
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Longitude</div>
-              <input value={String(saveDraft.lng)} onChange={function(e) { setDraftField("lng", e.target.value); }} style={inp} />
-            </div>
+          <SecLabel text="Location option" T={T} />
+          <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:8 }}>
+            {[
+              ["gps","Use current location"],
+              ["map","Drop pin on map"],
+              ["description","Describe location"],
+            ].map(function(opt) {
+              var on = saveDraft.location_mode === opt[0];
+              return (
+                <button key={opt[0]} type="button" onClick={function() { setDraftField("location_mode", opt[0]); }} style={{ textAlign:"left", background:on ? th.green + "33" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:10, color:on ? th.green : th.white, cursor:"pointer", fontSize:13, fontWeight:700 }}>
+                  {opt[1]}
+                </button>
+              );
+            })}
           </div>
+        </Card>
+        {saveDraft.location_mode === "gps" || saveDraft.location_mode === "map" ? (
+          <Card T={T}>
+            <SecLabel text={saveDraft.location_mode === "map" ? "Drop pin on OpenStreetMap" : "Current coordinates"} T={T} />
+            {saveDraft.location_mode === "map" ? (
+              <LeafletSpotPicker lat={saveDraft.lat} lng={saveDraft.lng} onPick={function(la, ln) { setSaveDraft(function(d) { return Object.assign({}, d, { lat:la, lng:ln }); }); }} T={T} />
+            ) : null}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:saveDraft.location_mode === "map" ? 10 : 0 }}>
+              <div>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Latitude</div>
+                <input value={saveDraft.lat == null ? "" : String(saveDraft.lat)} onChange={function(e) { setDraftField("lat", e.target.value); }} style={inp} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Longitude</div>
+                <input value={saveDraft.lng == null ? "" : String(saveDraft.lng)} onChange={function(e) { setDraftField("lng", e.target.value); }} style={inp} />
+              </div>
+            </div>
+          </Card>
+        ) : null}
+        <Card T={T}>
+          <SecLabel text="Spot details" T={T} />
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Name (required, max 50)</div>
+          <input maxLength={50} value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Category</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+            {SPOT_CATEGORIES.map(function(c) {
+              var on = saveDraft.category === c;
+              return (
+                <button key={c} type="button" onClick={function() { setDraftField("category", c); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:20, color:on ? th.green : th.muted, padding:"6px 10px", cursor:"pointer", fontSize:11 }}>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Description (required)</div>
+          <textarea value={saveDraft.description || ""} onChange={function(e) { setDraftField("description", e.target.value); }} placeholder="Describe access, landmarks, bank features, or why this spot matters." rows={4} style={Object.assign({}, inp, { minHeight:88, resize:"vertical" })} />
         </Card>
         <Card T={T}>
           <SecLabel text="Species present" T={T} />
@@ -1132,18 +1422,19 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           </div>
         </Card>
         <Card T={T}>
-          <SecLabel text="Notes" T={T} />
-          <textarea value={saveDraft.notes} onChange={function(e) { setDraftField("notes", e.target.value); }} placeholder="What worked, structure, depth…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
-        </Card>
-        <Card T={T}>
-          <SecLabel text="Access (parking, trail, shore vs boat)" T={T} />
-          <textarea value={saveDraft.access_info} onChange={function(e) { setDraftField("access_info", e.target.value); }} placeholder="Where to park, path in, bank vs wading…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
+          <SecLabel text="Optional photos" T={T} />
+          <input type="file" accept="image/*" multiple onChange={handleSpotPhotos} style={{ width:"100%", color:th.white, marginBottom:10 }} />
+          {saveDraft.photos && saveDraft.photos.length ? (
+            <div style={{ display:"flex", gap:8, overflowX:"auto" }}>
+              {saveDraft.photos.map(function(src, i) { return <img key={i} src={src} alt={"spot_" + i} style={{ width:88, height:88, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border }} />; })}
+            </div>
+          ) : <div style={{ fontSize:12, color:th.muted }}>Photos are optional.</div>}
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
         <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
           {privSpotId ? "Save changes" : "Save to my spots"}
         </button>
-        <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>Stays private until you choose sharing from your spot details.</div>
+        <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>{hasSaveCoords ? "Coordinates saved with this spot." : "Text-only spot: no map required."} Stays private until you choose sharing.</div>
       </div>
     );
   }
@@ -1153,100 +1444,35 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     return (
       <div>
         <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Save without GPS here</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Pick a recent point from this device or type numbers — good when GPS is off or you are entering an old spot.</p>
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Add New Spot</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Pick how this custom spot gets its location. A map is optional.</p>
         <Card T={T} borderColor={th.green + "44"}>
-          <SecLabel text="Paste Google Maps link or coordinates" T={T} />
-          <input
-            value={pastMapsPaste}
-            onChange={function(e) {
-              setPastMapsPaste(e.target.value);
-              setPastMapsParseMsg("");
-            }}
-            placeholder="Paste long Maps URL or two numbers: 41.826, -87.845"
-            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"11px 12px", color:th.white, fontSize:14, boxSizing:"border-box", marginBottom:10 }}
-          />
-          <button
-            type="button"
-            onClick={function() {
-              setPastMapsParseMsg("");
-              var ex = extractLatLngFromMapsText(pastMapsPaste);
-              if (ex) {
-                setPastManualLat(String(ex.lat));
-                setPastManualLng(String(ex.lng));
-                setPastMapsParseMsg("Coordinates filled below. Tap “Use these coordinates”.");
-                return;
-              }
-              if (/goo\.gl|maps\.app\.goo\.gl/i.test(pastMapsPaste)) {
-                setPastMapsParseMsg("Short links cannot be read here. Open the link in your browser, copy the long URL from the address bar, paste again.");
-                return;
-              }
-              setPastMapsParseMsg("Could not find latitude and longitude. Use a Maps URL that contains @lat,lng or paste two numbers with a comma.");
-            }}
-            style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800, marginBottom:8 }}
-          >
-            Fill latitude &amp; longitude from paste
+          <SecLabel text="Location options" T={T} />
+          <button type="button" onClick={startSaveCurrentGps} disabled={geoLoading} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px", cursor:geoLoading ? "wait" : "pointer", fontSize:14, fontWeight:800, marginBottom:8 }}>
+            {geoLoading ? "Finding current location..." : "Use current location"}
           </button>
-          {pastMapsParseMsg ? <div style={{ fontSize:13, color:pastMapsParseMsg.indexOf("filled") >= 0 ? th.green : th.orange, lineHeight:1.45 }}>{pastMapsParseMsg}</div> : null}
-          <div style={{ fontSize:12, color:th.muted, marginTop:10, lineHeight:1.5 }}>
-            Tip: Short share links often need one open in the browser — then paste the full URL from the address bar.
-          </div>
-        </Card>
-        <Card T={T} borderColor={th.blue + "44"}>
-          <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>
-            iPhone Significant Locations and Google Location History are not available to websites. This app only reads <strong style={{ color:th.green }}>a simple trail you collect here</strong> (GPS points while you use Spots) — it stays on your phone until you save a spot.
-          </div>
+          <button type="button" onClick={function() { openNewSpot("map"); }} style={{ width:"100%", background:th.blue, color:"#fff", border:"none", borderRadius:10, padding:"12px", cursor:"pointer", fontSize:14, fontWeight:800, marginBottom:8 }}>
+            Drop pin on map
+          </button>
+          <button type="button" onClick={function() { openNewSpot("description"); }} style={{ width:"100%", background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:10, padding:"12px", cursor:"pointer", fontSize:14, fontWeight:800 }}>
+            Describe location
+          </button>
+          {geoErr ? <div style={{ fontSize:12, color:th.orange, marginTop:10 }}>{geoErr}</div> : null}
         </Card>
         <Card T={T}>
-          <SecLabel text="Recent clusters (last 48h, this device)" T={T} />
+          <SecLabel text="Recent GPS points" T={T} />
           {clusters.length === 0 ? (
-            <div style={{ fontSize:12, color:th.muted }}>No trail yet. Move with the app open to build points, or use manual entry below.</div>
+            <div style={{ fontSize:12, color:th.muted }}>No recent points yet. Use current location, drop a pin, or describe the spot.</div>
           ) : (
             clusters.map(function(c, i) {
               return (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={function() {
-                    if (window.confirm("Save a spot at " + c.lat.toFixed(5) + ", " + c.lng.toFixed(5) + "?")) openSaveWithCoords(c.lat, c.lng);
-                  }}
-                  style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:8, cursor:"pointer", color:th.white }}
-                >
-                  <div style={{ fontSize:13, fontWeight:700 }}>📍 Area · {c.count} point{c.count !== 1 ? "s" : ""}</div>
+                <button key={i} type="button" onClick={function() { openSaveWithCoords(c.lat, c.lng, "gps"); }} style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:8, cursor:"pointer", color:th.white }}>
+                  <div style={{ fontSize:13, fontWeight:700 }}>Recent point · {c.count} point{c.count !== 1 ? "s" : ""}</div>
                   <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", marginTop:2 }}>{c.lat.toFixed(5)}, {c.lng.toFixed(5)}</div>
-                  <div style={{ fontSize:10, color:th.green, marginTop:4 }}>Tap to use these coordinates →</div>
                 </button>
               );
             })
           )}
-        </Card>
-        <Card T={T}>
-          <SecLabel text="Or enter coordinates manually" T={T} />
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            <input value={pastManualLat} onChange={function(e) { setPastManualLat(e.target.value); }} placeholder="Latitude" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", color:th.white, fontSize:13, boxSizing:"border-box" }} />
-            <input value={pastManualLng} onChange={function(e) { setPastManualLng(e.target.value); }} placeholder="Longitude" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", color:th.white, fontSize:13, boxSizing:"border-box" }} />
-          </div>
-          <button
-            type="button"
-            onClick={function() {
-              var la = parseCoordNum(pastManualLat);
-              var ln = parseCoordNum(pastManualLng);
-              if (!isFinite(la) || !isFinite(ln)) {
-                alert("Enter valid latitude and longitude numbers.");
-                return;
-              }
-              openSaveWithCoords(la, ln);
-            }}
-            style={{ width:"100%", marginTop:10, background:th.blue, color:"#fff", border:"none", borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, fontWeight:700 }}
-          >
-            Use these coordinates
-          </button>
-        </Card>
-        <Card T={T}>
-          <SecLabel text="Pick from a map" T={T} />
-          <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", textDecoration:"none", color:th.blue, fontWeight:700, fontSize:13 }}>
-            Open Google Maps — long-press to copy coords, paste above
-          </a>
         </Card>
       </div>
     );
@@ -1256,22 +1482,45 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var rosterF = CLUB_ROSTER.filter(function(m) {
       return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
     });
-    var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
+    var detailHasCoords = spotHasCoords(selectedSpot);
+    var mapImg = detailHasCoords ? "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin" : "";
     var shareLabel = selectedSpot.shareClub ? "Shared with Club" : (selectedSpot.sharedWith && selectedSpot.sharedWith.length ? "Shared with " + selectedSpot.sharedWith.map(function(m) { return m.name; }).join(", ") : "Private");
     return (
       <div>
         <OBtn label="Back" onClick={function() { setPrivView("my"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>{selectedSpot.name}</div>
         <div style={{ fontSize:11, color:th.gold, marginBottom:12 }}>{shareLabel}</div>
-        <img src={mapImg} alt="" style={{ width:"100%", borderRadius:10, border:"1px solid " + th.border, marginBottom:12 }} />
-        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-          <a href={"https://maps.google.com/?q=" + selectedSpot.lat + "," + selectedSpot.lng} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
-          <a href={"maps://maps.apple.com/?daddr=" + selectedSpot.lat + "," + selectedSpot.lng} style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
-        </div>
+        {detailHasCoords ? (
+          <div>
+            <div style={{ position:"relative", marginBottom:12 }}>
+              <img src={mapImg} alt="" style={{ width:"100%", minHeight:120, display:"block", borderRadius:10, border:"1px solid " + th.border, background:th.card }} />
+              <div aria-label="Dropped pin" style={{ position:"absolute", left:"50%", top:"50%", transform:"translate(-50%, -95%)", fontSize:32, textShadow:"0 2px 8px rgba(0,0,0,0.9)" }}>📍</div>
+            </div>
+            <a href={"https://www.openstreetmap.org/?mlat=" + selectedSpot.lat + "&mlon=" + selectedSpot.lng + "#map=16/" + selectedSpot.lat + "/" + selectedSpot.lng} target="_blank" rel="noopener noreferrer" style={{ display:"block", textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700, marginBottom:12 }}>View on OpenStreetMap</a>
+            <Card T={T}>
+              <SecLabel text="Coordinates" T={T} />
+              <div style={{ fontSize:12, color:th.white, fontFamily:"monospace" }}>{Number(selectedSpot.lat).toFixed(6)}, {Number(selectedSpot.lng).toFixed(6)}</div>
+            </Card>
+          </div>
+        ) : (
+          <Card T={T} borderColor={th.gold + "44"}>
+            <SecLabel text="Text-only location" T={T} />
+            <div style={{ fontSize:13, color:th.white, lineHeight:1.6 }}>No coordinates saved for this spot.</div>
+          </Card>
+        )}
         <Card T={T}>
-          <SecLabel text="Coordinates" T={T} />
-          <div style={{ fontSize:12, color:th.white, fontFamily:"monospace" }}>{selectedSpot.lat.toFixed(6)}, {selectedSpot.lng.toFixed(6)}</div>
+          <SecLabel text="Description" T={T} />
+          <div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{selectedSpot.description || selectedSpot.notes}</div>
         </Card>
+        {selectedSpot.category ? <Card T={T}><SecLabel text="Category" T={T} /><Pill label={selectedSpot.category} color={th.green} /></Card> : null}
+        {selectedSpot.photos && selectedSpot.photos.length ? (
+          <Card T={T}>
+            <SecLabel text="Photos" T={T} />
+            <div style={{ display:"flex", gap:8, overflowX:"auto" }}>
+              {selectedSpot.photos.map(function(src, i) { return <img key={i} src={src} alt={"spot_photo_" + i} style={{ width:96, height:96, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border }} />; })}
+            </div>
+          </Card>
+        ) : null}
         {selectedSpot.species_present && selectedSpot.species_present.length ? (
           <Card T={T}>
             <SecLabel text="Species" T={T} />
@@ -1280,7 +1529,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             </div>
           </Card>
         ) : null}
-        {selectedSpot.notes ? (
+        {selectedSpot.notes && selectedSpot.notes !== selectedSpot.description ? (
           <Card T={T}><SecLabel text="Notes" T={T} /><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{selectedSpot.notes}</div></Card>
         ) : null}
         {selectedSpot.access_info ? (
@@ -1326,12 +1575,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   }
 
   if (privView === "mymap") {
+    var mappedSpots = mySpots.filter(function(s) { return isValidLatLng(parseCoordNum(s.lat), parseCoordNum(s.lng)); });
     return (
       <div>
         <OBtn label="← Back to my spots" onClick={function() { setPrivView("my"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:10 }}>Pictures of each save</div>
-        {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No private spots saved yet.</div></Card> : null}
-        {mySpots.map(function(s) {
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:10 }}>Saved spots with coordinates</div>
+        {mappedSpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No coordinate-based spots saved yet.</div></Card> : null}
+        {mappedSpots.map(function(s) {
           var img = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
             <Card key={s.id} T={T}>
@@ -1384,6 +1634,12 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 
   if (privView === "my") {
     var log = (profile && profile.spotActivityLog) || [];
+    var sortedMySpots = mySpots.slice().sort(function(a, b) {
+      if (!userOrigin) return 0;
+      var da = spotHasCoords(a) ? distanceMilesBetween(userOrigin.lat, userOrigin.lng, Number(a.lat), Number(a.lng)) : Number.POSITIVE_INFINITY;
+      var db = spotHasCoords(b) ? distanceMilesBetween(userOrigin.lat, userOrigin.lng, Number(b.lat), Number(b.lng)) : Number.POSITIVE_INFINITY;
+      return da - db;
+    });
     return (
       <div>
         <PrimarySaveStrip />
@@ -1391,11 +1647,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <GuideMyToggle modeGuide={false} />
 
         <div style={{ fontSize:20, color:th.white, fontWeight:800, marginBottom:10 }}>My fishing spots</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 14px", lineHeight:1.55 }}>Everything here is yours. Names, notes, and map pins stay on this device until you share.</p>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 14px", lineHeight:1.55 }}>Everything here is yours. Spots sort by distance when your current location is available.</p>
 
         <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
           <button type="button" onClick={function() { setPrivView("mymap"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.blue, background:th.blue + "15", color:th.blue, fontWeight:700, fontSize:14, cursor:"pointer" }}>
-            🗺️ Map of my saves
+            🗺️ Coordinate spots
           </button>
           <button type="button" onClick={function() { setPrivView("club"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.gold, background:th.gold + "12", color:th.gold, fontWeight:700, fontSize:14, cursor:"pointer" }}>
             👥 Club map
@@ -1407,11 +1663,12 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         {mySpots.length === 0 ? (
           <Card T={T}>
             <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
-            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Save my fishing spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
+            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap <strong style={{ color:th.green }}>Add New Spot</strong> to use GPS, drop a pin, or describe a text-only spot.</div>
           </Card>
         ) : null}
-        {mySpots.map(function(s) {
+        {sortedMySpots.map(function(s) {
           var st = s.shareClub ? "Shared w/ Club" : (s.sharedWith && s.sharedWith.length ? "Shared w/ " + s.sharedWith[0].name + (s.sharedWith.length > 1 ? " +" + (s.sharedWith.length - 1) : "") : "Private");
+          var dist = formatSpotDistance(s, userOrigin);
           return (
             <button
               key={s.id}
@@ -1424,8 +1681,9 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, marginBottom:8, cursor:"pointer", color:th.white }}
             >
               <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Saved {formatShortDate(s.created_at)} · {st}</div>
-              <div style={{ fontSize:11, color:th.green, marginTop:4 }}>{(s.species_present || []).slice(0, 4).join(", ")}{(s.species_present && s.species_present.length > 4 ? "…" : "")}</div>
+              <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Saved {formatShortDate(s.created_at)} · {st}{dist ? " · " + dist : ""}</div>
+              <div style={{ fontSize:11, color:th.green, marginTop:4 }}>{s.category || "Saved spot"}</div>
+              <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>{s.description || s.notes || ""}</div>
             </button>
           );
         })}
@@ -1535,8 +1793,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div style={{ marginBottom:14 }}>
         <button
           type="button"
-          disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          disabled={false}
+          onClick={showNewSpotOptions}
           style={{
             width:"100%",
             background:th.green,
@@ -1544,7 +1802,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             border:"none",
             borderRadius:14,
             padding:"18px 16px",
-            cursor:geoLoading ? "wait" : "pointer",
+            cursor:"pointer",
             fontSize:18,
             fontWeight:800,
             boxShadow:"0 6px 22px rgba(0,0,0,0.45)",
@@ -1556,7 +1814,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:28 }} aria-hidden>📍</span>
-          <span>{geoLoading ? "Finding where you are…" : "Save my fishing spot"}</span>
+          <span>Add New Spot</span>
         </button>
         <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
           Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
@@ -1580,8 +1838,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       >
         <button
           type="button"
-          disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          disabled={false}
+          onClick={showNewSpotOptions}
           style={{
             width:"100%",
             background:th.green,
@@ -1589,7 +1847,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             border:"2px solid " + th.dim,
             borderRadius:12,
             padding:"14px 12px",
-            cursor:geoLoading ? "wait" : "pointer",
+            cursor:"pointer",
             fontSize:16,
             fontWeight:800,
             display:"flex",
@@ -1601,7 +1859,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:22 }} aria-hidden>📍</span>
-          {geoLoading ? "Working…" : "Save my spot"}
+          Add New Spot
         </button>
         <div style={{ fontSize:11, color:th.muted, textAlign:"center", marginTop:6 }}>Tap here anytime while you scroll the list</div>
       </div>
@@ -1636,8 +1894,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             lineHeight:1.35,
           }}
         >
-          🗺️ Save another way<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
+          📍 Add New Spot<br />
+          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>GPS, map pin, or text</span>
         </button>
         <button
           type="button"
@@ -1663,7 +1921,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
       <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Places in this app</div>
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
-        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
+        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Add New Spot</strong> button above to keep your own place.
       </p>
 
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
@@ -2045,10 +2303,46 @@ function CatchTab({ profile, T }) {
   const [refEndPct, setRefEndPct] = useState(34);
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
-  const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
+  const blankCatchForm = { species:"", length:"", bait:"", spot:"", spotLat:"", spotLng:"", location_mode:"description", rod:"", notes:"", date:new Date().toLocaleDateString() };
+  const [form, setForm] = useState(blankCatchForm);
+  const [catchGeoLoading, setCatchGeoLoading] = useState(false);
+  const [catchGeoErr, setCatchGeoErr] = useState("");
   const [rfcLink, setRfcLink] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  function setCatchLocationMode(mode) {
+    setCatchGeoErr("");
+    setForm(function(f) {
+      return Object.assign({}, f, {
+        location_mode:mode,
+        spot:mode === "description" ? f.spot : (f.spot || (mode === "map" ? "Dropped pin" : "Current location")),
+        spotLat:mode === "map" && !f.spotLat ? 41.84 : (mode === "description" ? "" : f.spotLat),
+        spotLng:mode === "map" && !f.spotLng ? -87.83 : (mode === "description" ? "" : f.spotLng),
+      });
+    });
+  }
+  function startCatchCurrentLocation() {
+    setCatchGeoErr("");
+    setCatchGeoLoading(true);
+    if (!navigator.geolocation) {
+      setCatchGeoLoading(false);
+      setCatchGeoErr("GPS not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCatchGeoLoading(false);
+        setForm(function(f) {
+          return Object.assign({}, f, { location_mode:"gps", spot:"Current location", spotLat:pos.coords.latitude, spotLng:pos.coords.longitude });
+        });
+      },
+      function() {
+        setCatchGeoLoading(false);
+        setCatchGeoErr("Could not read GPS. Use Drop pin on map or Describe location.");
+      },
+      { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
+    );
+  }
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -2119,7 +2413,7 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, spotLat:form.spotLat, spotLng:form.spotLng, location_mode:form.location_mode, notes:form.notes, date:form.date, photo:photo };
     setCatches(function(c) { return [entry].concat(c); });
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
@@ -2333,7 +2627,7 @@ function CatchTab({ profile, T }) {
           {step === 3 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
+              {["species","length","bait","date"].map(function(k) {
                 return (
                   <div key={k}>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
@@ -2341,6 +2635,29 @@ function CatchTab({ profile, T }) {
                   </div>
                 );
               })}
+              <Card T={T}>
+                <SecLabel text="Catch location" T={T} />
+                <div style={{ display:"grid", gap:8, marginBottom:10 }}>
+                  <button type="button" onClick={startCatchCurrentLocation} disabled={catchGeoLoading} style={{ background:form.location_mode === "gps" ? th.green + "33" : th.card, border:"1px solid " + (form.location_mode === "gps" ? th.green : th.border), borderRadius:8, color:th.white, padding:10, cursor:catchGeoLoading ? "wait" : "pointer", textAlign:"left" }}>
+                    {catchGeoLoading ? "Finding current location..." : "Use current location"}
+                  </button>
+                  <button type="button" onClick={function() { setCatchLocationMode("map"); }} style={{ background:form.location_mode === "map" ? th.blue + "33" : th.card, border:"1px solid " + (form.location_mode === "map" ? th.blue : th.border), borderRadius:8, color:th.white, padding:10, cursor:"pointer", textAlign:"left" }}>
+                    Drop pin on map
+                  </button>
+                  <button type="button" onClick={function() { setCatchLocationMode("description"); }} style={{ background:form.location_mode === "description" ? th.green + "22" : th.card, border:"1px solid " + (form.location_mode === "description" ? th.green : th.border), borderRadius:8, color:th.white, padding:10, cursor:"pointer", textAlign:"left" }}>
+                    Describe location
+                  </button>
+                </div>
+                {form.location_mode === "map" ? <LeafletSpotPicker lat={form.spotLat} lng={form.spotLng} onPick={function(la, ln) { setForm(function(f) { return Object.assign({}, f, { spotLat:la, spotLng:ln, spot:"Dropped pin" }); }); }} T={T} /> : null}
+                {form.location_mode === "gps" || form.location_mode === "map" ? (
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:10 }}>
+                    <input value={form.spotLat} onChange={function(e) { setF("spotLat", e.target.value); }} placeholder="Latitude" style={inputStyle} />
+                    <input value={form.spotLng} onChange={function(e) { setF("spotLng", e.target.value); }} placeholder="Longitude" style={inputStyle} />
+                  </div>
+                ) : null}
+                <input value={form.spot} onChange={function(e) { setF("spot", e.target.value); }} placeholder={form.location_mode === "description" ? "Describe the catch location" : "Optional location note"} style={inputStyle} />
+                {catchGeoErr ? <div style={{ fontSize:12, color:th.orange }}>{catchGeoErr}</div> : null}
+              </Card>
               {gear.length > 0 ? (
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
@@ -2361,7 +2678,7 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
               <Card T={T}>
-                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
+                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Location",form.spot],["Latitude",form.spotLat],["Longitude",form.spotLng],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
                     <div key={i} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, paddingBottom:6, borderBottom:"1px solid " + th.border }}>
                       <span style={{ fontSize:12, color:th.muted }}>{r[0]}</span>
