@@ -1,6 +1,6 @@
-# Future Features
+# Future Requests and Features
 
-Possible future additions or modifications for the North Riverside Fishing Guide app.
+Possible future requests, features, additions, or modifications for the North Riverside Fishing Guide app.
 
 ## Ideas
 
