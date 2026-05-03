@@ -4,7 +4,7 @@
 
 ### Project overview
 
-North Riverside Fishing Guide — a client-side React 18 PWA built with Vite 5. No backend, no database, no Docker required.
+Riverside Fishing Club (RFC) — a client-side React 18 PWA built with Vite 5. No backend, no database, no Docker required.
 
 ### Commands
 

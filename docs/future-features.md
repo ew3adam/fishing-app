@@ -1,6 +1,6 @@
 # Future Requests and Features
 
-Possible future requests, features, additions, or modifications for the North Riverside Fishing Guide app.
+Possible future requests, features, additions, or modifications for the Riverside Fishing Club (RFC) app.
 
 ## Ideas
 
