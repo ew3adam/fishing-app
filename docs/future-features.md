@@ -5,4 +5,4 @@ Possible future requests, features, additions, or modifications for the North Ri
 ## Ideas
 
 - Add an option to share the app with others.
-- Add profile instructions that show users how to save the app to their phone Home Screen on iPhone and Android.
+- Add profile instructions that show iPhone users how to use Add to Home Screen and Android users how to save the app icon.
