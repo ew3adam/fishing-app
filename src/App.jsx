@@ -725,25 +725,6 @@ async function verifyLiveArticleUrl(url) {
   return { ok:false, message:"Could not verify this article is live." };
 }
 
-async function findMapLocation(query) {
-  var q = sanitizeStr(query, 240);
-  if (!q) return { error:"Enter a place, address, or coordinates." };
-  var coords = extractLatLngFromMapsText(q);
-  if (coords) return { lat:coords.lat, lng:coords.lng, label:q };
-  try {
-    var res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q));
-    if (!res.ok) return { error:"Could not find that location." };
-    var rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) return { error:"No matching location found." };
-    var lat = parseCoordNum(rows[0].lat);
-    var lng = parseCoordNum(rows[0].lon);
-    if (!isValidLatLng(lat, lng)) return { error:"Map returned invalid coordinates." };
-    return { lat:lat, lng:lng, label:rows[0].display_name || q };
-  } catch (e) {
-    return { error:"Map search is unavailable right now." };
-  }
-}
-
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function Card({ children, style, borderColor, T }) {
   const th = THEMES[T || "dark"];
@@ -1104,11 +1085,6 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [saveErr, setSaveErr] = useState("");
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoErr, setGeoErr] = useState("");
-  const [pastManualLat, setPastManualLat] = useState("");
-  const [pastManualLng, setPastManualLng] = useState("");
-  const [pastMapsPaste, setPastMapsPaste] = useState("");
-  const [mapSearch, setMapSearch] = useState("");
-  const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [userOrigin, setUserOrigin] = useState(null);
   const favSpots = (profile && profile.favSpots) || [];
@@ -1227,7 +1203,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+        setGeoErr("Could not read GPS. Choose Drop pin on map or Describe location.");
       },
       { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
     );
@@ -1237,15 +1213,6 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var now = Date.now();
     var pts = pruneTrailPoints(loadLocationTrail(), now);
     return clusterTrailPoints(pts, 3);
-  }
-
-  function openMapSearch() {
-    var q = sanitizeStr(mapSearch, 180) || "fishing spots near North Riverside IL";
-    var enc = encodeURIComponent(q);
-    var target = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent)
-      ? "maps://maps.apple.com/?q=" + enc
-      : "https://maps.google.com/?q=" + enc;
-    window.open(target, "_blank", "noopener,noreferrer");
   }
 
   function submitSaveForm() {
@@ -1927,8 +1894,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             lineHeight:1.35,
           }}
         >
-          🗺️ Save another way<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
+          📍 Add New Spot<br />
+          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>GPS, map pin, or text</span>
         </button>
         <button
           type="button"
