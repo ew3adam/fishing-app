@@ -771,7 +771,7 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
-                <div style={{ fontSize:12, color:th.muted, marginTop:3 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
+                <div style={{ fontSize:13, color:th.white, marginTop:4, fontWeight:600 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
