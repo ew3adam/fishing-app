@@ -722,6 +722,19 @@ function fishingScore(wx) {
 }
 
 async function loadWeather(lat, lng) {
+  function moonPhaseInfo(dateLike) {
+    var names = ["New Moon","Waxing Crescent","First Quarter","Waxing Gibbous","Full Moon","Waning Gibbous","Last Quarter","Waning Crescent"];
+    var emojis = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"];
+    var d = dateLike instanceof Date ? dateLike : new Date();
+    var knownNewMoonUtc = Date.UTC(2000, 0, 6, 18, 14, 0); // Reference new moon
+    var cycleDays = 29.53058867;
+    var daysSince = (d.getTime() - knownNewMoonUtc) / 86400000;
+    var phaseDays = ((daysSince % cycleDays) + cycleDays) % cycleDays;
+    var phase = phaseDays / cycleDays;
+    var idx = Math.floor((phase * 8) + 0.5) % 8;
+    return { label:names[idx], emoji:emojis[idx] };
+  }
+
   function formatSunTime(iso) {
     if (!iso || typeof iso !== "string" || iso.indexOf("T") === -1) return "--";
     var timePart = iso.split("T")[1] || "";
@@ -742,6 +755,8 @@ async function loadWeather(lat, lng) {
     const c = d.current;
     const sunriseIso = d && d.daily && d.daily.sunrise && d.daily.sunrise[0];
     const sunsetIso = d && d.daily && d.daily.sunset && d.daily.sunset[0];
+    var forecastDate = d && d.daily && d.daily.time && d.daily.time[0] ? new Date(String(d.daily.time[0]) + "T12:00:00") : new Date();
+    var moon = moonPhaseInfo(forecastDate);
     return {
       temp: Math.round(c.temperature_2m),
       wind: Math.round(c.windspeed_10m),
@@ -750,7 +765,9 @@ async function loadWeather(lat, lng) {
       icon: WX_ICON[c.weathercode] || "🌡️",
       condition: WX_LABEL[c.weathercode] || "Unknown",
       sunrise: formatSunTime(sunriseIso),
-      sunset: formatSunTime(sunsetIso)
+      sunset: formatSunTime(sunsetIso),
+      moonPhase: moon.label,
+      moonEmoji: moon.emoji
     };
   } catch(e) {
     // Fallback: ask Claude for estimate
@@ -771,6 +788,11 @@ async function loadWeather(lat, lng) {
       var fallback = JSON.parse(m[0]);
       fallback.sunrise = fallback.sunrise || "--";
       fallback.sunset = fallback.sunset || "--";
+      if (!fallback.moonPhase || !fallback.moonEmoji) {
+        var moonNow = moonPhaseInfo(new Date());
+        fallback.moonPhase = fallback.moonPhase || moonNow.label;
+        fallback.moonEmoji = fallback.moonEmoji || moonNow.emoji;
+      }
       return fallback;
     }
     return null;
@@ -908,6 +930,7 @@ function HomeTab({ profile, T }) {
                 <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
                   <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌅 {wx.sunrise || "--"}</span>
                   <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌇 {wx.sunset || "--"}</span>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🎣 {wx.moonEmoji || "🌙"} {wx.moonPhase || "--"}</span>
                 </div>
               </div>
               {rating && (
