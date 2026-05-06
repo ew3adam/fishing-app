@@ -314,6 +314,34 @@ function extractLatLngFromMapsText(raw) {
   return null;
 }
 
+async function guessSpotNameFromCoords(lat, lng) {
+  try {
+    var r = await fetch(
+      "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" +
+      encodeURIComponent(String(lat)) +
+      "&lon=" +
+      encodeURIComponent(String(lng))
+    );
+    if (!r.ok) return "";
+    var d = await r.json();
+    var a = d && d.address ? d.address : {};
+    var choices = [
+      a.lake, a.water, a.reservoir, a.river, a.bay, a.beach,
+      a.park, a.neighbourhood, a.suburb, a.city_district,
+      a.city, a.town, a.village, d && d.name
+    ];
+    if (d && d.display_name) choices.push(String(d.display_name).split(",")[0]);
+    var i;
+    for (i = 0; i < choices.length; i++) {
+      var s = sanitizeStr(String(choices[i] || ""), 120);
+      if (s) return s;
+    }
+    return "";
+  } catch (e) {
+    return "";
+  }
+}
+
 var LEAFLET_ASSET_PROMISE = null;
 
 function ensureLeafletReady() {
@@ -877,7 +905,10 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
-                <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
+                <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌅 {wx.sunrise || "--"}</span>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌇 {wx.sunset || "--"}</span>
+                </div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
@@ -1087,38 +1118,47 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
   }
 
-  function openSaveWithCoords(lat, lng) {
+  function openSaveWithCoords(lat, lng, opts) {
+    var o = opts || {};
     setSaveErr("");
     setSaveDraft({
-      name:"",
+      name:sanitizeStr(o.name || "", 120),
       lat:lat,
       lng:lng,
       notes:"",
       species_present:[],
       access_info:"",
-      shareClub:false,
+      shareClub:!!o.shareClub,
       sharedWith:[],
+      needsNamePrompt:!!o.needsNamePrompt,
     });
     setPrivSpotId(null);
     setPrivView("save");
   }
 
-  function startSaveCurrentGps() {
+  function openMapPickerAt(lat, lng) {
+    setMapPickerStart({ lat:lat, lng:lng });
+    setPrivView("picker");
+  }
+
+  function startQuickAddSpot() {
     setGeoErr("");
     setGeoLoading(true);
     if (!navigator.geolocation) {
       setGeoLoading(false);
-      setGeoErr("GPS not available in this browser.");
+      setGeoErr("GPS not available. Opening map picker.");
+      openMapPickerAt(41.84, -87.83);
       return;
     }
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         setGeoLoading(false);
-        openSaveWithCoords(pos.coords.latitude, pos.coords.longitude);
+        openMapPickerAt(pos.coords.latitude, pos.coords.longitude);
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+        setGeoErr("Could not read GPS. Dropping you into map picker.");
+        openMapPickerAt(41.84, -87.83);
       },
       { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
     );
@@ -1137,8 +1177,21 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       la = 41.84;
       ln = -87.83;
     }
-    setMapPickerStart({ lat:la, lng:ln });
-    setPrivView("picker");
+    openMapPickerAt(la, ln);
+  }
+
+  async function handleMapPinUse(lat, lng) {
+    setPastManualLat(lat.toFixed(6));
+    setPastManualLng(lng.toFixed(6));
+    var suggested = await guessSpotNameFromCoords(lat, lng);
+    openSaveWithCoords(lat, lng, {
+      name:suggested,
+      shareClub:false,
+      needsNamePrompt:!sanitizeStr(suggested, 1),
+    });
+    if (!sanitizeStr(suggested, 1)) {
+      setSaveErr("No lake name found automatically. Enter a location name below.");
+    }
   }
 
   function submitSaveForm() {
@@ -1158,6 +1211,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       if (!d) return d;
       var n = Object.assign({}, d);
       n[k] = v;
+      if (k === "name" && sanitizeStr(v, 1)) n.needsNamePrompt = false;
       return n;
     });
   }
@@ -1250,9 +1304,36 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div>
         <OBtn label="Back" onClick={function() { setSaveErr(""); if (privSpotId) setPrivView("detail"); else setPrivView("main"); setSaveDraft(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>{privSpotId ? "Edit your spot" : "Name your fishing spot"}</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Give it a name you will recognize later. Coordinates fill in automatically — you can adjust them if needed.</p>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Map pin is saved. Confirm name and choose if this spot is private or public.</p>
         <Card T={T}>
           <SecLabel text="Basics" T={T} />
+          {saveDraft.needsNamePrompt && !sanitizeStr(saveDraft.name, 1) ? (
+            <div style={{ background:th.orange + "14", border:"1px solid " + th.orange + "44", borderRadius:8, padding:10, marginBottom:10 }}>
+              <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:6 }}>No lake name found automatically.</div>
+              <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>Do you want to enter a location name now?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button
+                  type="button"
+                  onClick={function() {
+                    setSaveDraft(function(d) { return Object.assign({}, d, { needsNamePrompt:false }); });
+                  }}
+                  style={{ flex:1, background:th.card, border:"1px solid " + th.orange, borderRadius:8, padding:"8px 10px", color:th.orange, fontWeight:700, cursor:"pointer", fontSize:12 }}
+                >
+                  Yes, I will enter it
+                </button>
+                <button
+                  type="button"
+                  onClick={function() {
+                    var fallbackName = "Dropped pin " + Number(saveDraft.lat).toFixed(4) + ", " + Number(saveDraft.lng).toFixed(4);
+                    setSaveDraft(function(d) { return Object.assign({}, d, { name:fallbackName, needsNamePrompt:false }); });
+                  }}
+                  style={{ flex:1, background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontWeight:700, cursor:"pointer", fontSize:12 }}
+                >
+                  Use pin coordinates
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Spot name</div>
           <input value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
@@ -1264,6 +1345,26 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Longitude</div>
               <input value={String(saveDraft.lng)} onChange={function(e) { setDraftField("lng", e.target.value); }} style={inp} />
             </div>
+          </div>
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Visibility</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <button
+              type="button"
+              onClick={function() { setDraftField("shareClub", false); }}
+              style={{ background:!saveDraft.shareClub ? th.green + "33" : "transparent", border:"1px solid " + (!saveDraft.shareClub ? th.green : th.border), borderRadius:8, padding:"10px 8px", cursor:"pointer", color:!saveDraft.shareClub ? th.green : th.muted, fontWeight:700, fontSize:12 }}
+            >
+              Private
+            </button>
+            <button
+              type="button"
+              onClick={function() { setDraftField("shareClub", true); }}
+              style={{ background:saveDraft.shareClub ? th.blue + "33" : "transparent", border:"1px solid " + (saveDraft.shareClub ? th.blue : th.border), borderRadius:8, padding:"10px 8px", cursor:"pointer", color:saveDraft.shareClub ? th.blue : th.muted, fontWeight:700, fontSize:12 }}
+            >
+              Public
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:th.muted, marginTop:8 }}>
+            Public means shared to club map. Private stays only on your device.
           </div>
         </Card>
         <Card T={T}>
@@ -1410,7 +1511,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   if (privView === "picker") {
     return (
       <div>
-        <OBtn label="Back to save another way" onClick={function() { setPrivView("past"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Drop a pin on the map</div>
         <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Tap anywhere on the map or drag the pin, then use that spot.</p>
         <Card T={T} borderColor={th.blue + "44"}>
@@ -1418,11 +1519,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             T={T}
             initialLat={mapPickerStart.lat}
             initialLng={mapPickerStart.lng}
-            onUse={function(lat, lng) {
-              setPastManualLat(lat.toFixed(6));
-              setPastManualLng(lng.toFixed(6));
-              openSaveWithCoords(lat, lng);
-            }}
+            onUse={handleMapPinUse}
           />
         </Card>
       </div>
@@ -1584,7 +1681,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         {mySpots.length === 0 ? (
           <Card T={T}>
             <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
-            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Add new spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
+            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Add new spot</strong> button to open the map, drop a pin, then save your location.</div>
           </Card>
         ) : null}
         {mySpots.map(function(s) {
@@ -1713,7 +1810,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <button
           type="button"
           disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          onClick={startQuickAddSpot}
           style={{
             width:"100%",
             background:th.green,
@@ -1733,7 +1830,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:28 }} aria-hidden>📍</span>
-          <span>{geoLoading ? "Finding where you are…" : "Add new spot"}</span>
+          <span>{geoLoading ? "Finding map center…" : "Add new spot"}</span>
         </button>
         <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
           Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
@@ -1758,7 +1855,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <button
           type="button"
           disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          onClick={startQuickAddSpot}
           style={{
             width:"100%",
             background:th.green,
@@ -1796,31 +1893,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </div>
       ) : null}
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-        <button
-          type="button"
-          onClick={function() { setPrivView("past"); }}
-          style={{
-            minHeight:64,
-            padding:12,
-            borderRadius:12,
-            border:"2px solid " + th.blue,
-            background:th.blue + "18",
-            color:th.blue,
-            fontWeight:700,
-            fontSize:14,
-            cursor:"pointer",
-            lineHeight:1.35,
-          }}
-        >
-          🗺️ Save another way<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
-        </button>
+      <div style={{ marginBottom:16 }}>
         <button
           type="button"
           onClick={function() { setPrivView("club"); }}
           style={{
-            minHeight:64,
+            width:"100%",
+            minHeight:56,
             padding:12,
             borderRadius:12,
             border:"2px solid " + th.gold,
@@ -1832,8 +1911,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             lineHeight:1.35,
           }}
         >
-          👥 Club shared map<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>optional</span>
+          👥 Club shared map
         </button>
       </div>
 
@@ -2362,9 +2440,9 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
-              <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
+              <input type="file" accept="image/*" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
+                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>🖼️ Choose Photo</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
               </div>
             </div>
