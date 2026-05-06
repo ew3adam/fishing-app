@@ -694,12 +694,36 @@ function fishingScore(wx) {
 }
 
 async function loadWeather(lat, lng) {
+  function formatSunTime(iso) {
+    if (!iso || typeof iso !== "string" || iso.indexOf("T") === -1) return "--";
+    var timePart = iso.split("T")[1] || "";
+    var parts = timePart.split(":");
+    if (parts.length < 2) return "--";
+    var h = Number(parts[0]);
+    var m = parts[1];
+    if (Number.isNaN(h)) return "--";
+    var suffix = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12 || 12;
+    return h12 + ":" + m + " " + suffix;
+  }
+
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    const sunriseIso = d && d.daily && d.daily.sunrise && d.daily.sunrise[0];
+    const sunsetIso = d && d.daily && d.daily.sunset && d.daily.sunset[0];
+    return {
+      temp: Math.round(c.temperature_2m),
+      wind: Math.round(c.windspeed_10m),
+      code: c.weathercode,
+      precip: c.precipitation_probability || 0,
+      icon: WX_ICON[c.weathercode] || "🌡️",
+      condition: WX_LABEL[c.weathercode] || "Unknown",
+      sunrise: formatSunTime(sunriseIso),
+      sunset: formatSunTime(sunsetIso)
+    };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -715,7 +739,12 @@ async function loadWeather(lat, lng) {
     const data = await res.json();
     const txt = (data.content && data.content[0] && data.content[0].text) || "";
     const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      var fallback = JSON.parse(m[0]);
+      fallback.sunrise = fallback.sunrise || "--";
+      fallback.sunset = fallback.sunset || "--";
+      return fallback;
+    }
     return null;
   }
 }
@@ -848,6 +877,7 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
@@ -1259,7 +1289,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
         <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
-          {privSpotId ? "Save changes" : "Save to my spots"}
+          {privSpotId ? "Save changes" : "Add new spot"}
         </button>
         <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>Stays private until you choose sharing from your spot details.</div>
       </div>
@@ -1554,7 +1584,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         {mySpots.length === 0 ? (
           <Card T={T}>
             <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
-            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Save my fishing spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
+            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Add new spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
           </Card>
         ) : null}
         {mySpots.map(function(s) {
@@ -1703,7 +1733,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:28 }} aria-hidden>📍</span>
-          <span>{geoLoading ? "Finding where you are…" : "Save my fishing spot"}</span>
+          <span>{geoLoading ? "Finding where you are…" : "Add new spot"}</span>
         </button>
         <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
           Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
@@ -1748,7 +1778,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:22 }} aria-hidden>📍</span>
-          {geoLoading ? "Working…" : "Save my spot"}
+          {geoLoading ? "Working…" : "Add new spot"}
         </button>
         <div style={{ fontSize:11, color:th.muted, textAlign:"center", marginTop:6 }}>Tap here anytime while you scroll the list</div>
       </div>
@@ -1810,7 +1840,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
       <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Places in this app</div>
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
-        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
+        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Add new spot</strong> button above to keep your own place.
       </p>
 
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
