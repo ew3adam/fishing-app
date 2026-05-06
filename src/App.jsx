@@ -982,11 +982,46 @@ function HomeTab({ profile, T }) {
 }
 
 // ─── SPECIES TAB ──────────────────────────────────────────────────────────────
-function SpeciesTab({ T }) {
+function SpeciesTab({ profile, setProfile, T }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
+  const [layout, setLayout] = useState("list");
+  const [sortBy, setSortBy] = useState("favorites");
   const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
+  const [listPhotoFailed, setListPhotoFailed] = useState({});
+  const favSp = (profile && profile.favSpecies) || [];
+
+  function toggleFavSpecies(name) {
+    if (typeof setProfile !== "function") return;
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var arr = (base.favSpecies || []).slice();
+      var next = arr.includes(name) ? arr.filter(function(x) { return x !== name; }) : arr.concat([name]);
+      return Object.assign({}, base, { favSpecies:next });
+    });
+  }
+
+  function sortedSpecies() {
+    return SPECIES.slice().sort(function(a, b) {
+      var af = favSp.includes(a.name) ? 1 : 0;
+      var bf = favSp.includes(b.name) ? 1 : 0;
+      if (sortBy === "favorites" && af !== bf) return bf - af;
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "season") return String(a.season || "").localeCompare(String(b.season || ""));
+      if (sortBy === "level") return String(a.level || "").localeCompare(String(b.level || ""));
+      if (af !== bf) return bf - af;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function onListPhotoError(id) {
+    setListPhotoFailed(function(prev) {
+      var next = Object.assign({}, prev);
+      next[id] = true;
+      return next;
+    });
+  }
 
   useEffect(function() {
     setSpeciesPhotoFailed(false);
@@ -995,9 +1030,19 @@ function SpeciesTab({ T }) {
   if (sel) {
     var sp = sel;
     var speciesPhotoUrl = SPECIES_PHOTO_BY_ID[sp.id];
+    var isFavDetail = favSp.includes(sp.name);
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, margin:"12px 0 10px" }}>
+          <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} />
+          <button
+            type="button"
+            onClick={function() { toggleFavSpecies(sp.name); }}
+            style={{ background:isFavDetail ? th.green + "33" : "transparent", border:"1px solid " + (isFavDetail ? th.green : th.border), borderRadius:8, padding:"8px 10px", cursor:"pointer", color:isFavDetail ? th.green : th.muted, fontSize:12, fontWeight:700 }}
+          >
+            {isFavDetail ? "★ Following" : "☆ Favorite"}
+          </button>
+        </div>
         {speciesPhotoUrl && !speciesPhotoFailed ? (
           <div style={{ marginBottom:14 }}>
             <img
@@ -1073,22 +1118,90 @@ function SpeciesTab({ T }) {
     );
   }
 
+  var rows = sortedSpecies();
+
   return (
     <div>
-      <SecLabel text="Tap a Fish for Full Details" T={T} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
-        {SPECIES.map(function(sp) {
-          return (
-            <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
-              <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
-              {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
-            </button>
-          );
-        })}
+      <SecLabel text="Species Browser" T={T} />
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+        <button type="button" onClick={function() { setLayout("list"); }} style={{ background:layout==="list" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="list" ? th.green : th.border), borderRadius:8, color:layout==="list" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          List view
+        </button>
+        <button type="button" onClick={function() { setLayout("tile"); }} style={{ background:layout==="tile" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="tile" ? th.green : th.border), borderRadius:8, color:layout==="tile" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          Tile view
+        </button>
       </div>
+
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Order by</div>
+        <select value={sortBy} onChange={function(e) { setSortBy(e.target.value); }} style={{ width:"100%", background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", fontSize:13 }}>
+          <option value="favorites">Favorites first</option>
+          <option value="name">Name (A-Z)</option>
+          <option value="season">Season</option>
+          <option value="level">Difficulty</option>
+        </select>
+      </div>
+
+      {layout === "list" ? (
+        <div>
+          {rows.map(function(sp) {
+            var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var isFav = favSp.includes(sp.name);
+            return (
+              <div key={sp.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:10, marginBottom:8, display:"flex", alignItems:"center", gap:10 }}>
+                <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ display:"flex", alignItems:"center", gap:10, flex:1, background:"transparent", border:"none", textAlign:"left", cursor:"pointer", color:th.white, padding:0 }}>
+                  <div style={{ width:66, height:44, borderRadius:8, overflow:"hidden", border:"1px solid " + th.border, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {img && !listPhotoFailed[sp.id] ? (
+                      <img src={img} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:20 }}>{sp.emoji}</span>
+                    )}
+                  </div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:17, fontWeight:700, color:th.white, lineHeight:1.2 }}>{sp.name}</div>
+                    <div style={{ fontSize:11, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                    <div style={{ fontSize:11, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                  </div>
+                </button>
+                <button type="button" onClick={function() { toggleFavSpecies(sp.name); }} style={{ minWidth:92, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:10, padding:"10px 8px", cursor:"pointer", color:isFav ? th.muted : "#fff", fontSize:12, fontWeight:700 }}>
+                  {isFav ? "Following" : "Favorite"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
+          {rows.map(function(sp) {
+            var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var isFav = favSp.includes(sp.name);
+            return (
+              <div key={sp.id} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderRadius:10, overflow:"hidden" }}>
+                <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ width:"100%", background:"transparent", border:"none", cursor:"pointer", textAlign:"left", color:th.white, padding:0 }}>
+                  <div style={{ width:"100%", height:100, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {img && !listPhotoFailed[sp.id] ? (
+                      <img src={img} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:30 }}>{sp.emoji}</span>
+                    )}
+                  </div>
+                  <div style={{ padding:"10px 10px 8px" }}>
+                    <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
+                    <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                    <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                  </div>
+                </button>
+                <div style={{ padding:"0 10px 10px" }}>
+                  <button type="button" onClick={function() { toggleFavSpecies(sp.name); }} style={{ width:"100%", background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:8, padding:"7px 0", cursor:"pointer", color:isFav ? th.muted : "#fff", fontSize:11, fontWeight:700 }}>
+                    {isFav ? "Following" : "Favorite"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2922,7 +3035,7 @@ export default function App() {
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
       <div style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
-        {tab==="fish"      && <SpeciesTab T={theme} />}
+        {tab==="fish"      && <SpeciesTab profile={profile} setProfile={setProfile} T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
