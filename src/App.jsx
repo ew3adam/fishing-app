@@ -297,7 +297,9 @@ function extractLatLngFromMapsText(raw) {
     /@(-?\d+\.?\d*),\s*(-?\d+\.?\d*)(?:[,/]|\s|$)/,
     /[?&]q=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
     /[?&]ll=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
+    /[?&]mlat=(-?\d+\.?\d*).*?[?&]mlon=(-?\d+\.?\d*)/i,
     /[?&]center=(-?\d+\.?\d*)[%2c,]\s*(-?\d+\.?\d*)/i,
+    /#map=\d+\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/i,
     /3d(-?\d+\.?\d*)[!]4d(-?\d+\.?\d*)/,
   ];
   var i;
@@ -310,6 +312,110 @@ function extractLatLngFromMapsText(raw) {
     }
   }
   return null;
+}
+
+var LEAFLET_ASSET_PROMISE = null;
+
+function ensureLeafletReady() {
+  if (typeof window === "undefined" || !window.document) return Promise.reject(new Error("Leaflet requires browser window."));
+  if (window.L && window.L.map) return Promise.resolve(window.L);
+  if (!LEAFLET_ASSET_PROMISE) {
+    LEAFLET_ASSET_PROMISE = new Promise(function(resolve, reject) {
+      var doc = window.document;
+      if (!doc.getElementById("leaflet-css")) {
+        var link = doc.createElement("link");
+        link.id = "leaflet-css";
+        link.rel = "stylesheet";
+        link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        doc.head.appendChild(link);
+      }
+      function finish() {
+        if (window.L && window.L.map) resolve(window.L);
+        else reject(new Error("Leaflet did not initialize."));
+      }
+      var existing = doc.getElementById("leaflet-js");
+      if (existing) {
+        if (window.L && window.L.map) finish();
+        else {
+          existing.addEventListener("load", finish, { once:true });
+          existing.addEventListener("error", function() { reject(new Error("Leaflet script failed to load.")); }, { once:true });
+        }
+        return;
+      }
+      var script = doc.createElement("script");
+      script.id = "leaflet-js";
+      script.async = true;
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.onload = finish;
+      script.onerror = function() { reject(new Error("Leaflet script failed to load.")); };
+      doc.body.appendChild(script);
+    });
+  }
+  return LEAFLET_ASSET_PROMISE;
+}
+
+function PinDropMapPicker({ initialLat, initialLng, T, onUse }) {
+  var th = THEMES[T || "dark"];
+  var startLat = isValidLatLng(initialLat, initialLng) ? initialLat : 41.84;
+  var startLng = isValidLatLng(initialLat, initialLng) ? initialLng : -87.83;
+  var mapRef = useRef(null);
+  var markerRef = useRef(null);
+  var mapElRef = useRef(null);
+  var [picked, setPicked] = useState({ lat:startLat, lng:startLng });
+  var [mapErr, setMapErr] = useState("");
+
+  useEffect(function() {
+    var alive = true;
+    ensureLeafletReady().then(function(L) {
+      if (!alive || !mapElRef.current) return;
+      var map = L.map(mapElRef.current).setView([startLat, startLng], 14);
+      mapRef.current = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom:19,
+        attribution:"&copy; OpenStreetMap contributors"
+      }).addTo(map);
+      var marker = L.marker([startLat, startLng], { draggable:true }).addTo(map);
+      markerRef.current = marker;
+      map.on("click", function(ev) {
+        marker.setLatLng(ev.latlng);
+        setPicked({ lat:ev.latlng.lat, lng:ev.latlng.lng });
+      });
+      marker.on("dragend", function() {
+        var p = marker.getLatLng();
+        setPicked({ lat:p.lat, lng:p.lng });
+      });
+      setTimeout(function() {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 30);
+    }).catch(function() {
+      if (alive) setMapErr("Map could not load here. Use manual coordinates below.");
+    });
+    return function() {
+      alive = false;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      markerRef.current = null;
+    };
+  }, [startLat, startLng]);
+
+  return (
+    <div>
+      <div ref={mapElRef} style={{ width:"100%", height:300, borderRadius:10, border:"1px solid " + th.border, marginBottom:10, background:th.card }} />
+      {mapErr ? <div style={{ fontSize:12, color:th.orange, marginBottom:8 }}>{mapErr}</div> : null}
+      <div style={{ fontSize:12, color:th.white, fontFamily:"monospace", marginBottom:8 }}>
+        {picked.lat.toFixed(6)}, {picked.lng.toFixed(6)}
+      </div>
+      <button
+        type="button"
+        onClick={function() { onUse(picked.lat, picked.lng); }}
+        style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}
+      >
+        Use this pin
+      </button>
+    </div>
+  );
 }
 
 function loadLocationTrail() {
@@ -919,6 +1025,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [mapPickerStart, setMapPickerStart] = useState({ lat:41.84, lng:-87.83 });
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -991,6 +1098,17 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var now = Date.now();
     var pts = pruneTrailPoints(loadLocationTrail(), now);
     return clusterTrailPoints(pts, 3);
+  }
+
+  function startMapPicker() {
+    var la = parseCoordNum(pastManualLat);
+    var ln = parseCoordNum(pastManualLng);
+    if (!isValidLatLng(la, ln)) {
+      la = 41.84;
+      ln = -87.83;
+    }
+    setMapPickerStart({ lat:la, lng:ln });
+    setPrivView("picker");
   }
 
   function submitSaveForm() {
@@ -1244,9 +1362,38 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </Card>
         <Card T={T}>
           <SecLabel text="Pick from a map" T={T} />
-          <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", textDecoration:"none", color:th.blue, fontWeight:700, fontSize:13 }}>
-            Open Google Maps — long-press to copy coords, paste above
-          </a>
+          <button
+            type="button"
+            onClick={startMapPicker}
+            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", color:th.blue, fontWeight:700, fontSize:13, cursor:"pointer" }}
+          >
+            Open in-app map picker
+          </button>
+          <div style={{ fontSize:11, color:th.muted, marginTop:8, lineHeight:1.5 }}>
+            Tap the map, drop your pin, then import coordinates into your private spot.
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (privView === "picker") {
+    return (
+      <div>
+        <OBtn label="Back to save another way" onClick={function() { setPrivView("past"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Drop a pin on the map</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Tap anywhere on the map or drag the pin, then use that spot.</p>
+        <Card T={T} borderColor={th.blue + "44"}>
+          <PinDropMapPicker
+            T={T}
+            initialLat={mapPickerStart.lat}
+            initialLng={mapPickerStart.lng}
+            onUse={function(lat, lng) {
+              setPastManualLat(lat.toFixed(6));
+              setPastManualLng(lng.toFixed(6));
+              openSaveWithCoords(lat, lng);
+            }}
+          />
         </Card>
       </div>
     );
