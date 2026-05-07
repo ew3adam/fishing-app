@@ -202,35 +202,42 @@ const SPECIES = [
   },
 ];
 
-/** Real fish photos (Wikimedia Commons — free licenses; link in UI for attribution). */
+/** Local cached fish photos (downloaded from Wikimedia fallback for speed/reliability). */
 var SPECIES_PHOTO_BY_ID = {
-  crappie:"https://upload.wikimedia.org/wikipedia/commons/4/4e/Pomoxis_nigromaculatus1.jpg",
-  bass:"https://upload.wikimedia.org/wikipedia/commons/9/96/Largemouth_bass_fish_underwater_micropterus_salmoides.jpg",
-  perch:"https://upload.wikimedia.org/wikipedia/commons/0/07/Yellow_Perch_%28Perca_flavescens%29.jpg",
-  trout:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
-  catfish:"https://upload.wikimedia.org/wikipedia/commons/5/5f/Channel_Catfish.jpg",
-  carp:"https://upload.wikimedia.org/wikipedia/commons/a/a8/Common_carp.jpg",
-  coho:"https://upload.wikimedia.org/wikipedia/commons/0/03/Oncorhynchus_kisutch.jpg",
-  chinook:"https://upload.wikimedia.org/wikipedia/commons/1/14/Oncorhynchus_tshawytscha.jpg",
-  steelhead:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
-  lake_trout:"https://upload.wikimedia.org/wikipedia/commons/b/ba/Lake_trout_fishes_salvelinus_namaycush.jpg",
-  brown_trout:"https://upload.wikimedia.org/wikipedia/commons/2/2e/Salmo_trutta.jpg",
-  brook_trout:"https://upload.wikimedia.org/wikipedia/commons/f/f9/Salvelinus_fontinalis.jpg",
-  smallmouth:"https://upload.wikimedia.org/wikipedia/commons/9/9d/Micropterus_dolomieu2.jpg",
-  walleye:"https://upload.wikimedia.org/wikipedia/commons/9/96/Sander_vitreus.jpg",
-  sauger:"https://upload.wikimedia.org/wikipedia/commons/f/f6/Sander_canadensis_115635868.jpg",
-  pike:"https://upload.wikimedia.org/wikipedia/commons/c/c6/Esox_lucius.jpg",
-  musky:"https://upload.wikimedia.org/wikipedia/commons/b/b3/Esox_masquinongy.jpg",
-  bluegill:"https://upload.wikimedia.org/wikipedia/commons/f/fa/Lepomis_macrochirus.jpg",
-  rockbass:"https://upload.wikimedia.org/wikipedia/commons/9/9a/Ambloplites_rupestris.jpg",
-  whitebass:"https://upload.wikimedia.org/wikipedia/commons/3/3b/Morone_chrysops.jpg",
-  freshwater_drum:"https://upload.wikimedia.org/wikipedia/commons/f/fb/Aplodinotus_grunniens.jpg",
-  gar:"https://upload.wikimedia.org/wikipedia/commons/4/47/Longnose_Gar_%28Lepisosteus_osseus%29.jpg",
-  bowfin:"https://upload.wikimedia.org/wikipedia/commons/5/5a/Amia_calva.jpg",
-  flathead:"https://upload.wikimedia.org/wikipedia/commons/8/84/Pylodictis_olivaris.jpg",
-  blue_cat:"https://upload.wikimedia.org/wikipedia/commons/1/17/Ictalurus_furcatus.jpg",
-  bullhead:"https://upload.wikimedia.org/wikipedia/commons/b/b4/Ameiurus_nebulosus.jpg",
+  crappie:"images/species/crappie.jpg",
+  bass:"images/species/bass.jpg",
+  perch:"images/species/perch.jpg",
+  trout:"images/species/trout.jpg",
+  catfish:"images/species/catfish.jpg",
+  carp:"images/species/carp.jpg",
+  coho:"images/species/coho.jpg",
+  chinook:"images/species/chinook.jpg",
+  steelhead:"images/species/steelhead.jpg",
+  lake_trout:"images/species/lake_trout.jpg",
+  brown_trout:"images/species/brown_trout.jpg",
+  brook_trout:"images/species/brook_trout.jpg",
+  smallmouth:"images/species/smallmouth.jpg",
+  walleye:"images/species/walleye.jpg",
+  sauger:"images/species/sauger.jpg",
+  pike:"images/species/pike.jpg",
+  musky:"images/species/musky.jpg",
+  bluegill:"images/species/bluegill.jpg",
+  rockbass:"images/species/rockbass.jpg",
+  whitebass:"images/species/whitebass.jpg",
+  freshwater_drum:"images/species/freshwater_drum.jpg",
+  gar:"images/species/gar.jpg",
+  bowfin:"images/species/bowfin.jpg",
+  flathead:"images/species/flathead.jpg",
+  blue_cat:"images/species/blue_cat.jpg",
+  bullhead:"images/species/bullhead.jpg",
 };
+
+function localAssetUrl(path) {
+  var p = sanitizeStr(String(path || ""), 400);
+  if (!p) return "";
+  var base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : "/";
+  return base.replace(/\/+$/, "/") + p.replace(/^\/+/, "");
+}
 
 // ─── LOCAL SPOTS ──────────────────────────────────────────────────────────────
 const LOCAL_SPOTS = [
@@ -660,6 +667,31 @@ const CATALOGUE = [
   {id:"splitshot",cat:"Terminal Tackle",name:"Split Shot Sinker",emoji:"⚫",what:"A tiny round lead weight with a split groove. You pinch it onto your line with pliers. The smallest and simplest way to add weight to get your bait to the right depth.",when:"Float rigs for trout, perch, crappie. Any light presentation that needs a little weight.",species:["All Species"],parts:["Split shot sinker set — various sizes","Needle-nose pliers to crimp"],tip:"Place split shot 12-18 inches above your hook. Use the smallest size that gets your bait to the right depth — lighter is always better.",searchQ:"split shot sinker fishing weight setup",yt:"https://www.youtube.com/results?search_query=split+shot+sinker+how+to+use+fishing"},
 ];
 
+/** Local tackle photos cached from Wikimedia files (beta set). */
+var CATALOGUE_PHOTO_BY_ID = {
+  texas:"images/tackle/lure-perch-set.png",
+  ned:"images/tackle/lure-perch-set.png",
+  carolina:"images/tackle/lure-perch-set.png",
+  dropshot:"images/tackle/lure-perch-set.png",
+  float:"images/tackle/float.jpg",
+  hairrig:"images/tackle/hook.jpg",
+  spoon:"images/tackle/lure-cleo.jpg",
+  spinner:"images/tackle/lure-rapala.jpg",
+  swimbait:"images/tackle/lure-perch-set.png",
+  crankbait:"images/tackle/lure-rapala.jpg",
+  topwater:"images/tackle/lure-popper.jpg",
+  blade:"images/tackle/lure-cleo.jpg",
+  jig:"images/tackle/lure-perch-set.png",
+  worm:"images/tackle/earthworm.jpg",
+  tube:"images/tackle/lure-perch-set.png",
+  spawnsac:"images/tackle/salmon-roe.jpg",
+  powerbait:"images/tackle/salmon-roe.jpg",
+  liver:"images/tackle/earthworm.jpg",
+  crawler:"images/tackle/earthworm.jpg",
+  circlehook:"images/tackle/hook.jpg",
+  splitshot:"images/tackle/hook.jpg",
+};
+
 // ─── LESSONS ──────────────────────────────────────────────────────────────────
 const LESSONS = [
   {title:"How to Set the Hook",emoji:"🎣",subs:[
@@ -1030,7 +1062,8 @@ function SpeciesTab({ profile, setProfile, T }) {
 
   if (sel) {
     var sp = sel;
-    var speciesPhotoUrl = SPECIES_PHOTO_BY_ID[sp.id];
+    var speciesPhotoPath = SPECIES_PHOTO_BY_ID[sp.id];
+    var speciesPhotoUrl = localAssetUrl(speciesPhotoPath);
     var isFavDetail = favSp.includes(sp.name);
     return (
       <div>
@@ -1044,7 +1077,7 @@ function SpeciesTab({ profile, setProfile, T }) {
             {isFavDetail ? "★ Following" : "☆ Favorite"}
           </button>
         </div>
-        {speciesPhotoUrl && !speciesPhotoFailed ? (
+        {speciesPhotoPath && !speciesPhotoFailed ? (
           <div style={{ marginBottom:14 }}>
             <img
               src={speciesPhotoUrl}
@@ -1056,8 +1089,8 @@ function SpeciesTab({ profile, setProfile, T }) {
             />
             <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.45 }}>
               Photo:{" "}
-              <a href={speciesPhotoUrl} target="_blank" rel="noopener noreferrer" style={{ color:th.blue }}>
-                Wikimedia Commons
+              <a href="https://commons.wikimedia.org/wiki/Category:Freshwater_fishes" target="_blank" rel="noopener noreferrer" style={{ color:th.blue }}>
+                Wikimedia (cached local copy)
               </a>
               {" "}(species ID photo — compare to your catch before keeping fish).
             </div>
@@ -1148,13 +1181,14 @@ function SpeciesTab({ profile, setProfile, T }) {
         <div>
           {rows.map(function(sp) {
             var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var imgUrl = localAssetUrl(img);
             var isFav = favSp.includes(sp.name);
             return (
               <div key={sp.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:10, marginBottom:8, display:"flex", alignItems:"center", gap:10 }}>
                 <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ display:"flex", alignItems:"center", gap:10, flex:1, background:"transparent", border:"none", textAlign:"left", cursor:"pointer", color:th.white, padding:0 }}>
                   <div style={{ width:66, height:44, borderRadius:8, overflow:"hidden", border:"1px solid " + th.border, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
                     {img && !listPhotoFailed[sp.id] ? (
-                      <img src={img} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                      <img src={imgUrl} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
                     ) : (
                       <span style={{ fontSize:20 }}>{sp.emoji}</span>
                     )}
@@ -1176,13 +1210,14 @@ function SpeciesTab({ profile, setProfile, T }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
           {rows.map(function(sp) {
             var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var imgUrl = localAssetUrl(img);
             var isFav = favSp.includes(sp.name);
             return (
               <div key={sp.id} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderRadius:10, overflow:"hidden" }}>
                 <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ width:"100%", background:"transparent", border:"none", cursor:"pointer", textAlign:"left", color:th.white, padding:0 }}>
                   <div style={{ width:"100%", height:100, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
                     {img && !listPhotoFailed[sp.id] ? (
-                      <img src={img} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                      <img src={imgUrl} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
                     ) : (
                       <span style={{ fontSize:30 }}>{sp.emoji}</span>
                     )}
@@ -2301,21 +2336,23 @@ function CatalogueTab({ profile, setProfile, T }) {
   const [cat, setCat] = useState("All");
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
-  const [img, setImg] = useState(null);
-  const [imgLoading, setImgLoading] = useState(false);
   const [layout, setLayout] = useState("list");
   const [sortBy, setSortBy] = useState("favorites");
+  const [detailPhotoFailed, setDetailPhotoFailed] = useState(false);
+  const [listPhotoFailed, setListPhotoFailed] = useState({});
   var favTackle = (profile && profile.favTackle) || [];
 
   useEffect(function() {
-    if (!sel) return;
-    setImg(null);
-    setImgLoading(true);
-    loadTackleImage(sel.name).then(function(url) {
-      setImg(url);
-      setImgLoading(false);
+    setDetailPhotoFailed(false);
+  }, [sel && sel.id]);
+
+  function onTacklePhotoError(id) {
+    setListPhotoFailed(function(prev) {
+      var next = Object.assign({}, prev);
+      next[id] = true;
+      return next;
     });
-  }, [sel]);
+  }
 
   function toggleFavoriteTackle(id) {
     if (typeof setProfile !== "function") return;
@@ -2342,6 +2379,8 @@ function CatalogueTab({ profile, setProfile, T }) {
   });
 
   if (sel) {
+    var detailPhotoPath = CATALOGUE_PHOTO_BY_ID[sel.id];
+    var detailPhotoUrl = localAssetUrl(detailPhotoPath);
     return (
       <div>
         <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
@@ -2359,19 +2398,11 @@ function CatalogueTab({ profile, setProfile, T }) {
         </Card>
 
         <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, overflow:"hidden", marginBottom:12, minHeight:180, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          {imgLoading && (
-            <div style={{ textAlign:"center", padding:24 }}>
-              <div style={{ fontSize:32 }}>🔍</div>
-              <div style={{ fontSize:12, color:th.muted, marginTop:8 }}>Loading photo...</div>
-            </div>
-          )}
-          {img && !imgLoading && (
-            <img src={img} alt={sel.name} style={{ width:"100%", maxHeight:220, objectFit:"contain", display:"block" }} onError={function() { setImg(null); }} />
-          )}
-          {!img && !imgLoading && (
+          {detailPhotoPath && !detailPhotoFailed ? (
+            <img src={detailPhotoUrl} alt={sel.name} style={{ width:"100%", maxHeight:220, objectFit:"contain", display:"block" }} onError={function() { setDetailPhotoFailed(true); }} />
+          ) : (
             <div style={{ textAlign:"center", padding:24 }}>
               <div style={{ fontSize:48 }}>{sel.emoji}</div>
-              <a href={"https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(sel.searchQ)} target="_blank" rel="noopener noreferrer" style={{ display:"block", fontSize:12, color:th.blue, marginTop:8 }}>Search Google Images for photo</a>
             </div>
           )}
         </div>
@@ -2440,10 +2471,18 @@ function CatalogueTab({ profile, setProfile, T }) {
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           {ordered.map(function(item) {
             var isFav = favTackle.includes(item.id);
+            var thumbPath = CATALOGUE_PHOTO_BY_ID[item.id];
+            var thumbUrl = localAssetUrl(thumbPath);
             return (
               <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:10, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
                 <button type="button" onClick={function() { setSel(item); }} style={{ flex:1, textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:10 }}>
-                  <div style={{ width:52, height:52, borderRadius:10, background:th.bg, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{item.emoji}</div>
+                  <div style={{ width:58, height:58, borderRadius:10, overflow:"hidden", background:th.bg, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+                    {thumbPath && !listPhotoFailed[item.id] ? (
+                      <img src={thumbUrl} alt={item.name} loading="lazy" decoding="async" onError={function() { onTacklePhotoError(item.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      item.emoji
+                    )}
+                  </div>
                   <div>
                     <div style={{ fontWeight:700, fontSize:18, color:th.white, lineHeight:1.2 }}>{item.name}</div>
                     <div style={{ fontSize:11, color:th.green, marginTop:3 }}>{item.cat}</div>
@@ -2461,10 +2500,18 @@ function CatalogueTab({ profile, setProfile, T }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
           {ordered.map(function(item) {
             var isFav = favTackle.includes(item.id);
+            var thumbPath = CATALOGUE_PHOTO_BY_ID[item.id];
+            var thumbUrl = localAssetUrl(thumbPath);
             return (
               <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, color:th.white }}>
                 <button type="button" onClick={function() { setSel(item); }} style={{ width:"100%", textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0 }}>
-                  <div style={{ fontSize:24, marginBottom:6 }}>{item.emoji}</div>
+                  <div style={{ width:"100%", height:92, borderRadius:8, overflow:"hidden", background:th.bg, border:"1px solid " + th.border, marginBottom:8, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {thumbPath && !listPhotoFailed[item.id] ? (
+                      <img src={thumbUrl} alt={item.name} loading="lazy" decoding="async" onError={function() { onTacklePhotoError(item.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:24 }}>{item.emoji}</span>
+                    )}
+                  </div>
                   <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{item.name}</div>
                   <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{item.cat}</div>
                   <div style={{ fontSize:10, color:th.muted, marginTop:4, lineHeight:1.4 }}>{item.species.slice(0,2).join(", ")}</div>
