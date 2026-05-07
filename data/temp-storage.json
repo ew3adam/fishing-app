@@ -1,0 +1,48 @@
+{
+  "version": "beta-temp-v1",
+  "environment": "beta",
+  "createdAt": "2026-05-07T00:00:00.000Z",
+  "updatedAt": "2026-05-07T00:00:00.000Z",
+  "connections": {
+    "uploadApi": {
+      "enabled": false,
+      "provider": "placeholder",
+      "baseUrl": "",
+      "apiPath": "/uploads",
+      "notes": "Replace with real upload endpoint when backend is ready."
+    },
+    "authApi": {
+      "enabled": false,
+      "provider": "placeholder",
+      "baseUrl": "",
+      "loginPath": "/auth/login",
+      "notes": "Replace with real auth endpoint for production."
+    },
+    "storageProvider": {
+      "enabled": false,
+      "name": "local-temp",
+      "bucket": "beta-uploads-temp",
+      "notes": "Use real cloud bucket after backend setup."
+    }
+  },
+  "testUsers": [
+    {
+      "id": "user1",
+      "username": "user1",
+      "password": "5432",
+      "role": "beta_tester",
+      "active": true,
+      "notes": "Temporary beta-only test user. Remove before production."
+    }
+  ],
+  "uploads": [],
+  "uploadRules": {
+    "allowedTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ],
+    "maxFileSizeMb": 10,
+    "notes": "Adjust limits as needed during beta testing."
+  }
+}

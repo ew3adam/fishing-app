@@ -448,12 +448,36 @@ function fishingScore(wx) {
 }
 
 async function loadWeather(lat, lng) {
+  function formatSunTime(iso) {
+    if (!iso || typeof iso !== "string" || iso.indexOf("T") === -1) return "--";
+    var timePart = iso.split("T")[1] || "";
+    var parts = timePart.split(":");
+    if (parts.length < 2) return "--";
+    var h = Number(parts[0]);
+    var m = parts[1];
+    if (Number.isNaN(h)) return "--";
+    var suffix = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12 || 12;
+    return h12 + ":" + m + " " + suffix;
+  }
+
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    const sunriseIso = d && d.daily && d.daily.sunrise && d.daily.sunrise[0];
+    const sunsetIso = d && d.daily && d.daily.sunset && d.daily.sunset[0];
+    return {
+      temp: Math.round(c.temperature_2m),
+      wind: Math.round(c.windspeed_10m),
+      code: c.weathercode,
+      precip: c.precipitation_probability || 0,
+      icon: WX_ICON[c.weathercode] || "🌡️",
+      condition: WX_LABEL[c.weathercode] || "Unknown",
+      sunrise: formatSunTime(sunriseIso),
+      sunset: formatSunTime(sunsetIso)
+    };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -469,7 +493,12 @@ async function loadWeather(lat, lng) {
     const data = await res.json();
     const txt = (data.content && data.content[0] && data.content[0].text) || "";
     const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      var fallback = JSON.parse(m[0]);
+      fallback.sunrise = fallback.sunrise || "--";
+      fallback.sunset = fallback.sunset || "--";
+      return fallback;
+    }
     return null;
   }
 }
@@ -602,6 +631,7 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
