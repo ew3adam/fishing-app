@@ -506,6 +506,7 @@ function normalizeProfile(raw) {
   out.email = typeof p.email === "string" ? p.email : "";
   out.level = p.level || "Beginner";
   out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
+  out.favTackle = Array.isArray(p.favTackle) ? p.favTackle : [];
   out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
   out.gear = Array.isArray(p.gear) ? p.gear : [];
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
@@ -2295,13 +2296,16 @@ function LakesTab({ T }) {
 }
 
 // ─── CATALOGUE TAB ────────────────────────────────────────────────────────────
-function CatalogueTab({ T }) {
+function CatalogueTab({ profile, setProfile, T }) {
   const th = THEMES[T];
   const [cat, setCat] = useState("All");
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [img, setImg] = useState(null);
   const [imgLoading, setImgLoading] = useState(false);
+  const [layout, setLayout] = useState("list");
+  const [sortBy, setSortBy] = useState("favorites");
+  var favTackle = (profile && profile.favTackle) || [];
 
   useEffect(function() {
     if (!sel) return;
@@ -2313,10 +2317,28 @@ function CatalogueTab({ T }) {
     });
   }, [sel]);
 
+  function toggleFavoriteTackle(id) {
+    if (typeof setProfile !== "function") return;
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var curr = (base.favTackle || []).slice();
+      var next = curr.includes(id) ? curr.filter(function(x) { return x !== id; }) : curr.concat([id]);
+      return Object.assign({}, base, { favTackle:next });
+    });
+  }
+
   var filtered = CATALOGUE.filter(function(item) {
     var mc = cat === "All" || item.cat === cat;
     var ms = !search || item.name.toLowerCase().includes(search.toLowerCase()) || item.what.toLowerCase().includes(search.toLowerCase());
     return mc && ms;
+  });
+  var ordered = filtered.slice().sort(function(a, b) {
+    var af = favTackle.includes(a.id) ? 1 : 0;
+    var bf = favTackle.includes(b.id) ? 1 : 0;
+    if (sortBy === "favorites" && af !== bf) return bf - af;
+    if (sortBy === "name") return a.name.localeCompare(b.name);
+    if (sortBy === "category") return String(a.cat || "").localeCompare(String(b.cat || ""));
+    return b.id.localeCompare(a.id);
   });
 
   if (sel) {
@@ -2324,9 +2346,16 @@ function CatalogueTab({ T }) {
       <div>
         <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
         <Card T={T}>
-          <div style={{ fontSize:36, marginBottom:6 }}>{sel.emoji}</div>
-          <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{sel.name}</div>
-          <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{sel.cat.toUpperCase()}</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+            <div>
+              <div style={{ fontSize:36, marginBottom:6 }}>{sel.emoji}</div>
+              <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{sel.name}</div>
+              <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{sel.cat.toUpperCase()}</div>
+            </div>
+            <button type="button" onClick={function() { toggleFavoriteTackle(sel.id); }} style={{ background:favTackle.includes(sel.id) ? th.green + "33" : "transparent", border:"1px solid " + (favTackle.includes(sel.id) ? th.green : th.border), borderRadius:8, color:favTackle.includes(sel.id) ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700, minWidth:96 }}>
+              {favTackle.includes(sel.id) ? "Following" : "Favorite"}
+            </button>
+          </div>
         </Card>
 
         <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, overflow:"hidden", marginBottom:12, minHeight:180, display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -2382,6 +2411,21 @@ function CatalogueTab({ T }) {
   return (
     <div>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lures, rigs, bait..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 8px" }} />
+      <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+        <button type="button" onClick={function() { setLayout("list"); }} style={{ background:layout==="list" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="list" ? th.green : th.border), borderRadius:8, color:layout==="list" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          List
+        </button>
+        <button type="button" onClick={function() { setLayout("tile"); }} style={{ background:layout==="tile" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="tile" ? th.green : th.border), borderRadius:8, color:layout==="tile" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          Tile
+        </button>
+      </div>
+      <div style={{ marginBottom:8 }}>
+        <select value={sortBy} onChange={function(e) { setSortBy(e.target.value); }} style={{ width:"100%", background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", fontSize:13 }}>
+          <option value="favorites">Favorites first</option>
+          <option value="name">Name A-Z</option>
+          <option value="category">Category</option>
+        </select>
+      </div>
       <div style={{ overflowX:"auto", whiteSpace:"nowrap", paddingBottom:8, marginBottom:10 }}>
         {CATALOGUE_CATS.map(function(c) {
           return (
@@ -2391,23 +2435,48 @@ function CatalogueTab({ T }) {
           );
         })}
       </div>
-      <SecLabel text={filtered.length + " items — tap for photos + tutorial"} T={T} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-        {filtered.map(function(item) {
-          return (
-            <button key={item.id} onClick={function() { setSel(item); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:6 }}>{item.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{item.name}</div>
-              <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{item.cat}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:4, lineHeight:1.4 }}>{item.species.slice(0,2).join(", ")}</div>
-              <div style={{ display:"flex", gap:6, marginTop:8 }}>
-                <span style={{ fontSize:10, background:"#1a3a5a", color:"#7ab8e8", borderRadius:4, padding:"2px 6px" }}>📸 Photo</span>
-                <span style={{ fontSize:10, background:"#3a1a1a", color:"#e87a7a", borderRadius:4, padding:"2px 6px" }}>▶ Video</span>
+      <SecLabel text={ordered.length + " items — tap for photos + tutorial"} T={T} />
+      {layout === "list" ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {ordered.map(function(item) {
+            var isFav = favTackle.includes(item.id);
+            return (
+              <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:10, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+                <button type="button" onClick={function() { setSel(item); }} style={{ flex:1, textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:10 }}>
+                  <div style={{ width:52, height:52, borderRadius:10, background:th.bg, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{item.emoji}</div>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:18, color:th.white, lineHeight:1.2 }}>{item.name}</div>
+                    <div style={{ fontSize:11, color:th.green, marginTop:3 }}>{item.cat}</div>
+                    <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{item.species.slice(0, 2).join(", ")}</div>
+                  </div>
+                </button>
+                <button type="button" onClick={function() { toggleFavoriteTackle(item.id); }} style={{ minWidth:112, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:12, padding:"11px 10px", color:isFav ? th.muted : "#fff", fontWeight:700, cursor:"pointer" }}>
+                  {isFav ? "Following" : "FOLLOW"}
+                </button>
               </div>
-            </button>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          {ordered.map(function(item) {
+            var isFav = favTackle.includes(item.id);
+            return (
+              <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, color:th.white }}>
+                <button type="button" onClick={function() { setSel(item); }} style={{ width:"100%", textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0 }}>
+                  <div style={{ fontSize:24, marginBottom:6 }}>{item.emoji}</div>
+                  <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{item.name}</div>
+                  <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{item.cat}</div>
+                  <div style={{ fontSize:10, color:th.muted, marginTop:4, lineHeight:1.4 }}>{item.species.slice(0,2).join(", ")}</div>
+                </button>
+                <button type="button" onClick={function() { toggleFavoriteTackle(item.id); }} style={{ width:"100%", marginTop:8, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:8, color:isFav ? th.muted : "#fff", padding:"6px 0", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                  {isFav ? "Following" : "Favorite"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -3038,7 +3107,7 @@ export default function App() {
         {tab==="fish"      && <SpeciesTab profile={profile} setProfile={setProfile} T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
-        {tab==="catalogue" && <CatalogueTab T={theme} />}
+        {tab==="catalogue" && <CatalogueTab profile={profile} setProfile={setProfile} T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
