@@ -453,6 +453,78 @@ function PinDropMapPicker({ initialLat, initialLng, T, onUse }) {
   );
 }
 
+function milesBetween(lat1, lng1, lat2, lng2) {
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLng = (lng2 - lng1) * toRad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 3958.8 * c;
+}
+
+function WaterPinsMap({ centerLat, centerLng, pins, T }) {
+  var th = THEMES[T || "dark"];
+  var mapRef = useRef(null);
+  var markerLayerRef = useRef(null);
+  var mapElRef = useRef(null);
+  var [mapErr, setMapErr] = useState("");
+
+  useEffect(function() {
+    var alive = true;
+    ensureLeafletReady().then(function(L) {
+      if (!alive || !mapElRef.current) return;
+      if (!mapRef.current) {
+        mapRef.current = L.map(mapElRef.current).setView([centerLat, centerLng], 11);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom:19,
+          attribution:"&copy; OpenStreetMap contributors"
+        }).addTo(mapRef.current);
+      }
+      mapRef.current.setView([centerLat, centerLng], 11);
+      if (markerLayerRef.current) markerLayerRef.current.remove();
+      markerLayerRef.current = L.layerGroup().addTo(mapRef.current);
+      var redPin = L.divIcon({
+        className:"water-red-pin",
+        html:'<div style="font-size:20px;line-height:1;color:#e05050;text-shadow:0 1px 2px rgba(0,0,0,0.5)">📍</div>',
+        iconSize:[20, 20],
+        iconAnchor:[10, 20],
+        popupAnchor:[0, -18]
+      });
+      (pins || []).forEach(function(p) {
+        if (!isValidLatLng(p.lat, p.lng)) return;
+        var m = L.marker([p.lat, p.lng], { icon:redPin }).addTo(markerLayerRef.current);
+        m.bindPopup("<strong>" + String(p.name || "Water body") + "</strong><br/>" + String(p.type || "Water") + (p.miles != null ? "<br/>" + p.miles.toFixed(1) + " mi" : ""));
+      });
+      setTimeout(function() {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 30);
+    }).catch(function() {
+      if (alive) setMapErr("Map could not load right now.");
+    });
+    return function() { alive = false; };
+  }, [centerLat, centerLng, JSON.stringify(pins || [])]);
+
+  useEffect(function() {
+    return function() {
+      if (markerLayerRef.current) markerLayerRef.current.remove();
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      markerLayerRef.current = null;
+    };
+  }, []);
+
+  return (
+    <div>
+      <div ref={mapElRef} style={{ width:"100%", height:320, borderRadius:10, border:"1px solid " + th.border, background:th.card }} />
+      {mapErr ? <div style={{ fontSize:12, color:th.orange, marginTop:8 }}>{mapErr}</div> : null}
+    </div>
+  );
+}
+
 function loadLocationTrail() {
   try {
     var raw = localStorage.getItem(LOCATION_TRAIL_KEY);
@@ -2177,12 +2249,78 @@ function LakesTab({ T }) {
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
+  const [radiusMiles, setRadiusMiles] = useState(50);
+  const [center, setCenter] = useState({ lat:41.84, lng:-87.83 });
+  const [locMsg, setLocMsg] = useState("Using North Riverside center.");
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
 
-  var filtered = LAKES.filter(function(l) {
-    return !search || l.name.toLowerCase().includes(search.toLowerCase());
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+        setLocMsg("Using your current location.");
+      },
+      function() {
+        setLocMsg("Using North Riverside center (location unavailable).");
+      },
+      { enableHighAccuracy:false, maximumAge:120000, timeout:8000 }
+    );
+  }, []);
+
+  function refreshCenterFromGps() {
+    if (!navigator.geolocation) {
+      setLocMsg("Location not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+        setLocMsg("Center updated to your current location.");
+      },
+      function() {
+        setLocMsg("Could not update location. Keeping previous center.");
+      },
+      { enableHighAccuracy:true, maximumAge:60000, timeout:12000 }
+    );
+  }
+
+  var q = search.toLowerCase().trim();
+  var lakesWithMiles = LAKES.map(function(l) {
+    return Object.assign({}, l, { _miles:milesBetween(center.lat, center.lng, l.lat, l.lng) });
+  });
+  var filtered = lakesWithMiles.filter(function(l) {
+    var within = l._miles <= radiusMiles;
+    var match = !q || l.name.toLowerCase().includes(q) || String(l.addr || "").toLowerCase().includes(q);
+    return within && match;
+  }).sort(function(a, b) { return a._miles - b._miles; });
+
+  var riverAccessPoints = LOCAL_SPOTS.map(function(s, i) {
+    return {
+      id:"river_" + i,
+      name:s.name,
+      type:"River access",
+      lat:s.lat,
+      lng:s.lng,
+      miles:milesBetween(center.lat, center.lng, s.lat, s.lng),
+    };
+  });
+  var lakePins = lakesWithMiles.map(function(l) {
+    return {
+      id:"lake_" + l.id,
+      name:l.name,
+      type:"Lake / water body",
+      lat:l.lat,
+      lng:l.lng,
+      miles:l._miles,
+    };
+  });
+  var mapPins = lakePins.concat(riverAccessPoints).filter(function(p) {
+    var within = p.miles <= radiusMiles;
+    var match = !q || p.name.toLowerCase().includes(q) || p.type.toLowerCase().includes(q);
+    return within && match;
   });
 
   if (sel) {
@@ -2303,8 +2441,34 @@ function LakesTab({ T }) {
 
   return (
     <div>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} />
-      <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
+      <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:12 }}>
+        <SecLabel text="Search area and mileage" T={T} />
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginBottom:8 }}>
+          <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes or river access..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none" }} />
+          <select value={String(radiusMiles)} onChange={function(e) { setRadiusMiles(parseInt(e.target.value, 10) || 50); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"0 10px", color:th.white, fontSize:13 }}>
+            {[5,10,15,25,50,75,100].map(function(mi) { return <option key={mi} value={mi}>{mi} mi</option>; })}
+          </select>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:8 }}>
+          <div style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>
+            {locMsg}<br />
+            Center: {center.lat.toFixed(4)}, {center.lng.toFixed(4)}
+          </div>
+          <button type="button" onClick={refreshCenterFromGps} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:8, color:th.green, padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+            Use my location
+          </button>
+        </div>
+        <div style={{ fontSize:12, color:th.white }}>
+          {mapPins.length} red pins found within {radiusMiles} miles (lakes + river access).
+        </div>
+      </Card>
+
+      <Card T={T} borderColor={th.red + "44"}>
+        <SecLabel text="Map pins (red)" T={T} />
+        <WaterPinsMap centerLat={center.lat} centerLng={center.lng} pins={mapPins} T={T} />
+      </Card>
+
+      <SecLabel text={filtered.length + " Lakes Within " + radiusMiles + " Miles"} T={T} />
       {filtered.map(function(lake, i) {
         return (
           <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
@@ -2312,10 +2476,10 @@ function LakesTab({ T }) {
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
                 {lake.aka ? <div style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
-                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake.dist}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake._miles.toFixed(1)} mi</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.dist}</div>
+                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake._miles.toFixed(1)} mi</div>
                 <div style={{ fontSize:10, color:th.muted }}>Max {lake.maxDepth} ft</div>
               </div>
             </div>
