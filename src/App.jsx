@@ -242,6 +242,7 @@ function localAssetUrl(path) {
 // ─── LOCAL SPOTS ──────────────────────────────────────────────────────────────
 const LOCAL_SPOTS = [
   {name:"Salt Creek",addr:"Brookfield, IL",dist:"~1 mi",lat:41.826,lng:-87.845,species:["Bass","Carp","Catfish"],tag:"Creek",color:"#4ab8a0",tip:"Light tackle. Deep bends hold big carp.",apple:"maps://maps.apple.com/?daddr=41.826,-87.845",google:"https://maps.google.com/?daddr=41.826,-87.845"},
+  {name:"Cermak Quarry",addr:"McCook, IL",dist:"~2 mi",lat:41.832,lng:-87.822,species:["Bass","Panfish","Carp"],tag:"Quarry",color:"#5a9fd4",tip:"Work slower on drop-offs and quarry edges. Early morning is best.",apple:"maps://maps.apple.com/?daddr=41.832,-87.822",google:"https://maps.google.com/?daddr=41.832,-87.822"},
   {name:"Thatcher Woods / Des Plaines",addr:"River Forest, IL",dist:"~3 mi",lat:41.874,lng:-87.831,species:["Bass","Carp","Catfish","Crappie","Pike"],tag:"River",color:"#5a9fd4",tip:"Eddies behind fallen logs = bass. Night = catfish.",apple:"maps://maps.apple.com/?daddr=41.874,-87.831",google:"https://maps.google.com/?daddr=41.874,-87.831"},
   {name:"Columbia Woods / Des Plaines",addr:"Willow Springs, IL",dist:"~6 mi",lat:41.762,lng:-87.884,species:["Bass","Catfish","Carp","Crappie"],tag:"River",color:"#5a9fd4",tip:"Best catfish holes on the Des Plaines. Night fish.",apple:"maps://maps.apple.com/?daddr=41.762,-87.884",google:"https://maps.google.com/?daddr=41.762,-87.884"},
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
@@ -462,6 +463,90 @@ function milesBetween(lat1, lng1, lat2, lng2) {
     Math.sin(dLng / 2) * Math.sin(dLng / 2);
   var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return 3958.8 * c;
+}
+
+function waterPinCenter(el) {
+  if (!el) return null;
+  if (isValidLatLng(el.lat, el.lon)) return { lat:el.lat, lng:el.lon };
+  if (el.center && isValidLatLng(el.center.lat, el.center.lon)) return { lat:el.center.lat, lng:el.center.lon };
+  if (el.bounds && isValidLatLng(el.bounds.minlat, el.bounds.minlon) && isValidLatLng(el.bounds.maxlat, el.bounds.maxlon)) {
+    return {
+      lat:(el.bounds.minlat + el.bounds.maxlat) / 2,
+      lng:(el.bounds.minlon + el.bounds.maxlon) / 2,
+    };
+  }
+  return null;
+}
+
+function prettyWaterType(tags) {
+  var t = tags || {};
+  if (t.leisure === "fishing") return "Fishing area";
+  if (t.waterway === "river" || t.waterway === "stream" || t.waterway === "canal") return "River access";
+  if (t.water === "quarry") return "Quarry";
+  if (t.water === "lake" || t.natural === "water") return "Lake / water body";
+  if (t.water) return "Water: " + String(t.water);
+  if (t.waterway) return "Waterway: " + String(t.waterway);
+  return "Water body";
+}
+
+async function fetchLiveNearbyWaterPins(lat, lng, radiusMiles) {
+  if (!isValidLatLng(lat, lng)) return [];
+  var radiusMeters = Math.max(800, Math.min(160934, Math.round(radiusMiles * 1609.34)));
+  var q = [
+    "[out:json][timeout:25];(",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    ");out center tags;"
+  ].join("");
+  var r = await fetch("https://overpass-api.de/api/interpreter", {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=UTF-8" },
+    body:q
+  });
+  if (!r.ok) throw new Error("Live map request failed");
+  var d = await r.json();
+  var arr = Array.isArray(d && d.elements) ? d.elements : [];
+  var pins = [];
+  var seen = {};
+  arr.forEach(function(el) {
+    var c = waterPinCenter(el);
+    if (!c) return;
+    var tags = el.tags || {};
+    var nm = sanitizeStr(String(tags.name || tags["name:en"] || ""), 120);
+    if (!nm) return;
+    var mi = milesBetween(lat, lng, c.lat, c.lng);
+    if (!isFinite(mi) || mi > radiusMiles) return;
+    var key = nm.toLowerCase() + "|" + c.lat.toFixed(4) + "|" + c.lng.toFixed(4);
+    if (seen[key]) return;
+    seen[key] = true;
+    pins.push({
+      id:"live_" + String(el.type || "el") + "_" + String(el.id || ""),
+      name:nm,
+      type:prettyWaterType(tags),
+      lat:c.lat,
+      lng:c.lng,
+      miles:mi,
+      live:true,
+    });
+  });
+  pins.sort(function(a, b) { return a.miles - b.miles; });
+  return pins.slice(0, 200);
 }
 
 function WaterPinsMap({ centerLat, centerLng, pins, T }) {
@@ -701,6 +786,11 @@ const LAKES = [
     bankSpots:[{name:"North Aerator",tip:"Cast toward the aerator — trout stack here after stocking."},{name:"East Inlet Pipe",tip:"Inlet brings oxygenated water — trout hold just downstream."},{name:"South Wall",tip:"Cast parallel to wall for deep trout mid-summer."}],
     season:{spring:"Go right after FPDCC stocking (April). PowerBait near aerators.",summer:"Trout go deep. Early morning only. Drop shot at 30+ ft.",fall:"Second stocking October. Same spring tactics. Spinners work well.",winter:"Check FPDCC ice advisories. No fishing during unsafe ice."},
     lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
+  {id:"cermak_quarry",name:"Cermak Quarry",aka:"McCook Quarry Reservoir",addr:"McCook, IL",dist:"~2 mi",lat:41.832,lng:-87.822,maxDepth:35,avgDepth:16,species:["Largemouth Bass","Crappie","Bluegill","Carp","Channel Catfish"],primary:"Largemouth Bass",
+    zones:[{depth:"4–10 ft",loc:"Shallow shelf and riprap edges",tip:"Topwater and spinnerbaits at dawn."},{depth:"12–20 ft",loc:"Middle basin transition",tip:"Slow plastics or jigging along break lines."},{depth:"24–35 ft",loc:"Quarry drop-offs",tip:"Vertical presentations when fish push deeper."}],
+    bankSpots:[{name:"Rock edge corner",tip:"Cast parallel to rock bank for bass and panfish."},{name:"Drop-off point",tip:"Work bottom rigs on the ledge for catfish and carp."},{name:"Calm pocket",tip:"Float rigs for crappie near structure on low-wind days."}],
+    season:{spring:"Shallow warming edges turn on first. Work slower around riprap.",summer:"Fish low light windows and deeper breaks during midday.",fall:"Baitfish push shallow and bass feed aggressively.",winter:"Slow down and target deeper water with vertical baits."},
+    lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.832,-87.822",google:"https://maps.google.com/?daddr=41.832,-87.822"},
   {id:"tampier",name:"Tampier Lake",addr:"Palos Park, IL",dist:"~12 mi",lat:41.656,lng:-87.845,maxDepth:18,avgDepth:8,species:["Largemouth Bass","Crappie","Bluegill","Channel Catfish","Yellow Perch"],primary:"Largemouth Bass",
     zones:[{depth:"2–5 ft",loc:"North shallows and weed flats",tip:"Bass and bluegill spawn here — topwater frogs and poppers"},{depth:"8–12 ft",loc:"Main basin center",tip:"Crappie suspend at 8 ft near brush — slip float + minnow"},{depth:"14–18 ft",loc:"South channel near dam",tip:"Catfish and larger bass — slip sinker with chicken liver at night"}],
     bankSpots:[{name:"North Weed Flats",tip:"Dawn topwater for bass along the weed edge."},{name:"Main Launch Dock",tip:"Crappie stack under docks — tiny jig at 6-8 ft."},{name:"South Dam",tip:"Night fish catfish here. Slip sinker with chicken liver."}],
@@ -2252,6 +2342,10 @@ function LakesTab({ T }) {
   const [radiusMiles, setRadiusMiles] = useState(50);
   const [center, setCenter] = useState({ lat:41.84, lng:-87.83 });
   const [locMsg, setLocMsg] = useState("Using North Riverside center.");
+  const [areaInput, setAreaInput] = useState("");
+  const [livePins, setLivePins] = useState([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveErr, setLiveErr] = useState("");
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
@@ -2287,6 +2381,59 @@ function LakesTab({ T }) {
     );
   }
 
+  async function setCenterFromAreaSearch() {
+    var area = sanitizeStr(areaInput, 120);
+    if (!area) {
+      setLocMsg("Enter an area or zip before searching.");
+      return;
+    }
+    try {
+      setLocMsg("Looking up area center...");
+      var r = await fetch(
+        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" +
+        encodeURIComponent(area)
+      );
+      if (!r.ok) throw new Error("Area search failed");
+      var d = await r.json();
+      if (!Array.isArray(d) || !d[0]) {
+        setLocMsg("Area not found. Try city, zip, or full address.");
+        return;
+      }
+      var lat = parseFloat(d[0].lat);
+      var lng = parseFloat(d[0].lon);
+      if (!isValidLatLng(lat, lng)) {
+        setLocMsg("Area center was invalid. Try again.");
+        return;
+      }
+      setCenter({ lat:lat, lng:lng });
+      setLocMsg("Using area center: " + sanitizeStr(String(d[0].display_name || area), 70));
+    } catch (e) {
+      setLocMsg("Could not search that area right now.");
+    }
+  }
+
+  useEffect(function() {
+    var alive = true;
+    var timer = setTimeout(function() {
+      setLiveLoading(true);
+      setLiveErr("");
+      fetchLiveNearbyWaterPins(center.lat, center.lng, radiusMiles).then(function(rows) {
+        if (!alive) return;
+        setLivePins(Array.isArray(rows) ? rows : []);
+        setLiveLoading(false);
+      }).catch(function() {
+        if (!alive) return;
+        setLiveErr("Live water lookup unavailable. Showing saved map data.");
+        setLivePins([]);
+        setLiveLoading(false);
+      });
+    }, 200);
+    return function() {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [center.lat, center.lng, radiusMiles]);
+
   var q = search.toLowerCase().trim();
   var lakesWithMiles = LAKES.map(function(l) {
     return Object.assign({}, l, { _miles:milesBetween(center.lat, center.lng, l.lat, l.lng) });
@@ -2317,11 +2464,16 @@ function LakesTab({ T }) {
       miles:l._miles,
     };
   });
-  var mapPins = lakePins.concat(riverAccessPoints).filter(function(p) {
+  var combinedPins = lakePins.concat(riverAccessPoints).concat(livePins);
+  var seenPins = {};
+  var mapPins = combinedPins.filter(function(p) {
+    var key = (String(p.name || "").toLowerCase()) + "|" + Number(p.lat).toFixed(4) + "|" + Number(p.lng).toFixed(4);
+    if (seenPins[key]) return false;
+    seenPins[key] = true;
     var within = p.miles <= radiusMiles;
-    var match = !q || p.name.toLowerCase().includes(q) || p.type.toLowerCase().includes(q);
+    var match = !q || String(p.name || "").toLowerCase().includes(q) || String(p.type || "").toLowerCase().includes(q);
     return within && match;
-  });
+  }).sort(function(a, b) { return a.miles - b.miles; });
 
   if (sel) {
     var lake = sel;
@@ -2449,6 +2601,17 @@ function LakesTab({ T }) {
             {[5,10,15,25,50,75,100].map(function(mi) { return <option key={mi} value={mi}>{mi} mi</option>; })}
           </select>
         </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginBottom:8 }}>
+          <input
+            value={areaInput}
+            onChange={function(e) { setAreaInput(e.target.value); }}
+            placeholder="Set map center by area (city, zip, address)"
+            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none" }}
+          />
+          <button type="button" onClick={setCenterFromAreaSearch} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, color:th.blue, padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+            Search area
+          </button>
+        </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:8 }}>
           <div style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>
             {locMsg}<br />
@@ -2459,8 +2622,10 @@ function LakesTab({ T }) {
           </button>
         </div>
         <div style={{ fontSize:12, color:th.white }}>
-          {mapPins.length} red pins found within {radiusMiles} miles (lakes + river access).
+          {mapPins.length} red pins found within {radiusMiles} miles (live + saved).
         </div>
+        {liveLoading ? <div style={{ fontSize:11, color:th.blue, marginTop:4 }}>Refreshing live nearby water map...</div> : null}
+        {liveErr ? <div style={{ fontSize:11, color:th.orange, marginTop:4 }}>{liveErr}</div> : null}
       </Card>
 
       <Card T={T} borderColor={th.red + "44"}>
