@@ -285,6 +285,18 @@ function parseCoordNum(v) {
   return isFinite(n) ? n : NaN;
 }
 
+function milesBetween(lat1, lng1, lat2, lng2) {
+  // Great-circle distance in miles for radius filtering/suggestions.
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLng = (lng2 - lng1) * toRad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 3958.8 * c;
+}
+
 function isValidLatLng(lat, lng) {
   return isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
@@ -1785,13 +1797,41 @@ function LakesTab({ T }) {
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
+  const [radiusMiles, setRadiusMiles] = useState(5);
+  const [center, setCenter] = useState({ lat:41.84, lng:-87.83 });
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
 
-  var filtered = LAKES.filter(function(l) {
-    return !search || l.name.toLowerCase().includes(search.toLowerCase());
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+      },
+      function() {},
+      { enableHighAccuracy:false, maximumAge:120000, timeout:8000 }
+    );
+  }, []);
+
+  var q = search.toLowerCase().trim();
+  var lakesWithMiles = LAKES.map(function(l) {
+    return Object.assign({}, l, { _miles:milesBetween(center.lat, center.lng, l.lat, l.lng) });
   });
+  var filtered = lakesWithMiles.filter(function(l) {
+    var within = l._miles <= radiusMiles;
+    var matches = !q || l.name.toLowerCase().includes(q) || String(l.addr || "").toLowerCase().includes(q);
+    return within && matches;
+  }).sort(function(a, b) { return a._miles - b._miles; });
+
+  var suggestedWaters = LOCAL_SPOTS.map(function(s) {
+    return Object.assign({}, s, { _miles:milesBetween(center.lat, center.lng, s.lat, s.lng) });
+  }).sort(function(a, b) { return a._miles - b._miles; });
+  suggestedWaters = suggestedWaters.filter(function(s) {
+    var inRadius = s._miles <= radiusMiles;
+    var matches = !q || s.name.toLowerCase().includes(q) || String(s.addr || "").toLowerCase().includes(q);
+    return inRadius && matches;
+  }).slice(0, 3);
 
   if (sel) {
     var lake = sel;
@@ -1911,8 +1951,16 @@ function LakesTab({ T }) {
 
   return (
     <div>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} />
-      <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
+      <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, margin:"12px 0 10px" }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none" }} />
+        <select value={String(radiusMiles)} onChange={function(e) { setRadiusMiles(parseInt(e.target.value, 10) || 5); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"0 10px", color:th.white, fontSize:13, fontWeight:700, minWidth:78 }}>
+          {[5,10,15,25,50].map(function(mi) { return <option key={mi} value={mi} style={{ color:"#111", background:"#fff" }}>{mi} mi</option>; })}
+        </select>
+      </div>
+      <SecLabel text={filtered.length + " Lakes Within " + radiusMiles + " Miles"} T={T} />
+      <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>
+        Suggestions are based on your current location.
+      </div>
       {filtered.map(function(lake, i) {
         return (
           <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
@@ -1920,10 +1968,10 @@ function LakesTab({ T }) {
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
                 {lake.aka ? <div style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
-                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake.dist}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake._miles.toFixed(1)} mi</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.dist}</div>
+                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake._miles.toFixed(1)} mi</div>
                 <div style={{ fontSize:10, color:th.muted }}>Max {lake.maxDepth} ft</div>
               </div>
             </div>
@@ -1934,6 +1982,27 @@ function LakesTab({ T }) {
           </div>
         );
       })}
+      {filtered.length === 0 ? (
+        <Card T={T} borderColor={th.blue + "44"}>
+          <SecLabel text={"Nearby suggestions within " + radiusMiles + " miles"} T={T} />
+          <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>
+            No lakes found in this radius. Try these nearby waters:
+          </div>
+          {suggestedWaters.map(function(s) {
+            return (
+              <div key={s.name} style={{ border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:8, background:th.card }}>
+                <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{s.name}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{s.addr} · {s._miles.toFixed(1)} mi</div>
+              </div>
+            );
+          })}
+          {suggestedWaters.length === 0 ? (
+            <div style={{ fontSize:12, color:th.muted }}>
+              No nearby suggestions in {radiusMiles} miles. Increase radius for more options.
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
     </div>
   );
 }
