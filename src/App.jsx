@@ -275,6 +275,11 @@ function sanitizeStr(s, maxLen) {
   return s.replace(/\s+/g, " ").trim().slice(0, m);
 }
 
+function fpdccFishingMapUrl(query) {
+  var q = sanitizeStr(String(query || ""), 120);
+  return "https://map.fpdcc.com/#/?search=" + encodeURIComponent(q || "fishing");
+}
+
 function parseCoordNum(v) {
   var n = parseFloat(String(v).trim());
   return isFinite(n) ? n : NaN;
@@ -1842,9 +1847,9 @@ function LakesTab({ T }) {
                 <div style={{ fontSize:24 }}>📍</div>
                 <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Google Maps</div>
               </a>
-              <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
+              <a href={fpdccFishingMapUrl(lake.name)} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
                 <div style={{ fontSize:24 }}>🗺️</div>
-                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>LakeLink</div>
+                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>FPDCC (Free)</div>
               </a>
             </div>
           </div>
@@ -1865,8 +1870,8 @@ function LakesTab({ T }) {
                 </Card>
               );
             })}
-            <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-              <div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Full Contour Map on LakeLink</div>
+            <a href={fpdccFishingMapUrl(lake.name)} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
+              <div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Free Contour Map (FPDCC)</div>
             </a>
           </div>
         )}
