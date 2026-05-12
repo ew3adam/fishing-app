@@ -587,13 +587,25 @@ function fishingScore(wx) {
   return { score, label, emoji, color, notes };
 }
 
+function formatSunTime(value) {
+  // Open-Meteo returns local Chicago sunrise/sunset strings, so format the clock part directly.
+  if (!value) return "";
+  var parts = String(value).trim().match(/T(\d{2}):(\d{2})/);
+  if (!parts) return String(value).trim();
+  var hour = parseInt(parts[1], 10);
+  var suffix = hour >= 12 ? "PM" : "AM";
+  var displayHour = hour % 12 || 12;
+  return displayHour + ":" + parts[2] + " " + suffix;
+}
+
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    const daily = d.daily || {};
+    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown", sunrise: formatSunTime(daily.sunrise && daily.sunrise[0]), sunset: formatSunTime(daily.sunset && daily.sunset[0]) };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -603,7 +615,7 @@ async function loadWeather(lat, lng) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
-        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
+        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\",\"sunrise\":\"5:45 AM\",\"sunset\":\"7:55 PM\"}"}]
       })
     });
     const data = await res.json();
@@ -742,6 +754,11 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                {(wx.sunrise || wx.sunset) && (
+                  <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>
+                    Sunrise {wx.sunrise || "N/A"} · Sunset {wx.sunset || "N/A"}
+                  </div>
+                )}
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
