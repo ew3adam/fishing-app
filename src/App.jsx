@@ -202,39 +202,47 @@ const SPECIES = [
   },
 ];
 
-/** Real fish photos (Wikimedia Commons — free licenses; link in UI for attribution). */
+/** Local cached fish photos (downloaded from Wikimedia fallback for speed/reliability). */
 var SPECIES_PHOTO_BY_ID = {
-  crappie:"https://upload.wikimedia.org/wikipedia/commons/4/4e/Pomoxis_nigromaculatus1.jpg",
-  bass:"https://upload.wikimedia.org/wikipedia/commons/9/96/Largemouth_bass_fish_underwater_micropterus_salmoides.jpg",
-  perch:"https://upload.wikimedia.org/wikipedia/commons/0/07/Yellow_Perch_%28Perca_flavescens%29.jpg",
-  trout:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
-  catfish:"https://upload.wikimedia.org/wikipedia/commons/5/5f/Channel_Catfish.jpg",
-  carp:"https://upload.wikimedia.org/wikipedia/commons/a/a8/Common_carp.jpg",
-  coho:"https://upload.wikimedia.org/wikipedia/commons/0/03/Oncorhynchus_kisutch.jpg",
-  chinook:"https://upload.wikimedia.org/wikipedia/commons/1/14/Oncorhynchus_tshawytscha.jpg",
-  steelhead:"https://upload.wikimedia.org/wikipedia/commons/b/b1/Oncorhynchus_mykiss.jpg",
-  lake_trout:"https://upload.wikimedia.org/wikipedia/commons/b/ba/Lake_trout_fishes_salvelinus_namaycush.jpg",
-  brown_trout:"https://upload.wikimedia.org/wikipedia/commons/2/2e/Salmo_trutta.jpg",
-  brook_trout:"https://upload.wikimedia.org/wikipedia/commons/f/f9/Salvelinus_fontinalis.jpg",
-  smallmouth:"https://upload.wikimedia.org/wikipedia/commons/9/9d/Micropterus_dolomieu2.jpg",
-  walleye:"https://upload.wikimedia.org/wikipedia/commons/9/96/Sander_vitreus.jpg",
-  sauger:"https://upload.wikimedia.org/wikipedia/commons/f/f6/Sander_canadensis_115635868.jpg",
-  pike:"https://upload.wikimedia.org/wikipedia/commons/c/c6/Esox_lucius.jpg",
-  musky:"https://upload.wikimedia.org/wikipedia/commons/b/b3/Esox_masquinongy.jpg",
-  bluegill:"https://upload.wikimedia.org/wikipedia/commons/f/fa/Lepomis_macrochirus.jpg",
-  rockbass:"https://upload.wikimedia.org/wikipedia/commons/9/9a/Ambloplites_rupestris.jpg",
-  whitebass:"https://upload.wikimedia.org/wikipedia/commons/3/3b/Morone_chrysops.jpg",
-  freshwater_drum:"https://upload.wikimedia.org/wikipedia/commons/f/fb/Aplodinotus_grunniens.jpg",
-  gar:"https://upload.wikimedia.org/wikipedia/commons/4/47/Longnose_Gar_%28Lepisosteus_osseus%29.jpg",
-  bowfin:"https://upload.wikimedia.org/wikipedia/commons/5/5a/Amia_calva.jpg",
-  flathead:"https://upload.wikimedia.org/wikipedia/commons/8/84/Pylodictis_olivaris.jpg",
-  blue_cat:"https://upload.wikimedia.org/wikipedia/commons/1/17/Ictalurus_furcatus.jpg",
-  bullhead:"https://upload.wikimedia.org/wikipedia/commons/b/b4/Ameiurus_nebulosus.jpg",
+  crappie:"images/species/crappie.jpg",
+  bass:"images/species/bass.jpg",
+  perch:"images/species/perch.jpg",
+  trout:"images/species/trout.jpg",
+  catfish:"images/species/catfish.jpg",
+  carp:"images/species/carp.jpg",
+  coho:"images/species/coho.jpg",
+  chinook:"images/species/chinook.jpg",
+  steelhead:"images/species/steelhead.jpg",
+  lake_trout:"images/species/lake_trout.jpg",
+  brown_trout:"images/species/brown_trout.jpg",
+  brook_trout:"images/species/brook_trout.jpg",
+  smallmouth:"images/species/smallmouth.jpg",
+  walleye:"images/species/walleye.jpg",
+  sauger:"images/species/sauger.jpg",
+  pike:"images/species/pike.jpg",
+  musky:"images/species/musky.jpg",
+  bluegill:"images/species/bluegill.jpg",
+  rockbass:"images/species/rockbass.jpg",
+  whitebass:"images/species/whitebass.jpg",
+  freshwater_drum:"images/species/freshwater_drum.jpg",
+  gar:"images/species/gar.jpg",
+  bowfin:"images/species/bowfin.jpg",
+  flathead:"images/species/flathead.jpg",
+  blue_cat:"images/species/blue_cat.jpg",
+  bullhead:"images/species/bullhead.jpg",
 };
+
+function localAssetUrl(path) {
+  var p = sanitizeStr(String(path || ""), 400);
+  if (!p) return "";
+  var base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) ? import.meta.env.BASE_URL : "/";
+  return base.replace(/\/+$/, "/") + p.replace(/^\/+/, "");
+}
 
 // ─── LOCAL SPOTS ──────────────────────────────────────────────────────────────
 const LOCAL_SPOTS = [
   {name:"Salt Creek",addr:"Brookfield, IL",dist:"~1 mi",lat:41.826,lng:-87.845,species:["Bass","Carp","Catfish"],tag:"Creek",color:"#4ab8a0",tip:"Light tackle. Deep bends hold big carp.",apple:"maps://maps.apple.com/?daddr=41.826,-87.845",google:"https://maps.google.com/?daddr=41.826,-87.845"},
+  {name:"Cermak Quarry",addr:"McCook, IL",dist:"~2 mi",lat:41.832,lng:-87.822,species:["Bass","Panfish","Carp"],tag:"Quarry",color:"#5a9fd4",tip:"Work slower on drop-offs and quarry edges. Early morning is best.",apple:"maps://maps.apple.com/?daddr=41.832,-87.822",google:"https://maps.google.com/?daddr=41.832,-87.822"},
   {name:"Thatcher Woods / Des Plaines",addr:"River Forest, IL",dist:"~3 mi",lat:41.874,lng:-87.831,species:["Bass","Carp","Catfish","Crappie","Pike"],tag:"River",color:"#5a9fd4",tip:"Eddies behind fallen logs = bass. Night = catfish.",apple:"maps://maps.apple.com/?daddr=41.874,-87.831",google:"https://maps.google.com/?daddr=41.874,-87.831"},
   {name:"Columbia Woods / Des Plaines",addr:"Willow Springs, IL",dist:"~6 mi",lat:41.762,lng:-87.884,species:["Bass","Catfish","Carp","Crappie"],tag:"River",color:"#5a9fd4",tip:"Best catfish holes on the Des Plaines. Night fish.",apple:"maps://maps.apple.com/?daddr=41.762,-87.884",google:"https://maps.google.com/?daddr=41.762,-87.884"},
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
@@ -297,7 +305,9 @@ function extractLatLngFromMapsText(raw) {
     /@(-?\d+\.?\d*),\s*(-?\d+\.?\d*)(?:[,/]|\s|$)/,
     /[?&]q=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
     /[?&]ll=(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/,
+    /[?&]mlat=(-?\d+\.?\d*).*?[?&]mlon=(-?\d+\.?\d*)/i,
     /[?&]center=(-?\d+\.?\d*)[%2c,]\s*(-?\d+\.?\d*)/i,
+    /#map=\d+\/(-?\d+\.?\d*)\/(-?\d+\.?\d*)/i,
     /3d(-?\d+\.?\d*)[!]4d(-?\d+\.?\d*)/,
   ];
   var i;
@@ -310,6 +320,294 @@ function extractLatLngFromMapsText(raw) {
     }
   }
   return null;
+}
+
+async function guessSpotNameFromCoords(lat, lng) {
+  try {
+    var r = await fetch(
+      "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" +
+      encodeURIComponent(String(lat)) +
+      "&lon=" +
+      encodeURIComponent(String(lng))
+    );
+    if (!r.ok) return "";
+    var d = await r.json();
+    var a = d && d.address ? d.address : {};
+    var choices = [
+      a.lake, a.water, a.reservoir, a.river, a.bay, a.beach,
+      a.park, a.neighbourhood, a.suburb, a.city_district,
+      a.city, a.town, a.village, d && d.name
+    ];
+    if (d && d.display_name) choices.push(String(d.display_name).split(",")[0]);
+    var i;
+    for (i = 0; i < choices.length; i++) {
+      var s = sanitizeStr(String(choices[i] || ""), 120);
+      if (s) return s;
+    }
+    return "";
+  } catch (e) {
+    return "";
+  }
+}
+
+var LEAFLET_ASSET_PROMISE = null;
+
+function ensureLeafletReady() {
+  if (typeof window === "undefined" || !window.document) return Promise.reject(new Error("Leaflet requires browser window."));
+  if (window.L && window.L.map) return Promise.resolve(window.L);
+  if (!LEAFLET_ASSET_PROMISE) {
+    LEAFLET_ASSET_PROMISE = new Promise(function(resolve, reject) {
+      var doc = window.document;
+      if (!doc.getElementById("leaflet-css")) {
+        var link = doc.createElement("link");
+        link.id = "leaflet-css";
+        link.rel = "stylesheet";
+        link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        doc.head.appendChild(link);
+      }
+      function finish() {
+        if (window.L && window.L.map) resolve(window.L);
+        else reject(new Error("Leaflet did not initialize."));
+      }
+      var existing = doc.getElementById("leaflet-js");
+      if (existing) {
+        if (window.L && window.L.map) finish();
+        else {
+          existing.addEventListener("load", finish, { once:true });
+          existing.addEventListener("error", function() { reject(new Error("Leaflet script failed to load.")); }, { once:true });
+        }
+        return;
+      }
+      var script = doc.createElement("script");
+      script.id = "leaflet-js";
+      script.async = true;
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.onload = finish;
+      script.onerror = function() { reject(new Error("Leaflet script failed to load.")); };
+      doc.body.appendChild(script);
+    });
+  }
+  return LEAFLET_ASSET_PROMISE;
+}
+
+function PinDropMapPicker({ initialLat, initialLng, T, onUse }) {
+  var th = THEMES[T || "dark"];
+  var startLat = isValidLatLng(initialLat, initialLng) ? initialLat : 41.84;
+  var startLng = isValidLatLng(initialLat, initialLng) ? initialLng : -87.83;
+  var mapRef = useRef(null);
+  var markerRef = useRef(null);
+  var mapElRef = useRef(null);
+  var [picked, setPicked] = useState({ lat:startLat, lng:startLng });
+  var [mapErr, setMapErr] = useState("");
+
+  useEffect(function() {
+    var alive = true;
+    ensureLeafletReady().then(function(L) {
+      if (!alive || !mapElRef.current) return;
+      var map = L.map(mapElRef.current).setView([startLat, startLng], 14);
+      mapRef.current = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom:19,
+        attribution:"&copy; OpenStreetMap contributors"
+      }).addTo(map);
+      var marker = L.marker([startLat, startLng], { draggable:true }).addTo(map);
+      markerRef.current = marker;
+      map.on("click", function(ev) {
+        marker.setLatLng(ev.latlng);
+        setPicked({ lat:ev.latlng.lat, lng:ev.latlng.lng });
+      });
+      marker.on("dragend", function() {
+        var p = marker.getLatLng();
+        setPicked({ lat:p.lat, lng:p.lng });
+      });
+      setTimeout(function() {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 30);
+    }).catch(function() {
+      if (alive) setMapErr("Map could not load here. Use manual coordinates below.");
+    });
+    return function() {
+      alive = false;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      markerRef.current = null;
+    };
+  }, [startLat, startLng]);
+
+  return (
+    <div>
+      <div ref={mapElRef} style={{ width:"100%", height:300, borderRadius:10, border:"1px solid " + th.border, marginBottom:10, background:th.card }} />
+      {mapErr ? <div style={{ fontSize:12, color:th.orange, marginBottom:8 }}>{mapErr}</div> : null}
+      <div style={{ fontSize:12, color:th.white, fontFamily:"monospace", marginBottom:8 }}>
+        {picked.lat.toFixed(6)}, {picked.lng.toFixed(6)}
+      </div>
+      <button
+        type="button"
+        onClick={function() { onUse(picked.lat, picked.lng); }}
+        style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}
+      >
+        Use this pin
+      </button>
+    </div>
+  );
+}
+
+function milesBetween(lat1, lng1, lat2, lng2) {
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLng = (lng2 - lng1) * toRad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 3958.8 * c;
+}
+
+function waterPinCenter(el) {
+  if (!el) return null;
+  if (isValidLatLng(el.lat, el.lon)) return { lat:el.lat, lng:el.lon };
+  if (el.center && isValidLatLng(el.center.lat, el.center.lon)) return { lat:el.center.lat, lng:el.center.lon };
+  if (el.bounds && isValidLatLng(el.bounds.minlat, el.bounds.minlon) && isValidLatLng(el.bounds.maxlat, el.bounds.maxlon)) {
+    return {
+      lat:(el.bounds.minlat + el.bounds.maxlat) / 2,
+      lng:(el.bounds.minlon + el.bounds.maxlon) / 2,
+    };
+  }
+  return null;
+}
+
+function prettyWaterType(tags) {
+  var t = tags || {};
+  if (t.leisure === "fishing") return "Fishing area";
+  if (t.waterway === "river" || t.waterway === "stream" || t.waterway === "canal") return "River access";
+  if (t.water === "quarry") return "Quarry";
+  if (t.water === "lake" || t.natural === "water") return "Lake / water body";
+  if (t.water) return "Water: " + String(t.water);
+  if (t.waterway) return "Waterway: " + String(t.waterway);
+  return "Water body";
+}
+
+async function fetchLiveNearbyWaterPins(lat, lng, radiusMiles) {
+  if (!isValidLatLng(lat, lng)) return [];
+  var radiusMeters = Math.max(800, Math.min(160934, Math.round(radiusMiles * 1609.34)));
+  var q = [
+    "[out:json][timeout:25];(",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[natural=water];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[water];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=river];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[waterway=stream];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[man_made=reservoir];",
+    "node(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    "way(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    "relation(around:" + radiusMeters + "," + lat + "," + lng + ")[leisure=fishing];",
+    ");out center tags;"
+  ].join("");
+  var r = await fetch("https://overpass-api.de/api/interpreter", {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=UTF-8" },
+    body:q
+  });
+  if (!r.ok) throw new Error("Live map request failed");
+  var d = await r.json();
+  var arr = Array.isArray(d && d.elements) ? d.elements : [];
+  var pins = [];
+  var seen = {};
+  arr.forEach(function(el) {
+    var c = waterPinCenter(el);
+    if (!c) return;
+    var tags = el.tags || {};
+    var nm = sanitizeStr(String(tags.name || tags["name:en"] || ""), 120);
+    if (!nm) return;
+    var mi = milesBetween(lat, lng, c.lat, c.lng);
+    if (!isFinite(mi) || mi > radiusMiles) return;
+    var key = nm.toLowerCase() + "|" + c.lat.toFixed(4) + "|" + c.lng.toFixed(4);
+    if (seen[key]) return;
+    seen[key] = true;
+    pins.push({
+      id:"live_" + String(el.type || "el") + "_" + String(el.id || ""),
+      name:nm,
+      type:prettyWaterType(tags),
+      lat:c.lat,
+      lng:c.lng,
+      miles:mi,
+      live:true,
+    });
+  });
+  pins.sort(function(a, b) { return a.miles - b.miles; });
+  return pins.slice(0, 200);
+}
+
+function WaterPinsMap({ centerLat, centerLng, pins, T }) {
+  var th = THEMES[T || "dark"];
+  var mapRef = useRef(null);
+  var markerLayerRef = useRef(null);
+  var mapElRef = useRef(null);
+  var [mapErr, setMapErr] = useState("");
+
+  useEffect(function() {
+    var alive = true;
+    ensureLeafletReady().then(function(L) {
+      if (!alive || !mapElRef.current) return;
+      if (!mapRef.current) {
+        mapRef.current = L.map(mapElRef.current).setView([centerLat, centerLng], 11);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom:19,
+          attribution:"&copy; OpenStreetMap contributors"
+        }).addTo(mapRef.current);
+      }
+      mapRef.current.setView([centerLat, centerLng], 11);
+      if (markerLayerRef.current) markerLayerRef.current.remove();
+      markerLayerRef.current = L.layerGroup().addTo(mapRef.current);
+      var redPin = L.divIcon({
+        className:"water-red-pin",
+        html:'<div style="font-size:20px;line-height:1;color:#e05050;text-shadow:0 1px 2px rgba(0,0,0,0.5)">📍</div>',
+        iconSize:[20, 20],
+        iconAnchor:[10, 20],
+        popupAnchor:[0, -18]
+      });
+      (pins || []).forEach(function(p) {
+        if (!isValidLatLng(p.lat, p.lng)) return;
+        var m = L.marker([p.lat, p.lng], { icon:redPin }).addTo(markerLayerRef.current);
+        m.bindPopup("<strong>" + String(p.name || "Water body") + "</strong><br/>" + String(p.type || "Water") + (p.miles != null ? "<br/>" + p.miles.toFixed(1) + " mi" : ""));
+      });
+      setTimeout(function() {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 30);
+    }).catch(function() {
+      if (alive) setMapErr("Map could not load right now.");
+    });
+    return function() { alive = false; };
+  }, [centerLat, centerLng, JSON.stringify(pins || [])]);
+
+  useEffect(function() {
+    return function() {
+      if (markerLayerRef.current) markerLayerRef.current.remove();
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+      markerLayerRef.current = null;
+    };
+  }, []);
+
+  return (
+    <div>
+      <div ref={mapElRef} style={{ width:"100%", height:320, borderRadius:10, border:"1px solid " + th.border, background:th.card }} />
+      {mapErr ? <div style={{ fontSize:12, color:th.orange, marginTop:8 }}>{mapErr}</div> : null}
+    </div>
+  );
 }
 
 function loadLocationTrail() {
@@ -372,6 +670,7 @@ function normalizeProfile(raw) {
   out.email = typeof p.email === "string" ? p.email : "";
   out.level = p.level || "Beginner";
   out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
+  out.favTackle = Array.isArray(p.favTackle) ? p.favTackle : [];
   out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
   out.gear = Array.isArray(p.gear) ? p.gear : [];
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
@@ -487,6 +786,11 @@ const LAKES = [
     bankSpots:[{name:"North Aerator",tip:"Cast toward the aerator — trout stack here after stocking."},{name:"East Inlet Pipe",tip:"Inlet brings oxygenated water — trout hold just downstream."},{name:"South Wall",tip:"Cast parallel to wall for deep trout mid-summer."}],
     season:{spring:"Go right after FPDCC stocking (April). PowerBait near aerators.",summer:"Trout go deep. Early morning only. Drop shot at 30+ ft.",fall:"Second stocking October. Same spring tactics. Spinners work well.",winter:"Check FPDCC ice advisories. No fishing during unsafe ice."},
     lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
+  {id:"cermak_quarry",name:"Cermak Quarry",aka:"McCook Quarry Reservoir",addr:"McCook, IL",dist:"~2 mi",lat:41.832,lng:-87.822,maxDepth:35,avgDepth:16,species:["Largemouth Bass","Crappie","Bluegill","Carp","Channel Catfish"],primary:"Largemouth Bass",
+    zones:[{depth:"4–10 ft",loc:"Shallow shelf and riprap edges",tip:"Topwater and spinnerbaits at dawn."},{depth:"12–20 ft",loc:"Middle basin transition",tip:"Slow plastics or jigging along break lines."},{depth:"24–35 ft",loc:"Quarry drop-offs",tip:"Vertical presentations when fish push deeper."}],
+    bankSpots:[{name:"Rock edge corner",tip:"Cast parallel to rock bank for bass and panfish."},{name:"Drop-off point",tip:"Work bottom rigs on the ledge for catfish and carp."},{name:"Calm pocket",tip:"Float rigs for crappie near structure on low-wind days."}],
+    season:{spring:"Shallow warming edges turn on first. Work slower around riprap.",summer:"Fish low light windows and deeper breaks during midday.",fall:"Baitfish push shallow and bass feed aggressively.",winter:"Slow down and target deeper water with vertical baits."},
+    lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.832,-87.822",google:"https://maps.google.com/?daddr=41.832,-87.822"},
   {id:"tampier",name:"Tampier Lake",addr:"Palos Park, IL",dist:"~12 mi",lat:41.656,lng:-87.845,maxDepth:18,avgDepth:8,species:["Largemouth Bass","Crappie","Bluegill","Channel Catfish","Yellow Perch"],primary:"Largemouth Bass",
     zones:[{depth:"2–5 ft",loc:"North shallows and weed flats",tip:"Bass and bluegill spawn here — topwater frogs and poppers"},{depth:"8–12 ft",loc:"Main basin center",tip:"Crappie suspend at 8 ft near brush — slip float + minnow"},{depth:"14–18 ft",loc:"South channel near dam",tip:"Catfish and larger bass — slip sinker with chicken liver at night"}],
     bankSpots:[{name:"North Weed Flats",tip:"Dawn topwater for bass along the weed edge."},{name:"Main Launch Dock",tip:"Crappie stack under docks — tiny jig at 6-8 ft."},{name:"South Dam",tip:"Night fish catfish here. Slip sinker with chicken liver."}],
@@ -524,6 +828,31 @@ const CATALOGUE = [
   {id:"circlehook",cat:"Terminal Tackle",name:"Circle Hook",emoji:"⭕",what:"A hook where the point curves back toward the shank in a circle. Fish cannot swallow it — it slides out and catches in the corner of the mouth automatically.",when:"Catfish always. Any time you want a self-setting hook or catch-and-release fishing.",species:["Channel Catfish","Carp"],parts:["2/0 to 3/0 circle hook","Heavy mono or braid leader"],tip:"Do NOT jerk to set the hook — just reel down and lift. The hook rotates and catches the lip by itself.",searchQ:"circle hook fishing vs j hook diagram",yt:"https://www.youtube.com/results?search_query=circle+hook+fishing+how+to+use+catfish"},
   {id:"splitshot",cat:"Terminal Tackle",name:"Split Shot Sinker",emoji:"⚫",what:"A tiny round lead weight with a split groove. You pinch it onto your line with pliers. The smallest and simplest way to add weight to get your bait to the right depth.",when:"Float rigs for trout, perch, crappie. Any light presentation that needs a little weight.",species:["All Species"],parts:["Split shot sinker set — various sizes","Needle-nose pliers to crimp"],tip:"Place split shot 12-18 inches above your hook. Use the smallest size that gets your bait to the right depth — lighter is always better.",searchQ:"split shot sinker fishing weight setup",yt:"https://www.youtube.com/results?search_query=split+shot+sinker+how+to+use+fishing"},
 ];
+
+/** Local tackle photos cached from Wikimedia files (beta set). */
+var CATALOGUE_PHOTO_BY_ID = {
+  texas:"images/tackle/lure-perch-set.png",
+  ned:"images/tackle/lure-perch-set.png",
+  carolina:"images/tackle/lure-perch-set.png",
+  dropshot:"images/tackle/lure-perch-set.png",
+  float:"images/tackle/float.jpg",
+  hairrig:"images/tackle/hook.jpg",
+  spoon:"images/tackle/lure-cleo.jpg",
+  spinner:"images/tackle/lure-rapala.jpg",
+  swimbait:"images/tackle/lure-perch-set.png",
+  crankbait:"images/tackle/lure-rapala.jpg",
+  topwater:"images/tackle/lure-popper.jpg",
+  blade:"images/tackle/lure-cleo.jpg",
+  jig:"images/tackle/lure-perch-set.png",
+  worm:"images/tackle/earthworm.jpg",
+  tube:"images/tackle/lure-perch-set.png",
+  spawnsac:"images/tackle/salmon-roe.jpg",
+  powerbait:"images/tackle/salmon-roe.jpg",
+  liver:"images/tackle/earthworm.jpg",
+  crawler:"images/tackle/earthworm.jpg",
+  circlehook:"images/tackle/hook.jpg",
+  splitshot:"images/tackle/hook.jpg",
+};
 
 // ─── LESSONS ──────────────────────────────────────────────────────────────────
 const LESSONS = [
@@ -588,12 +917,53 @@ function fishingScore(wx) {
 }
 
 async function loadWeather(lat, lng) {
+  function moonPhaseInfo(dateLike) {
+    var names = ["New Moon","Waxing Crescent","First Quarter","Waxing Gibbous","Full Moon","Waning Gibbous","Last Quarter","Waning Crescent"];
+    var emojis = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"];
+    var d = dateLike instanceof Date ? dateLike : new Date();
+    var knownNewMoonUtc = Date.UTC(2000, 0, 6, 18, 14, 0); // Reference new moon
+    var cycleDays = 29.53058867;
+    var daysSince = (d.getTime() - knownNewMoonUtc) / 86400000;
+    var phaseDays = ((daysSince % cycleDays) + cycleDays) % cycleDays;
+    var phase = phaseDays / cycleDays;
+    var idx = Math.floor((phase * 8) + 0.5) % 8;
+    return { label:names[idx], emoji:emojis[idx] };
+  }
+
+  function formatSunTime(iso) {
+    if (!iso || typeof iso !== "string" || iso.indexOf("T") === -1) return "--";
+    var timePart = iso.split("T")[1] || "";
+    var parts = timePart.split(":");
+    if (parts.length < 2) return "--";
+    var h = Number(parts[0]);
+    var m = parts[1];
+    if (Number.isNaN(h)) return "--";
+    var suffix = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12 || 12;
+    return h12 + ":" + m + " " + suffix;
+  }
+
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    const sunriseIso = d && d.daily && d.daily.sunrise && d.daily.sunrise[0];
+    const sunsetIso = d && d.daily && d.daily.sunset && d.daily.sunset[0];
+    var forecastDate = d && d.daily && d.daily.time && d.daily.time[0] ? new Date(String(d.daily.time[0]) + "T12:00:00") : new Date();
+    var moon = moonPhaseInfo(forecastDate);
+    return {
+      temp: Math.round(c.temperature_2m),
+      wind: Math.round(c.windspeed_10m),
+      code: c.weathercode,
+      precip: c.precipitation_probability || 0,
+      icon: WX_ICON[c.weathercode] || "🌡️",
+      condition: WX_LABEL[c.weathercode] || "Unknown",
+      sunrise: formatSunTime(sunriseIso),
+      sunset: formatSunTime(sunsetIso),
+      moonPhase: moon.label,
+      moonEmoji: moon.emoji
+    };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -609,7 +979,17 @@ async function loadWeather(lat, lng) {
     const data = await res.json();
     const txt = (data.content && data.content[0] && data.content[0].text) || "";
     const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      var fallback = JSON.parse(m[0]);
+      fallback.sunrise = fallback.sunrise || "--";
+      fallback.sunset = fallback.sunset || "--";
+      if (!fallback.moonPhase || !fallback.moonEmoji) {
+        var moonNow = moonPhaseInfo(new Date());
+        fallback.moonPhase = fallback.moonPhase || moonNow.label;
+        fallback.moonEmoji = fallback.moonEmoji || moonNow.emoji;
+      }
+      return fallback;
+    }
     return null;
   }
 }
@@ -742,6 +1122,11 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌅 {wx.sunrise || "--"}</span>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🌇 {wx.sunset || "--"}</span>
+                  <span style={{ fontSize:11, color:th.white, fontWeight:700, background:th.card, border:"1px solid " + th.border, borderRadius:999, padding:"3px 8px", whiteSpace:"nowrap" }}>🎣 {wx.moonEmoji || "🌙"} {wx.moonPhase || "--"}</span>
+                </div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
@@ -792,11 +1177,46 @@ function HomeTab({ profile, T }) {
 }
 
 // ─── SPECIES TAB ──────────────────────────────────────────────────────────────
-function SpeciesTab({ T }) {
+function SpeciesTab({ profile, setProfile, T }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
+  const [layout, setLayout] = useState("list");
+  const [sortBy, setSortBy] = useState("favorites");
   const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
+  const [listPhotoFailed, setListPhotoFailed] = useState({});
+  const favSp = (profile && profile.favSpecies) || [];
+
+  function toggleFavSpecies(name) {
+    if (typeof setProfile !== "function") return;
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var arr = (base.favSpecies || []).slice();
+      var next = arr.includes(name) ? arr.filter(function(x) { return x !== name; }) : arr.concat([name]);
+      return Object.assign({}, base, { favSpecies:next });
+    });
+  }
+
+  function sortedSpecies() {
+    return SPECIES.slice().sort(function(a, b) {
+      var af = favSp.includes(a.name) ? 1 : 0;
+      var bf = favSp.includes(b.name) ? 1 : 0;
+      if (sortBy === "favorites" && af !== bf) return bf - af;
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "season") return String(a.season || "").localeCompare(String(b.season || ""));
+      if (sortBy === "level") return String(a.level || "").localeCompare(String(b.level || ""));
+      if (af !== bf) return bf - af;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function onListPhotoError(id) {
+    setListPhotoFailed(function(prev) {
+      var next = Object.assign({}, prev);
+      next[id] = true;
+      return next;
+    });
+  }
 
   useEffect(function() {
     setSpeciesPhotoFailed(false);
@@ -804,11 +1224,22 @@ function SpeciesTab({ T }) {
 
   if (sel) {
     var sp = sel;
-    var speciesPhotoUrl = SPECIES_PHOTO_BY_ID[sp.id];
+    var speciesPhotoPath = SPECIES_PHOTO_BY_ID[sp.id];
+    var speciesPhotoUrl = localAssetUrl(speciesPhotoPath);
+    var isFavDetail = favSp.includes(sp.name);
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
-        {speciesPhotoUrl && !speciesPhotoFailed ? (
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, margin:"12px 0 10px" }}>
+          <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} />
+          <button
+            type="button"
+            onClick={function() { toggleFavSpecies(sp.name); }}
+            style={{ background:isFavDetail ? th.green + "33" : "transparent", border:"1px solid " + (isFavDetail ? th.green : th.border), borderRadius:8, padding:"8px 10px", cursor:"pointer", color:isFavDetail ? th.green : th.muted, fontSize:12, fontWeight:700 }}
+          >
+            {isFavDetail ? "★ Following" : "☆ Favorite"}
+          </button>
+        </div>
+        {speciesPhotoPath && !speciesPhotoFailed ? (
           <div style={{ marginBottom:14 }}>
             <img
               src={speciesPhotoUrl}
@@ -820,8 +1251,8 @@ function SpeciesTab({ T }) {
             />
             <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.45 }}>
               Photo:{" "}
-              <a href={speciesPhotoUrl} target="_blank" rel="noopener noreferrer" style={{ color:th.blue }}>
-                Wikimedia Commons
+              <a href="https://commons.wikimedia.org/wiki/Category:Freshwater_fishes" target="_blank" rel="noopener noreferrer" style={{ color:th.blue }}>
+                Wikimedia (cached local copy)
               </a>
               {" "}(species ID photo — compare to your catch before keeping fish).
             </div>
@@ -883,22 +1314,92 @@ function SpeciesTab({ T }) {
     );
   }
 
+  var rows = sortedSpecies();
+
   return (
     <div>
-      <SecLabel text="Tap a Fish for Full Details" T={T} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
-        {SPECIES.map(function(sp) {
-          return (
-            <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
-              <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
-              {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
-            </button>
-          );
-        })}
+      <SecLabel text="Species Browser" T={T} />
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+        <button type="button" onClick={function() { setLayout("list"); }} style={{ background:layout==="list" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="list" ? th.green : th.border), borderRadius:8, color:layout==="list" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          List view
+        </button>
+        <button type="button" onClick={function() { setLayout("tile"); }} style={{ background:layout==="tile" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="tile" ? th.green : th.border), borderRadius:8, color:layout==="tile" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          Tile view
+        </button>
       </div>
+
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Order by</div>
+        <select value={sortBy} onChange={function(e) { setSortBy(e.target.value); }} style={{ width:"100%", background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", fontSize:13 }}>
+          <option value="favorites">Favorites first</option>
+          <option value="name">Name (A-Z)</option>
+          <option value="season">Season</option>
+          <option value="level">Difficulty</option>
+        </select>
+      </div>
+
+      {layout === "list" ? (
+        <div>
+          {rows.map(function(sp) {
+            var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var imgUrl = localAssetUrl(img);
+            var isFav = favSp.includes(sp.name);
+            return (
+              <div key={sp.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:10, marginBottom:8, display:"flex", alignItems:"center", gap:10 }}>
+                <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ display:"flex", alignItems:"center", gap:10, flex:1, background:"transparent", border:"none", textAlign:"left", cursor:"pointer", color:th.white, padding:0 }}>
+                  <div style={{ width:66, height:44, borderRadius:8, overflow:"hidden", border:"1px solid " + th.border, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {img && !listPhotoFailed[sp.id] ? (
+                      <img src={imgUrl} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:20 }}>{sp.emoji}</span>
+                    )}
+                  </div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:17, fontWeight:700, color:th.white, lineHeight:1.2 }}>{sp.name}</div>
+                    <div style={{ fontSize:11, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                    <div style={{ fontSize:11, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                  </div>
+                </button>
+                <button type="button" onClick={function() { toggleFavSpecies(sp.name); }} style={{ minWidth:92, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:10, padding:"10px 8px", cursor:"pointer", color:isFav ? th.muted : "#fff", fontSize:12, fontWeight:700 }}>
+                  {isFav ? "Following" : "Favorite"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
+          {rows.map(function(sp) {
+            var img = SPECIES_PHOTO_BY_ID[sp.id];
+            var imgUrl = localAssetUrl(img);
+            var isFav = favSp.includes(sp.name);
+            return (
+              <div key={sp.id} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderRadius:10, overflow:"hidden" }}>
+                <button type="button" onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ width:"100%", background:"transparent", border:"none", cursor:"pointer", textAlign:"left", color:th.white, padding:0 }}>
+                  <div style={{ width:"100%", height:100, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {img && !listPhotoFailed[sp.id] ? (
+                      <img src={imgUrl} alt={sp.name} loading="lazy" decoding="async" onError={function() { onListPhotoError(sp.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:30 }}>{sp.emoji}</span>
+                    )}
+                  </div>
+                  <div style={{ padding:"10px 10px 8px" }}>
+                    <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
+                    <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                    <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                  </div>
+                </button>
+                <div style={{ padding:"0 10px 10px" }}>
+                  <button type="button" onClick={function() { toggleFavSpecies(sp.name); }} style={{ width:"100%", background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:8, padding:"7px 0", cursor:"pointer", color:isFav ? th.muted : "#fff", fontSize:11, fontWeight:700 }}>
+                    {isFav ? "Following" : "Favorite"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -919,6 +1420,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [mapPickerStart, setMapPickerStart] = useState({ lat:41.84, lng:-87.83 });
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -950,38 +1452,47 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
   }
 
-  function openSaveWithCoords(lat, lng) {
+  function openSaveWithCoords(lat, lng, opts) {
+    var o = opts || {};
     setSaveErr("");
     setSaveDraft({
-      name:"",
+      name:sanitizeStr(o.name || "", 120),
       lat:lat,
       lng:lng,
       notes:"",
       species_present:[],
       access_info:"",
-      shareClub:false,
+      shareClub:!!o.shareClub,
       sharedWith:[],
+      needsNamePrompt:!!o.needsNamePrompt,
     });
     setPrivSpotId(null);
     setPrivView("save");
   }
 
-  function startSaveCurrentGps() {
+  function openMapPickerAt(lat, lng) {
+    setMapPickerStart({ lat:lat, lng:lng });
+    setPrivView("picker");
+  }
+
+  function startQuickAddSpot() {
     setGeoErr("");
     setGeoLoading(true);
     if (!navigator.geolocation) {
       setGeoLoading(false);
-      setGeoErr("GPS not available in this browser.");
+      setGeoErr("GPS not available. Opening map picker.");
+      openMapPickerAt(41.84, -87.83);
       return;
     }
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         setGeoLoading(false);
-        openSaveWithCoords(pos.coords.latitude, pos.coords.longitude);
+        openMapPickerAt(pos.coords.latitude, pos.coords.longitude);
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+        setGeoErr("Could not read GPS. Dropping you into map picker.");
+        openMapPickerAt(41.84, -87.83);
       },
       { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
     );
@@ -991,6 +1502,30 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var now = Date.now();
     var pts = pruneTrailPoints(loadLocationTrail(), now);
     return clusterTrailPoints(pts, 3);
+  }
+
+  function startMapPicker() {
+    var la = parseCoordNum(pastManualLat);
+    var ln = parseCoordNum(pastManualLng);
+    if (!isValidLatLng(la, ln)) {
+      la = 41.84;
+      ln = -87.83;
+    }
+    openMapPickerAt(la, ln);
+  }
+
+  async function handleMapPinUse(lat, lng) {
+    setPastManualLat(lat.toFixed(6));
+    setPastManualLng(lng.toFixed(6));
+    var suggested = await guessSpotNameFromCoords(lat, lng);
+    openSaveWithCoords(lat, lng, {
+      name:suggested,
+      shareClub:false,
+      needsNamePrompt:!sanitizeStr(suggested, 1),
+    });
+    if (!sanitizeStr(suggested, 1)) {
+      setSaveErr("No lake name found automatically. Enter a location name below.");
+    }
   }
 
   function submitSaveForm() {
@@ -1010,6 +1545,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       if (!d) return d;
       var n = Object.assign({}, d);
       n[k] = v;
+      if (k === "name" && sanitizeStr(v, 1)) n.needsNamePrompt = false;
       return n;
     });
   }
@@ -1102,9 +1638,36 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div>
         <OBtn label="Back" onClick={function() { setSaveErr(""); if (privSpotId) setPrivView("detail"); else setPrivView("main"); setSaveDraft(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>{privSpotId ? "Edit your spot" : "Name your fishing spot"}</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Give it a name you will recognize later. Coordinates fill in automatically — you can adjust them if needed.</p>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>Map pin is saved. Confirm name and choose if this spot is private or public.</p>
         <Card T={T}>
           <SecLabel text="Basics" T={T} />
+          {saveDraft.needsNamePrompt && !sanitizeStr(saveDraft.name, 1) ? (
+            <div style={{ background:th.orange + "14", border:"1px solid " + th.orange + "44", borderRadius:8, padding:10, marginBottom:10 }}>
+              <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:6 }}>No lake name found automatically.</div>
+              <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>Do you want to enter a location name now?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button
+                  type="button"
+                  onClick={function() {
+                    setSaveDraft(function(d) { return Object.assign({}, d, { needsNamePrompt:false }); });
+                  }}
+                  style={{ flex:1, background:th.card, border:"1px solid " + th.orange, borderRadius:8, padding:"8px 10px", color:th.orange, fontWeight:700, cursor:"pointer", fontSize:12 }}
+                >
+                  Yes, I will enter it
+                </button>
+                <button
+                  type="button"
+                  onClick={function() {
+                    var fallbackName = "Dropped pin " + Number(saveDraft.lat).toFixed(4) + ", " + Number(saveDraft.lng).toFixed(4);
+                    setSaveDraft(function(d) { return Object.assign({}, d, { name:fallbackName, needsNamePrompt:false }); });
+                  }}
+                  style={{ flex:1, background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontWeight:700, cursor:"pointer", fontSize:12 }}
+                >
+                  Use pin coordinates
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Spot name</div>
           <input value={saveDraft.name} onChange={function(e) { setDraftField("name", e.target.value); }} placeholder="e.g. Busse south cove" style={inp} />
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
@@ -1116,6 +1679,26 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Longitude</div>
               <input value={String(saveDraft.lng)} onChange={function(e) { setDraftField("lng", e.target.value); }} style={inp} />
             </div>
+          </div>
+          <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Visibility</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <button
+              type="button"
+              onClick={function() { setDraftField("shareClub", false); }}
+              style={{ background:!saveDraft.shareClub ? th.green + "33" : "transparent", border:"1px solid " + (!saveDraft.shareClub ? th.green : th.border), borderRadius:8, padding:"10px 8px", cursor:"pointer", color:!saveDraft.shareClub ? th.green : th.muted, fontWeight:700, fontSize:12 }}
+            >
+              Private
+            </button>
+            <button
+              type="button"
+              onClick={function() { setDraftField("shareClub", true); }}
+              style={{ background:saveDraft.shareClub ? th.blue + "33" : "transparent", border:"1px solid " + (saveDraft.shareClub ? th.blue : th.border), borderRadius:8, padding:"10px 8px", cursor:"pointer", color:saveDraft.shareClub ? th.blue : th.muted, fontWeight:700, fontSize:12 }}
+            >
+              Public
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:th.muted, marginTop:8 }}>
+            Public means shared to club map. Private stays only on your device.
           </div>
         </Card>
         <Card T={T}>
@@ -1141,7 +1724,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
         <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
-          {privSpotId ? "Save changes" : "Save to my spots"}
+          {privSpotId ? "Save changes" : "Add new spot"}
         </button>
         <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>Stays private until you choose sharing from your spot details.</div>
       </div>
@@ -1244,9 +1827,34 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </Card>
         <Card T={T}>
           <SecLabel text="Pick from a map" T={T} />
-          <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", textDecoration:"none", color:th.blue, fontWeight:700, fontSize:13 }}>
-            Open Google Maps — long-press to copy coords, paste above
-          </a>
+          <button
+            type="button"
+            onClick={startMapPicker}
+            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:12, textAlign:"center", color:th.blue, fontWeight:700, fontSize:13, cursor:"pointer" }}
+          >
+            Open in-app map picker
+          </button>
+          <div style={{ fontSize:11, color:th.muted, marginTop:8, lineHeight:1.5 }}>
+            Tap the map, drop your pin, then import coordinates into your private spot.
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (privView === "picker") {
+    return (
+      <div>
+        <OBtn label="Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Drop a pin on the map</div>
+        <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.55 }}>Tap anywhere on the map or drag the pin, then use that spot.</p>
+        <Card T={T} borderColor={th.blue + "44"}>
+          <PinDropMapPicker
+            T={T}
+            initialLat={mapPickerStart.lat}
+            initialLng={mapPickerStart.lng}
+            onUse={handleMapPinUse}
+          />
         </Card>
       </div>
     );
@@ -1407,7 +2015,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         {mySpots.length === 0 ? (
           <Card T={T}>
             <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
-            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Save my fishing spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
+            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Add new spot</strong> button to open the map, drop a pin, then save your location.</div>
           </Card>
         ) : null}
         {mySpots.map(function(s) {
@@ -1536,7 +2144,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <button
           type="button"
           disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          onClick={startQuickAddSpot}
           style={{
             width:"100%",
             background:th.green,
@@ -1556,7 +2164,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:28 }} aria-hidden>📍</span>
-          <span>{geoLoading ? "Finding where you are…" : "Save my fishing spot"}</span>
+          <span>{geoLoading ? "Finding map center…" : "Add new spot"}</span>
         </button>
         <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
           Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
@@ -1581,7 +2189,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <button
           type="button"
           disabled={geoLoading}
-          onClick={startSaveCurrentGps}
+          onClick={startQuickAddSpot}
           style={{
             width:"100%",
             background:th.green,
@@ -1601,7 +2209,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         >
           <span style={{ fontSize:22 }} aria-hidden>📍</span>
-          {geoLoading ? "Working…" : "Save my spot"}
+          {geoLoading ? "Working…" : "Add new spot"}
         </button>
         <div style={{ fontSize:11, color:th.muted, textAlign:"center", marginTop:6 }}>Tap here anytime while you scroll the list</div>
       </div>
@@ -1619,31 +2227,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </div>
       ) : null}
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-        <button
-          type="button"
-          onClick={function() { setPrivView("past"); }}
-          style={{
-            minHeight:64,
-            padding:12,
-            borderRadius:12,
-            border:"2px solid " + th.blue,
-            background:th.blue + "18",
-            color:th.blue,
-            fontWeight:700,
-            fontSize:14,
-            cursor:"pointer",
-            lineHeight:1.35,
-          }}
-        >
-          🗺️ Save another way<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
-        </button>
+      <div style={{ marginBottom:16 }}>
         <button
           type="button"
           onClick={function() { setPrivView("club"); }}
           style={{
-            minHeight:64,
+            width:"100%",
+            minHeight:56,
             padding:12,
             borderRadius:12,
             border:"2px solid " + th.gold,
@@ -1655,15 +2245,14 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             lineHeight:1.35,
           }}
         >
-          👥 Club shared map<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>optional</span>
+          👥 Club shared map
         </button>
       </div>
 
       <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
       <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Places in this app</div>
       <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
-        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
+        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Add new spot</strong> button above to keep your own place.
       </p>
 
       <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
@@ -1750,13 +2339,141 @@ function LakesTab({ T }) {
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
+  const [radiusMiles, setRadiusMiles] = useState(50);
+  const [center, setCenter] = useState({ lat:41.84, lng:-87.83 });
+  const [locMsg, setLocMsg] = useState("Using North Riverside center.");
+  const [areaInput, setAreaInput] = useState("");
+  const [livePins, setLivePins] = useState([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveErr, setLiveErr] = useState("");
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
 
-  var filtered = LAKES.filter(function(l) {
-    return !search || l.name.toLowerCase().includes(search.toLowerCase());
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+        setLocMsg("Using your current location.");
+      },
+      function() {
+        setLocMsg("Using North Riverside center (location unavailable).");
+      },
+      { enableHighAccuracy:false, maximumAge:120000, timeout:8000 }
+    );
+  }, []);
+
+  function refreshCenterFromGps() {
+    if (!navigator.geolocation) {
+      setLocMsg("Location not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+        setLocMsg("Center updated to your current location.");
+      },
+      function() {
+        setLocMsg("Could not update location. Keeping previous center.");
+      },
+      { enableHighAccuracy:true, maximumAge:60000, timeout:12000 }
+    );
+  }
+
+  async function setCenterFromAreaSearch() {
+    var area = sanitizeStr(areaInput, 120);
+    if (!area) {
+      setLocMsg("Enter an area or zip before searching.");
+      return;
+    }
+    try {
+      setLocMsg("Looking up area center...");
+      var r = await fetch(
+        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" +
+        encodeURIComponent(area)
+      );
+      if (!r.ok) throw new Error("Area search failed");
+      var d = await r.json();
+      if (!Array.isArray(d) || !d[0]) {
+        setLocMsg("Area not found. Try city, zip, or full address.");
+        return;
+      }
+      var lat = parseFloat(d[0].lat);
+      var lng = parseFloat(d[0].lon);
+      if (!isValidLatLng(lat, lng)) {
+        setLocMsg("Area center was invalid. Try again.");
+        return;
+      }
+      setCenter({ lat:lat, lng:lng });
+      setLocMsg("Using area center: " + sanitizeStr(String(d[0].display_name || area), 70));
+    } catch (e) {
+      setLocMsg("Could not search that area right now.");
+    }
+  }
+
+  useEffect(function() {
+    var alive = true;
+    var timer = setTimeout(function() {
+      setLiveLoading(true);
+      setLiveErr("");
+      fetchLiveNearbyWaterPins(center.lat, center.lng, radiusMiles).then(function(rows) {
+        if (!alive) return;
+        setLivePins(Array.isArray(rows) ? rows : []);
+        setLiveLoading(false);
+      }).catch(function() {
+        if (!alive) return;
+        setLiveErr("Live water lookup unavailable. Showing saved map data.");
+        setLivePins([]);
+        setLiveLoading(false);
+      });
+    }, 200);
+    return function() {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [center.lat, center.lng, radiusMiles]);
+
+  var q = search.toLowerCase().trim();
+  var lakesWithMiles = LAKES.map(function(l) {
+    return Object.assign({}, l, { _miles:milesBetween(center.lat, center.lng, l.lat, l.lng) });
   });
+  var filtered = lakesWithMiles.filter(function(l) {
+    var within = l._miles <= radiusMiles;
+    var match = !q || l.name.toLowerCase().includes(q) || String(l.addr || "").toLowerCase().includes(q);
+    return within && match;
+  }).sort(function(a, b) { return a._miles - b._miles; });
+
+  var riverAccessPoints = LOCAL_SPOTS.map(function(s, i) {
+    return {
+      id:"river_" + i,
+      name:s.name,
+      type:"River access",
+      lat:s.lat,
+      lng:s.lng,
+      miles:milesBetween(center.lat, center.lng, s.lat, s.lng),
+    };
+  });
+  var lakePins = lakesWithMiles.map(function(l) {
+    return {
+      id:"lake_" + l.id,
+      name:l.name,
+      type:"Lake / water body",
+      lat:l.lat,
+      lng:l.lng,
+      miles:l._miles,
+    };
+  });
+  var combinedPins = lakePins.concat(riverAccessPoints).concat(livePins);
+  var seenPins = {};
+  var mapPins = combinedPins.filter(function(p) {
+    var key = (String(p.name || "").toLowerCase()) + "|" + Number(p.lat).toFixed(4) + "|" + Number(p.lng).toFixed(4);
+    if (seenPins[key]) return false;
+    seenPins[key] = true;
+    var within = p.miles <= radiusMiles;
+    var match = !q || String(p.name || "").toLowerCase().includes(q) || String(p.type || "").toLowerCase().includes(q);
+    return within && match;
+  }).sort(function(a, b) { return a.miles - b.miles; });
 
   if (sel) {
     var lake = sel;
@@ -1876,8 +2593,47 @@ function LakesTab({ T }) {
 
   return (
     <div>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} />
-      <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
+      <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:12 }}>
+        <SecLabel text="Search area and mileage" T={T} />
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginBottom:8 }}>
+          <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes or river access..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none" }} />
+          <select value={String(radiusMiles)} onChange={function(e) { setRadiusMiles(parseInt(e.target.value, 10) || 50); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"0 10px", color:th.white, fontSize:13 }}>
+            {[5,10,15,25,50,75,100].map(function(mi) { return <option key={mi} value={mi}>{mi} mi</option>; })}
+          </select>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginBottom:8 }}>
+          <input
+            value={areaInput}
+            onChange={function(e) { setAreaInput(e.target.value); }}
+            placeholder="Set map center by area (city, zip, address)"
+            style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none" }}
+          />
+          <button type="button" onClick={setCenterFromAreaSearch} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:8, color:th.blue, padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+            Search area
+          </button>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, marginBottom:8 }}>
+          <div style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>
+            {locMsg}<br />
+            Center: {center.lat.toFixed(4)}, {center.lng.toFixed(4)}
+          </div>
+          <button type="button" onClick={refreshCenterFromGps} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:8, color:th.green, padding:"8px 10px", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+            Use my location
+          </button>
+        </div>
+        <div style={{ fontSize:12, color:th.white }}>
+          {mapPins.length} red pins found within {radiusMiles} miles (live + saved).
+        </div>
+        {liveLoading ? <div style={{ fontSize:11, color:th.blue, marginTop:4 }}>Refreshing live nearby water map...</div> : null}
+        {liveErr ? <div style={{ fontSize:11, color:th.orange, marginTop:4 }}>{liveErr}</div> : null}
+      </Card>
+
+      <Card T={T} borderColor={th.red + "44"}>
+        <SecLabel text="Map pins (red)" T={T} />
+        <WaterPinsMap centerLat={center.lat} centerLng={center.lng} pins={mapPins} T={T} />
+      </Card>
+
+      <SecLabel text={filtered.length + " Lakes Within " + radiusMiles + " Miles"} T={T} />
       {filtered.map(function(lake, i) {
         return (
           <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
@@ -1885,10 +2641,10 @@ function LakesTab({ T }) {
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
                 {lake.aka ? <div style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
-                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake.dist}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake._miles.toFixed(1)} mi</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.dist}</div>
+                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake._miles.toFixed(1)} mi</div>
                 <div style={{ fontSize:10, color:th.muted }}>Max {lake.maxDepth} ft</div>
               </div>
             </div>
@@ -1904,54 +2660,78 @@ function LakesTab({ T }) {
 }
 
 // ─── CATALOGUE TAB ────────────────────────────────────────────────────────────
-function CatalogueTab({ T }) {
+function CatalogueTab({ profile, setProfile, T }) {
   const th = THEMES[T];
   const [cat, setCat] = useState("All");
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
-  const [img, setImg] = useState(null);
-  const [imgLoading, setImgLoading] = useState(false);
+  const [layout, setLayout] = useState("list");
+  const [sortBy, setSortBy] = useState("favorites");
+  const [detailPhotoFailed, setDetailPhotoFailed] = useState(false);
+  const [listPhotoFailed, setListPhotoFailed] = useState({});
+  var favTackle = (profile && profile.favTackle) || [];
 
   useEffect(function() {
-    if (!sel) return;
-    setImg(null);
-    setImgLoading(true);
-    loadTackleImage(sel.name).then(function(url) {
-      setImg(url);
-      setImgLoading(false);
+    setDetailPhotoFailed(false);
+  }, [sel && sel.id]);
+
+  function onTacklePhotoError(id) {
+    setListPhotoFailed(function(prev) {
+      var next = Object.assign({}, prev);
+      next[id] = true;
+      return next;
     });
-  }, [sel]);
+  }
+
+  function toggleFavoriteTackle(id) {
+    if (typeof setProfile !== "function") return;
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var curr = (base.favTackle || []).slice();
+      var next = curr.includes(id) ? curr.filter(function(x) { return x !== id; }) : curr.concat([id]);
+      return Object.assign({}, base, { favTackle:next });
+    });
+  }
 
   var filtered = CATALOGUE.filter(function(item) {
     var mc = cat === "All" || item.cat === cat;
     var ms = !search || item.name.toLowerCase().includes(search.toLowerCase()) || item.what.toLowerCase().includes(search.toLowerCase());
     return mc && ms;
   });
+  var ordered = filtered.slice().sort(function(a, b) {
+    var af = favTackle.includes(a.id) ? 1 : 0;
+    var bf = favTackle.includes(b.id) ? 1 : 0;
+    if (sortBy === "favorites" && af !== bf) return bf - af;
+    if (sortBy === "name") return a.name.localeCompare(b.name);
+    if (sortBy === "category") return String(a.cat || "").localeCompare(String(b.cat || ""));
+    return b.id.localeCompare(a.id);
+  });
 
   if (sel) {
+    var detailPhotoPath = CATALOGUE_PHOTO_BY_ID[sel.id];
+    var detailPhotoUrl = localAssetUrl(detailPhotoPath);
     return (
       <div>
         <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
         <Card T={T}>
-          <div style={{ fontSize:36, marginBottom:6 }}>{sel.emoji}</div>
-          <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{sel.name}</div>
-          <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{sel.cat.toUpperCase()}</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+            <div>
+              <div style={{ fontSize:36, marginBottom:6 }}>{sel.emoji}</div>
+              <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{sel.name}</div>
+              <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{sel.cat.toUpperCase()}</div>
+            </div>
+            <button type="button" onClick={function() { toggleFavoriteTackle(sel.id); }} style={{ background:favTackle.includes(sel.id) ? th.green + "33" : "transparent", border:"1px solid " + (favTackle.includes(sel.id) ? th.green : th.border), borderRadius:8, color:favTackle.includes(sel.id) ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700, minWidth:96 }}>
+              {favTackle.includes(sel.id) ? "Following" : "Favorite"}
+            </button>
+          </div>
         </Card>
 
         <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, overflow:"hidden", marginBottom:12, minHeight:180, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          {imgLoading && (
-            <div style={{ textAlign:"center", padding:24 }}>
-              <div style={{ fontSize:32 }}>🔍</div>
-              <div style={{ fontSize:12, color:th.muted, marginTop:8 }}>Loading photo...</div>
-            </div>
-          )}
-          {img && !imgLoading && (
-            <img src={img} alt={sel.name} style={{ width:"100%", maxHeight:220, objectFit:"contain", display:"block" }} onError={function() { setImg(null); }} />
-          )}
-          {!img && !imgLoading && (
+          {detailPhotoPath && !detailPhotoFailed ? (
+            <img src={detailPhotoUrl} alt={sel.name} style={{ width:"100%", maxHeight:220, objectFit:"contain", display:"block" }} onError={function() { setDetailPhotoFailed(true); }} />
+          ) : (
             <div style={{ textAlign:"center", padding:24 }}>
               <div style={{ fontSize:48 }}>{sel.emoji}</div>
-              <a href={"https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(sel.searchQ)} target="_blank" rel="noopener noreferrer" style={{ display:"block", fontSize:12, color:th.blue, marginTop:8 }}>Search Google Images for photo</a>
             </div>
           )}
         </div>
@@ -1991,6 +2771,21 @@ function CatalogueTab({ T }) {
   return (
     <div>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lures, rigs, bait..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 8px" }} />
+      <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+        <button type="button" onClick={function() { setLayout("list"); }} style={{ background:layout==="list" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="list" ? th.green : th.border), borderRadius:8, color:layout==="list" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          List
+        </button>
+        <button type="button" onClick={function() { setLayout("tile"); }} style={{ background:layout==="tile" ? th.green + "33" : "transparent", border:"1px solid " + (layout==="tile" ? th.green : th.border), borderRadius:8, color:layout==="tile" ? th.green : th.muted, padding:"8px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+          Tile
+        </button>
+      </div>
+      <div style={{ marginBottom:8 }}>
+        <select value={sortBy} onChange={function(e) { setSortBy(e.target.value); }} style={{ width:"100%", background:th.card, color:th.white, border:"1px solid " + th.border, borderRadius:8, padding:"9px 10px", fontSize:13 }}>
+          <option value="favorites">Favorites first</option>
+          <option value="name">Name A-Z</option>
+          <option value="category">Category</option>
+        </select>
+      </div>
       <div style={{ overflowX:"auto", whiteSpace:"nowrap", paddingBottom:8, marginBottom:10 }}>
         {CATALOGUE_CATS.map(function(c) {
           return (
@@ -2000,23 +2795,64 @@ function CatalogueTab({ T }) {
           );
         })}
       </div>
-      <SecLabel text={filtered.length + " items — tap for photos + tutorial"} T={T} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-        {filtered.map(function(item) {
-          return (
-            <button key={item.id} onClick={function() { setSel(item); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:6 }}>{item.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{item.name}</div>
-              <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{item.cat}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:4, lineHeight:1.4 }}>{item.species.slice(0,2).join(", ")}</div>
-              <div style={{ display:"flex", gap:6, marginTop:8 }}>
-                <span style={{ fontSize:10, background:"#1a3a5a", color:"#7ab8e8", borderRadius:4, padding:"2px 6px" }}>📸 Photo</span>
-                <span style={{ fontSize:10, background:"#3a1a1a", color:"#e87a7a", borderRadius:4, padding:"2px 6px" }}>▶ Video</span>
+      <SecLabel text={ordered.length + " items — tap for photos + tutorial"} T={T} />
+      {layout === "list" ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {ordered.map(function(item) {
+            var isFav = favTackle.includes(item.id);
+            var thumbPath = CATALOGUE_PHOTO_BY_ID[item.id];
+            var thumbUrl = localAssetUrl(thumbPath);
+            return (
+              <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:10, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+                <button type="button" onClick={function() { setSel(item); }} style={{ flex:1, textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:10 }}>
+                  <div style={{ width:58, height:58, borderRadius:10, overflow:"hidden", background:th.bg, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+                    {thumbPath && !listPhotoFailed[item.id] ? (
+                      <img src={thumbUrl} alt={item.name} loading="lazy" decoding="async" onError={function() { onTacklePhotoError(item.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      item.emoji
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:18, color:th.white, lineHeight:1.2 }}>{item.name}</div>
+                    <div style={{ fontSize:11, color:th.green, marginTop:3 }}>{item.cat}</div>
+                    <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{item.species.slice(0, 2).join(", ")}</div>
+                  </div>
+                </button>
+                <button type="button" onClick={function() { toggleFavoriteTackle(item.id); }} style={{ minWidth:112, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:12, padding:"11px 10px", color:isFav ? th.muted : "#fff", fontWeight:700, cursor:"pointer" }}>
+                  {isFav ? "Following" : "FOLLOW"}
+                </button>
               </div>
-            </button>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          {ordered.map(function(item) {
+            var isFav = favTackle.includes(item.id);
+            var thumbPath = CATALOGUE_PHOTO_BY_ID[item.id];
+            var thumbUrl = localAssetUrl(thumbPath);
+            return (
+              <div key={item.id} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, color:th.white }}>
+                <button type="button" onClick={function() { setSel(item); }} style={{ width:"100%", textAlign:"left", background:"transparent", border:"none", color:th.white, cursor:"pointer", padding:0 }}>
+                  <div style={{ width:"100%", height:92, borderRadius:8, overflow:"hidden", background:th.bg, border:"1px solid " + th.border, marginBottom:8, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {thumbPath && !listPhotoFailed[item.id] ? (
+                      <img src={thumbUrl} alt={item.name} loading="lazy" decoding="async" onError={function() { onTacklePhotoError(item.id); }} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                    ) : (
+                      <span style={{ fontSize:24 }}>{item.emoji}</span>
+                    )}
+                  </div>
+                  <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{item.name}</div>
+                  <div style={{ fontSize:10, color:th.green, fontFamily:"monospace", marginTop:2 }}>{item.cat}</div>
+                  <div style={{ fontSize:10, color:th.muted, marginTop:4, lineHeight:1.4 }}>{item.species.slice(0,2).join(", ")}</div>
+                </button>
+                <button type="button" onClick={function() { toggleFavoriteTackle(item.id); }} style={{ width:"100%", marginTop:8, background:isFav ? "transparent" : th.blue, border:"1px solid " + (isFav ? th.border : th.blue), borderRadius:8, color:isFav ? th.muted : "#fff", padding:"6px 0", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                  {isFav ? "Following" : "Favorite"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2185,9 +3021,9 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
-              <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
+              <input type="file" accept="image/*" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
+                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>🖼️ Choose Photo</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
               </div>
             </div>
@@ -2644,10 +3480,10 @@ export default function App() {
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
       <div style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
-        {tab==="fish"      && <SpeciesTab T={theme} />}
+        {tab==="fish"      && <SpeciesTab profile={profile} setProfile={setProfile} T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
         {tab==="lakes"     && <LakesTab T={theme} />}
-        {tab==="catalogue" && <CatalogueTab T={theme} />}
+        {tab==="catalogue" && <CatalogueTab profile={profile} setProfile={setProfile} T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
