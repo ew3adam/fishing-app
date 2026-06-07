@@ -1699,6 +1699,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         >
           Salmon trail
         </button>
+        <button
+          type="button"
+          onClick={function() { setView("lakes"); }}
+          style={{
+            padding:"10px 14px",
+            borderRadius:10,
+            border:"2px solid " + (view==="lakes" ? th.teal : th.border),
+            background:view==="lakes" ? th.teal + "35" : "transparent",
+            color:view==="lakes" ? th.teal : th.muted,
+            fontWeight:700,
+            fontSize:14,
+            cursor:"pointer",
+          }}
+        >
+          Lakes 🌊
+        </button>
         {favSpots.length > 0 ? (
           <button
             type="button"
@@ -1720,6 +1736,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       </div>
 
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
+      {view === "lakes" && <LakesTab T={T} />}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
