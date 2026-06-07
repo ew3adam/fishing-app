@@ -2652,7 +2652,16 @@ export default function App() {
   }, [profile]);
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80 }}>
+    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80, paddingTop:48 }}>
+      <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontSize:22 }}>🎣</span>
+          <span style={{ fontSize:15, fontWeight:700, color:th.white, letterSpacing:0.3 }}>RFC Fishing</span>
+        </div>
+        <button onClick={function() { setTab("me"); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:"6px 8px", borderRadius:20 }}>
+          <span style={{ fontSize:22 }}>👤</span>
+        </button>
+      </div>
       <div style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
@@ -2661,6 +2670,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
         {tab==="scout"     && <ScoutTab T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
