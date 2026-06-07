@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import exifr from "exifr";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -6,6 +7,29 @@ const THEMES = {
   light:     { bg:"#f0f4f0", card:"rgba(255,255,255,0.9)", border:"#c0d4c0", green:"#2a7a2a", dim:"#7ab87a", gold:"#a07010", white:"#1a2a1a", muted:"#5a7a5a", blue:"#2a5fa0", red:"#c03030", orange:"#b06010", teal:"#1a8070", indigo:"#3a4fb0", nav:"rgba(240,244,240,0.97)" },
   bluesteel: { bg:"#0d1520", card:"rgba(255,255,255,0.06)", border:"#1a3050", green:"#40c0e0", dim:"#1a5070", gold:"#e0c040", white:"#e8f0f8", muted:"#6080a0", blue:"#60a0e0", red:"#e05050", orange:"#e09030", teal:"#40d0c0", indigo:"#8080e0", nav:"rgba(13,21,32,0.97)" },
 };
+
+// ─── KNOWN SPOTS (reverse-geocode EXIF + Scout tab) ──────────────────────────
+const KNOWN_SPOTS = [
+  { name:"Salt Creek",                   lat:41.826, lng:-87.845 },
+  { name:"Thatcher Woods / Des Plaines", lat:41.874, lng:-87.831 },
+  { name:"Columbia Woods / Des Plaines", lat:41.762, lng:-87.884 },
+  { name:"Cal-Sag Channel",              lat:41.762, lng:-87.858 },
+  { name:"Sag Quarry East",              lat:41.704, lng:-87.845 },
+  { name:"Horsetail Lake",               lat:41.698, lng:-87.851 },
+  { name:"Tampier Lake",                 lat:41.656, lng:-87.845 },
+  { name:"Wolf Lake",                    lat:41.656, lng:-87.533 },
+  { name:"Busse Lake",                   lat:42.018, lng:-88.045 },
+  { name:"Burnham Harbor",               lat:41.838, lng:-87.614 },
+  { name:"Steelworkers Park",            lat:41.734, lng:-87.527 },
+  { name:"Waukegan Harbor Pier",         lat:42.359, lng:-87.829 },
+  { name:"Hammond Marina Breakwall",     lat:41.694, lng:-87.512 },
+];
+function haversineMi(lat1, lon1, lat2, lon2) {
+  var R = 3958.8, r = Math.PI / 180;
+  var dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
 
 // ─── WEATHER LOOKUP ───────────────────────────────────────────────────────────
 const WX_LABEL = {0:"Clear",1:"Mainly Clear",2:"Partly Cloudy",3:"Overcast",45:"Foggy",51:"Light Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",71:"Light Snow",80:"Showers",95:"Thunderstorm"};
@@ -2045,10 +2069,13 @@ function CatchTab({ profile, T }) {
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
-  const [catches, setCatches] = useState([
-    { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
-    { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
-  ]);
+  const [catches, setCatches] = useState(function() {
+    try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
+    return [
+      { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
+      { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
+    ];
+  });
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
   const [referencePhotos, setReferencePhotos] = useState([]);
@@ -2068,6 +2095,7 @@ function CatchTab({ profile, T }) {
   const [rulerOrientation, setRulerOrientation] = useState("horizontal");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+  useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -2084,6 +2112,18 @@ function CatchTab({ profile, T }) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
     var primary = files[0];
+    // Parse EXIF GPS + timestamp to auto-fill spot and date
+    exifr.parse(primary, ["GPSLatitude", "GPSLongitude", "DateTimeOriginal"]).then(function(exif) {
+      if (!exif) return;
+      if (exif.GPSLatitude && exif.GPSLongitude) {
+        var nearest = KNOWN_SPOTS.reduce(function(best, s) {
+          var d = haversineMi(exif.GPSLatitude, exif.GPSLongitude, s.lat, s.lng);
+          return d < best.d ? { d:d, name:s.name } : best;
+        }, { d:Infinity, name:null });
+        if (nearest.d < 0.3) setF("spot", nearest.name);
+      }
+      if (exif.DateTimeOriginal) setF("date", new Date(exif.DateTimeOriginal).toLocaleDateString());
+    }).catch(function() {});
     readImageFile(primary).then(function(img) {
       setPhoto(img.full);
       setPhotoB64(img.b64);
