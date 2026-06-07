@@ -2065,6 +2065,7 @@ function CatchTab({ profile, T }) {
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
   const [speciesSearch, setSpeciesSearch] = useState("");
+  const [rulerOrientation, setRulerOrientation] = useState("horizontal");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function readImageFile(file) {
@@ -2218,28 +2219,53 @@ function CatchTab({ profile, T }) {
                 <div style={{ marginBottom:12 }}>
                   <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
                     <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
-                    <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                      {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                        var left = (i / rulerInches) * 100;
-                        var major = i % 5 === 0;
-                        return (
-                          <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                            {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                          </div>
-                        );
-                      })}
-                      {/* Mouth and tail markers define the measured fish span. */}
-                      <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
-                        <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                    {rulerOrientation === "horizontal" ? (
+                      <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                          var left = (i / rulerInches) * 100;
+                          var major = i % 5 === 0;
+                          return (
+                            <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                              {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                            </div>
+                          );
+                        })}
+                        <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.18)" }} />
+                        <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
+                          <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                        </div>
+                        <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
+                          <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                        </div>
                       </div>
-                      <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
-                        <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                    ) : (
+                      <div style={{ position:"absolute", top:10, bottom:10, right:10, width:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                          var top = (i / rulerInches) * 100;
+                          var major = i % 5 === 0;
+                          return (
+                            <div key={"tick_" + i} style={{ position:"absolute", top:top + "%", right:0, height:1, width:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                              {major ? <div style={{ position:"absolute", right:24, top:-6, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                            </div>
+                          );
+                        })}
+                        <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.18)" }} />
+                        <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green }}>
+                          <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                        </div>
+                        <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange }}>
+                          <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
                       Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                    </div>
+                    <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+                      <button onClick={function() { setRulerOrientation("horizontal"); }} style={{ flex:1, background:rulerOrientation==="horizontal" ? th.green+"22" : "transparent", border:"1px solid "+(rulerOrientation==="horizontal" ? th.green : th.border), color:rulerOrientation==="horizontal" ? th.green : th.muted, borderRadius:7, padding:"7px 8px", cursor:"pointer", fontSize:12, fontWeight:rulerOrientation==="horizontal" ? 700 : 400 }}>↔ Horizontal</button>
+                      <button onClick={function() { setRulerOrientation("vertical"); }} style={{ flex:1, background:rulerOrientation==="vertical" ? th.green+"22" : "transparent", border:"1px solid "+(rulerOrientation==="vertical" ? th.green : th.border), color:rulerOrientation==="vertical" ? th.green : th.muted, borderRadius:7, padding:"7px 8px", cursor:"pointer", fontSize:12, fontWeight:rulerOrientation==="vertical" ? 700 : 400 }}>↕ Vertical</button>
                     </div>
                     <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
@@ -2283,9 +2309,9 @@ function CatchTab({ profile, T }) {
                         <input type="number" min="0.1" max="24" step="0.01" value={referenceInches} onChange={function(e) { setReferenceInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
                       </div>
                     ) : null}
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Mouth marker position</div>
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Mouth position (top=0%)" : "Mouth marker position"}</div>
                     <input type="range" min="0" max="100" step="1" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Tail marker position</div>
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Tail position (top=0%)" : "Tail marker position"}</div>
                     <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
                     {usesObjectReference ? (
                       <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:4 }}>
