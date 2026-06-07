@@ -2064,6 +2064,7 @@ function CatchTab({ profile, T }) {
   const [tailPct, setTailPct] = useState(90);
   const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
   const [rfcLink, setRfcLink] = useState("");
+  const [speciesSearch, setSpeciesSearch] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function readImageFile(file) {
@@ -2326,28 +2327,53 @@ function CatchTab({ profile, T }) {
                   </Card>
                 </div>
               ) : null}
-              {aiLoading ? <div style={{ textAlign:"center", color:th.muted, padding:"20px 0" }}>Identifying fish...</div> : null}
-              {aiResult && !aiLoading ? (
-                <Card T={T} borderColor={th.green + "44"}>
-                  <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>AI Result — Please Verify</div>
-                  <div style={{ fontSize:13, color:th.white, marginBottom:4 }}>Species: {aiResult.species} ({aiResult.confidence}% confident)</div>
-                  <div style={{ fontSize:13, color:th.white }}>{aiResult.notes}</div>
-                </Card>
-              ) : null}
-              <Card T={T} borderColor={th.orange + "44"}>
-                <div style={{ fontSize:12, color:th.white, lineHeight:1.55 }}>
-                  ID check: use the species photo guide in the Fish tab to confirm body shape, mouth size, and tail shape before saving your catch.
-                </div>
-              </Card>
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm species:</div>
-              <input value={form.species} onChange={function(e) { setF("species", e.target.value); }} style={inputStyle} />
-              <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm length:</div>
-              <input value={form.length} onChange={function(e) { setF("length", e.target.value); }} placeholder='e.g. 13 inches' style={inputStyle} />
-              <button onClick={function() { setStep(3); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Next</button>
+              <button onClick={function() { setStep(3); setSpeciesSearch(""); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginTop:8 }}>Confirm Length → Pick Species</button>
             </div>
           )}
 
           {step === 3 && (
+            <div>
+              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Identify Species</div>
+              {aiLoading ? (
+                <div style={{ textAlign:"center", color:th.muted, padding:"16px 0" }}>
+                  <div style={{ fontSize:24, marginBottom:6 }}>🔍</div>
+                  AI identifying fish...
+                </div>
+              ) : null}
+              {aiResult && !aiLoading ? (
+                <Card T={T} borderColor={th.green + "44"}>
+                  <div style={{ fontSize:11, color:th.green, fontFamily:"monospace", marginBottom:4 }}>AI RESULT — {aiResult.confidence}% CONFIDENT</div>
+                  <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:4 }}>{aiResult.species}</div>
+                  <div style={{ fontSize:12, color:th.muted, marginBottom:10 }}>{aiResult.notes}</div>
+                  <button onClick={function() { setF("species", aiResult.species); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Use "{aiResult.species}"</button>
+                </Card>
+              ) : null}
+              {!aiResult && !aiLoading ? (
+                <Card T={T} borderColor={th.orange + "44"}>
+                  <div style={{ fontSize:13, color:th.orange }}>AI unavailable — pick species below</div>
+                </Card>
+              ) : null}
+              <div style={{ fontSize:12, color:th.muted, margin:"12px 0 6px" }}>Search species:</div>
+              <input value={speciesSearch} onChange={function(e) { setSpeciesSearch(e.target.value); }} placeholder="e.g. Bass, Trout..." style={inputStyle} />
+              <div style={{ maxHeight:240, overflowY:"auto", marginBottom:12, border:"1px solid " + th.border, borderRadius:8 }}>
+                {SPECIES.filter(function(sp) { return !speciesSearch || sp.name.toLowerCase().includes(speciesSearch.toLowerCase()); }).map(function(sp) {
+                  var selected = form.species === sp.name;
+                  return (
+                    <button key={sp.id} onClick={function() { setF("species", sp.name); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 12px", background:selected ? th.green + "22" : "transparent", border:"none", borderBottom:"1px solid " + th.border, cursor:"pointer", textAlign:"left" }}>
+                      <span style={{ fontSize:20 }}>{sp.emoji}</span>
+                      <span style={{ fontSize:14, color:th.white, flex:1 }}>{sp.name}</span>
+                      {selected ? <span style={{ color:th.green, fontSize:16, fontWeight:700 }}>✓</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={function() { setStep(4); }} disabled={!form.species} style={{ width:"100%", background:form.species ? th.green : th.border, color:form.species ? "#000" : th.muted, border:"none", borderRadius:8, padding:"11px 0", cursor:form.species ? "pointer" : "not-allowed", fontSize:14, fontWeight:700 }}>
+                {form.species ? "Confirm " + form.species + " →" : "Select a species to continue"}
+              </button>
+            </div>
+          )}
+
+          {step === 4 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
               {["species","length","bait","spot","date"].map(function(k) {
@@ -2369,11 +2395,11 @@ function CatchTab({ profile, T }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes (optional)</div>
               <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
-              <button onClick={function() { setStep(4); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
+              <button onClick={function() { setStep(5); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
@@ -2388,7 +2414,7 @@ function CatchTab({ profile, T }) {
                 })}
               </Card>
               <button onClick={submitCatch} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginBottom:8 }}>Post to Community Feed</button>
-              <OBtn label="Edit" onClick={function() { setStep(3); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
+              <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
 
@@ -2402,7 +2428,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
