@@ -31,6 +31,35 @@ function haversineMi(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+// ─── WEIGHT ESTIMATION (length-weight regression) ─────────────────────────────
+const WEIGHT_COEF = {
+  "Largemouth Bass":  {a:0.000448, b:3.18}, "Smallmouth Bass": {a:0.000358, b:3.18},
+  "Crappie":          {a:0.000500, b:3.00}, "Yellow Perch":    {a:0.000586, b:3.00},
+  "Rainbow Trout":    {a:0.000278, b:3.10}, "Brown Trout":     {a:0.000278, b:3.10},
+  "Brook Trout":      {a:0.000230, b:3.10}, "Lake Trout":      {a:0.000200, b:3.20},
+  "Channel Catfish":  {a:0.000123, b:3.52}, "Flathead Catfish":{a:0.000120, b:3.55},
+  "Blue Catfish":     {a:0.000125, b:3.50}, "Bullhead":        {a:0.000150, b:3.30},
+  "Common Carp":      {a:0.000754, b:2.97}, "Coho Salmon":     {a:0.002240, b:2.65},
+  "Chinook Salmon":   {a:0.000789, b:2.81}, "Steelhead":       {a:0.000350, b:3.15},
+  "Walleye":          {a:0.000150, b:3.20}, "Sauger":          {a:0.000140, b:3.20},
+  "Northern Pike":    {a:0.000615, b:2.71}, "Muskellunge":     {a:0.000581, b:2.41},
+  "Bluegill":         {a:0.000650, b:3.00}, "Rock Bass":       {a:0.000600, b:3.00},
+  "White Bass":       {a:0.000400, b:3.10}, "Freshwater Drum": {a:0.000400, b:3.20},
+  "Bowfin":           {a:0.000200, b:3.30}, "Longnose Gar":    {a:0.000030, b:3.50},
+};
+function estimateWeightLbs(speciesName, lengthStr) {
+  var m = (lengthStr || "").match(/([\d.]+)/);
+  if (!m) return null;
+  var L = parseFloat(m[1]);
+  if (!L || L < 2) return null;
+  var c = WEIGHT_COEF[speciesName];
+  if (!c) return null;
+  var w = c.a * Math.pow(L, c.b);
+  if (w < 0.0625) return null;
+  if (w < 1) return Math.round(w * 16) + " oz";
+  return w.toFixed(2) + " lbs";
+}
+
 // ─── WEATHER LOOKUP ───────────────────────────────────────────────────────────
 const WX_LABEL = {0:"Clear",1:"Mainly Clear",2:"Partly Cloudy",3:"Overcast",45:"Foggy",51:"Light Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",71:"Light Snow",80:"Showers",95:"Thunderstorm"};
 const WX_ICON  = {0:"☀️",1:"🌤️",2:"⛅",3:"☁️",45:"🌫️",51:"🌦️",61:"🌧️",63:"🌧️",65:"⛈️",71:"🌨️",80:"🌦️",95:"⛈️"};
@@ -2178,7 +2207,7 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
     setCatches(function(c) { return [entry].concat(c); });
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
@@ -2202,6 +2231,7 @@ function CatchTab({ profile, T }) {
   var measuredLengthLabel = measurementOption === "5_none" ? estimatedLengthLabel : measuredInches.toFixed(1) + " inches";
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
+  var estWeightLabel = estimateWeightLbs(form.species, form.length);
 
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
 
@@ -2222,7 +2252,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                   <div>
                     <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{c.species}</div>
-                    <div style={{ fontSize:12, color:th.green }}>{c.length}</div>
+                    <div style={{ fontSize:12, color:th.green }}>{c.length}{c.estWeight ? " · ~" + c.estWeight : ""}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
                     <div style={{ fontSize:11, color:th.muted }}>{c.user}</div>
@@ -2450,6 +2480,7 @@ function CatchTab({ profile, T }) {
                   </div>
                 );
               })}
+              {estWeightLabel ? <div style={{ fontSize:11, color:th.muted, marginBottom:12, fontStyle:"italic" }}>Est. weight: {estWeightLabel} (length-weight formula)</div> : null}
               {gear.length > 0 ? (
                 <div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Rod Used</div>
@@ -2470,7 +2501,7 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
               <Card T={T}>
-                {[["Species",form.species],["Length",form.length],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
+                {[["Species",form.species],["Length",form.length],["Est. Weight",estWeightLabel],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
                     <div key={i} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, paddingBottom:6, borderBottom:"1px solid " + th.border }}>
                       <span style={{ fontSize:12, color:th.muted }}>{r[0]}</span>
@@ -2488,6 +2519,7 @@ function CatchTab({ profile, T }) {
             <div style={{ textAlign:"center", padding:"20px 0" }}>
               <div style={{ fontSize:48, marginBottom:12 }}>🎉</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:6 }}>Catch Posted!</div>
+              {form.species ? <div style={{ fontSize:14, color:th.green, fontWeight:600, marginBottom:4 }}>{form.species} · {form.length}{estWeightLabel ? " · ~" + estWeightLabel : ""}</div> : null}
               <div style={{ fontSize:13, color:th.muted, marginBottom:20 }}>Your catch is live on the community feed.</div>
               <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:10, padding:16, marginBottom:16, textAlign:"left" }}>
                 <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Share with Riverside Fishing Club?</div>
