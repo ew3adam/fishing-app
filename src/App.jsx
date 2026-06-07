@@ -335,9 +335,26 @@ function sanitizeStr(s, maxLen) {
   return s.replace(/\s+/g, " ").trim().slice(0, m);
 }
 
+function fpdccFishingMapUrl(query) {
+  var q = sanitizeStr(String(query || ""), 120);
+  return "https://map.fpdcc.com/#/?search=" + encodeURIComponent(q || "fishing");
+}
+
 function parseCoordNum(v) {
   var n = parseFloat(String(v).trim());
   return isFinite(n) ? n : NaN;
+}
+
+function milesBetween(lat1, lng1, lat2, lng2) {
+  // Great-circle distance in miles for radius filtering/suggestions.
+  var toRad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * toRad;
+  var dLng = (lng2 - lng1) * toRad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 3958.8 * c;
 }
 
 function isValidLatLng(lat, lng) {
@@ -648,12 +665,36 @@ function fishingScore(wx) {
 }
 
 async function loadWeather(lat, lng) {
+  function formatSunTime(iso) {
+    if (!iso || typeof iso !== "string" || iso.indexOf("T") === -1) return "--";
+    const timePart = iso.split("T")[1] || "";
+    const pieces = timePart.split(":");
+    if (pieces.length < 2) return "--";
+    const h = Number(pieces[0]);
+    const m = pieces[1];
+    if (Number.isNaN(h)) return "--";
+    const suffix = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    return h12 + ":" + m + " " + suffix;
+  }
+
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    const sunriseIso = d && d.daily && d.daily.sunrise && d.daily.sunrise[0];
+    const sunsetIso = d && d.daily && d.daily.sunset && d.daily.sunset[0];
+    return {
+      temp: Math.round(c.temperature_2m),
+      wind: Math.round(c.windspeed_10m),
+      code: c.weathercode,
+      precip: c.precipitation_probability || 0,
+      icon: WX_ICON[c.weathercode] || "🌡️",
+      condition: WX_LABEL[c.weathercode] || "Unknown",
+      sunrise: formatSunTime(sunriseIso),
+      sunset: formatSunTime(sunsetIso)
+    };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -669,7 +710,12 @@ async function loadWeather(lat, lng) {
     const data = await res.json();
     const txt = (data.content && data.content[0] && data.content[0].text) || "";
     const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
+    if (m) {
+      const fallback = JSON.parse(m[0]);
+      fallback.sunrise = fallback.sunrise || "--";
+      fallback.sunset = fallback.sunset || "--";
+      return fallback;
+    }
     return null;
   }
 }
@@ -802,6 +848,7 @@ function HomeTab({ profile, T }) {
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                <div style={{ fontSize:13, color:th.white, marginTop:4, fontWeight:600 }}>🌅 Sunrise {wx.sunrise || "--"} · 🌇 Sunset {wx.sunset || "--"}</div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
@@ -1829,13 +1876,41 @@ function LakesTab({ T }) {
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
+  const [radiusMiles, setRadiusMiles] = useState(5);
+  const [center, setCenter] = useState({ lat:41.84, lng:-87.83 });
   var now = new Date();
   var mo = now.getMonth();
   var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
 
-  var filtered = LAKES.filter(function(l) {
-    return !search || l.name.toLowerCase().includes(search.toLowerCase());
+  useEffect(function() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setCenter({ lat:pos.coords.latitude, lng:pos.coords.longitude });
+      },
+      function() {},
+      { enableHighAccuracy:false, maximumAge:120000, timeout:8000 }
+    );
+  }, []);
+
+  var q = search.toLowerCase().trim();
+  var lakesWithMiles = LAKES.map(function(l) {
+    return Object.assign({}, l, { _miles:milesBetween(center.lat, center.lng, l.lat, l.lng) });
   });
+  var filtered = lakesWithMiles.filter(function(l) {
+    var within = l._miles <= radiusMiles;
+    var matches = !q || l.name.toLowerCase().includes(q) || String(l.addr || "").toLowerCase().includes(q);
+    return within && matches;
+  }).sort(function(a, b) { return a._miles - b._miles; });
+
+  var suggestedWaters = LOCAL_SPOTS.map(function(s) {
+    return Object.assign({}, s, { _miles:milesBetween(center.lat, center.lng, s.lat, s.lng) });
+  }).sort(function(a, b) { return a._miles - b._miles; });
+  suggestedWaters = suggestedWaters.filter(function(s) {
+    var inRadius = s._miles <= radiusMiles;
+    var matches = !q || s.name.toLowerCase().includes(q) || String(s.addr || "").toLowerCase().includes(q);
+    return inRadius && matches;
+  }).slice(0, 3);
 
   if (sel) {
     var lake = sel;
@@ -1891,9 +1966,9 @@ function LakesTab({ T }) {
                 <div style={{ fontSize:24 }}>📍</div>
                 <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Google Maps</div>
               </a>
-              <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
+              <a href={fpdccFishingMapUrl(lake.name)} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
                 <div style={{ fontSize:24 }}>🗺️</div>
-                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>LakeLink</div>
+                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>FPDCC (Free)</div>
               </a>
             </div>
           </div>
@@ -1914,8 +1989,8 @@ function LakesTab({ T }) {
                 </Card>
               );
             })}
-            <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-              <div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Full Contour Map on LakeLink</div>
+            <a href={fpdccFishingMapUrl(lake.name)} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
+              <div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Free Contour Map (FPDCC)</div>
             </a>
           </div>
         )}
@@ -1955,8 +2030,16 @@ function LakesTab({ T }) {
 
   return (
     <div>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", margin:"12px 0 10px" }} />
-      <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
+      <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, margin:"12px 0 10px" }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search lakes..." style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"11px 14px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none" }} />
+        <select value={String(radiusMiles)} onChange={function(e) { setRadiusMiles(parseInt(e.target.value, 10) || 5); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"0 10px", color:th.white, fontSize:13, fontWeight:700, minWidth:78 }}>
+          {[5,10,15,25,50].map(function(mi) { return <option key={mi} value={mi} style={{ color:"#111", background:"#fff" }}>{mi} mi</option>; })}
+        </select>
+      </div>
+      <SecLabel text={filtered.length + " Lakes Within " + radiusMiles + " Miles"} T={T} />
+      <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>
+        Suggestions are based on your current location.
+      </div>
       {filtered.map(function(lake, i) {
         return (
           <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
@@ -1964,10 +2047,10 @@ function LakesTab({ T }) {
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
                 {lake.aka ? <div style={{ fontSize:10, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
-                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake.dist}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{lake.addr} · {lake._miles.toFixed(1)} mi</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.dist}</div>
+                <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake._miles.toFixed(1)} mi</div>
                 <div style={{ fontSize:10, color:th.muted }}>Max {lake.maxDepth} ft</div>
               </div>
             </div>
@@ -1978,6 +2061,27 @@ function LakesTab({ T }) {
           </div>
         );
       })}
+      {filtered.length === 0 ? (
+        <Card T={T} borderColor={th.blue + "44"}>
+          <SecLabel text={"Nearby suggestions within " + radiusMiles + " miles"} T={T} />
+          <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>
+            No lakes found in this radius. Try these nearby waters:
+          </div>
+          {suggestedWaters.map(function(s) {
+            return (
+              <div key={s.name} style={{ border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:8, background:th.card }}>
+                <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{s.name}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{s.addr} · {s._miles.toFixed(1)} mi</div>
+              </div>
+            );
+          })}
+          {suggestedWaters.length === 0 ? (
+            <div style={{ fontSize:12, color:th.muted }}>
+              No nearby suggestions in {radiusMiles} miles. Increase radius for more options.
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
     </div>
   );
 }
