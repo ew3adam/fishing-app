@@ -1,5 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
+import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { listActiveMembers } from "./services/memberService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud } from "./services/fishingSyncService.js";
+import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
+import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -371,12 +376,15 @@ const SALMON_SPOTS = [
 var PROFILE_STORAGE_KEY = "rfc_fishing_profile_v2";
 var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
 
-var CLUB_ROSTER = [
-  { id:"roster_1", name:"Jim K." },
-  { id:"roster_2", name:"Sarah M." },
-  { id:"roster_3", name:"Bob T." },
-  { id:"roster_4", name:"Maria G." },
-];
+/** Build spot-sharing picker from cloud members or local imported roster. */
+function sharingRosterFromSources(cloudMembers, localRoster) {
+  if (cloudMembers && cloudMembers.length) {
+    return cloudMembers.filter(function(m) { return m.isActive !== false; }).map(function(m) {
+      return { id: m.id, name: m.displayName || m.id };
+    });
+  }
+  return rosterForSharingPicker(localRoster);
+}
 
 var MOCK_CLUB_SHARED_SPOTS = [
   { id:"club_demo_busse", name:"Busse Lake — south cove", lat:42.018, lng:-88.045, credit:"Jim K.", species_present:["Largemouth Bass","Crappie"], isDemo:true },
@@ -490,6 +498,9 @@ function normalizeProfile(raw) {
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
   out.spotActivityLog = Array.isArray(p.spotActivityLog) ? p.spotActivityLog : [];
   out.memberId = typeof p.memberId === "string" && p.memberId ? p.memberId : "";
+  out.firebaseUid = typeof p.firebaseUid === "string" ? p.firebaseUid : "";
+  out.cloudSyncedAt = typeof p.cloudSyncedAt === "string" ? p.cloudSyncedAt : "";
+  if (out.email) out.email = out.email.replace(/\s+/g, "").trim().toLowerCase();
   return out;
 }
 
@@ -1017,7 +1028,7 @@ function SpeciesTab({ T }) {
 }
 
 // ─── SPOTS TAB ────────────────────────────────────────────────────────────────
-function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection }) {
+function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
   const [mapSpot, setMapSpot] = useState(null);
@@ -1444,7 +1455,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   }
 
   if (privView === "detail" && selectedSpot) {
-    var rosterF = CLUB_ROSTER.filter(function(m) {
+    var rosterF = (clubRoster || []).filter(function(m) {
       return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
     });
     var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
@@ -2118,13 +2129,14 @@ function CatalogueTab({ T }) {
 }
 
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
-function CatchTab({ profile, T }) {
+function CatchTab({ profile, authMember, T }) {
   const th = THEMES[T];
   const [view, setView] = useState("feed");
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
   const photoContainerRef = useRef();
+  const photoAreaRef = useRef();
   const draggingMarker = useRef(null);
   const [catches, setCatches] = useState(function() {
     try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
@@ -2288,9 +2300,14 @@ function CatchTab({ profile, T }) {
       setTailPct(90);
     });
   }
+  function overlayMeasureEl() {
+    if (measurementOption === "1_ruler" && photoAreaRef.current) return photoAreaRef.current;
+    return photoContainerRef.current;
+  }
   function handleOverlayTouchStart(e) {
-    if (!photoContainerRef.current) return;
-    var rect = photoContainerRef.current.getBoundingClientRect();
+    var el = overlayMeasureEl();
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
     var touch = e.touches[0];
     var pct = rulerOrientation === "horizontal"
       ? ((touch.clientX - rect.left) / rect.width) * 100
@@ -2299,8 +2316,10 @@ function CatchTab({ profile, T }) {
     draggingMarker.current = Math.abs(pct - mouthPct) <= Math.abs(pct - tailPct) ? "mouth" : "tail";
   }
   function handleOverlayTouchMove(e) {
-    if (!draggingMarker.current || !photoContainerRef.current) return;
-    var rect = photoContainerRef.current.getBoundingClientRect();
+    if (!draggingMarker.current) return;
+    var el = overlayMeasureEl();
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
     var touch = e.touches[0];
     var pct = rulerOrientation === "horizontal"
       ? ((touch.clientX - rect.left) / rect.width) * 100
@@ -2323,8 +2342,11 @@ function CatchTab({ profile, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo };
+    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo, visibility:"private" };
     setCatches(function(c) { return [entry].concat(c); });
+    if (authMember && authMember.id) {
+      saveCatchToCloud(authMember.id, entry).catch(function() {});
+    }
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
@@ -2409,7 +2431,7 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
               <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Take Photo</button>
+                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Use Photo</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
               </div>
             </div>
@@ -2420,35 +2442,45 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
               {photo ? (
                 <div style={{ marginBottom:12 }}>
-                  <div ref={photoContainerRef} onTouchStart={handleOverlayTouchStart} onTouchMove={handleOverlayTouchMove} onTouchEnd={handleOverlayTouchEnd} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000", touchAction:"none" }}>
-                    <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
-                    {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
-                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
-                    {measurementOption === "1_ruler" ? (
-                      rulerOrientation === "horizontal" ? (
-                        <div style={{ position:"absolute", left:0, right:0, bottom:0, height:52, overflow:"hidden", pointerEvents:"none" }}>
-                          <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", left:0, right:0, bottom:0, width:"100%", height:"100%", objectFit:"fill", opacity:0.92 }} />
-                          <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.22)" }} />
-                          <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                            <div style={{ position:"absolute", top:-18, left:-20, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
+                  <div ref={photoContainerRef} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000" }}>
+                    <div
+                      ref={photoAreaRef}
+                      onTouchStart={handleOverlayTouchStart}
+                      onTouchMove={handleOverlayTouchMove}
+                      onTouchEnd={handleOverlayTouchEnd}
+                      style={{
+                        position:"relative",
+                        touchAction:"none",
+                        marginBottom: measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? 52 : 0,
+                        marginRight: measurementOption === "1_ruler" && rulerOrientation === "vertical" ? 52 : 0,
+                      }}
+                    >
+                      <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
+                      {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
+                      <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
+                      {measurementOption === "1_ruler" ? (
+                        rulerOrientation === "horizontal" ? (
+                          <div style={{ position:"absolute", left:0, right:0, top:0, bottom:0, pointerEvents:"none" }}>
+                            <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.22)" }} />
+                            <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                              <div style={{ position:"absolute", top:8, left:-20, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
+                            </div>
+                            <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                              <div style={{ position:"absolute", top:8, left:-12, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
+                            </div>
                           </div>
-                          <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                            <div style={{ position:"absolute", top:-18, left:-12, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
+                        ) : (
+                          <div style={{ position:"absolute", left:0, right:0, top:0, bottom:0, pointerEvents:"none" }}>
+                            <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.22)" }} />
+                            <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                              <div style={{ position:"absolute", left:8, top:-8, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
+                            </div>
+                            <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                              <div style={{ position:"absolute", left:8, top:-8, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
+                            </div>
                           </div>
-                        </div>
+                        )
                       ) : (
-                        <div style={{ position:"absolute", top:0, bottom:0, right:0, width:52, overflow:"hidden", pointerEvents:"none" }}>
-                          <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", top:"50%", left:"50%", height:"100%", width:"auto", maxWidth:"none", transform:"translate(-50%, -50%) rotate(90deg)", opacity:0.92 }} />
-                          <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.22)" }} />
-                          <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                            <div style={{ position:"absolute", top:-8, right:56, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
-                          </div>
-                          <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                            <div style={{ position:"absolute", top:-8, right:56, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
-                          </div>
-                        </div>
-                      )
-                    ) : (
                       rulerOrientation === "horizontal" ? (
                         <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
                           {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
@@ -2489,6 +2521,17 @@ function CatchTab({ profile, T }) {
                         </div>
                       )
                     )}
+                    </div>
+                    {measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? (
+                      <div style={{ position:"absolute", left:0, right:0, bottom:0, height:52, overflow:"hidden", pointerEvents:"none", borderTop:"1px solid rgba(255,255,255,0.15)" }}>
+                        <img src={RULER_REF_SRC} alt="" draggable={false} style={{ width:"100%", height:"100%", objectFit:"fill", opacity:0.92, display:"block" }} />
+                      </div>
+                    ) : null}
+                    {measurementOption === "1_ruler" && rulerOrientation === "vertical" ? (
+                      <div style={{ position:"absolute", top:0, right:0, bottom:0, width:52, overflow:"hidden", pointerEvents:"none", borderLeft:"1px solid rgba(255,255,255,0.15)" }}>
+                        <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", top:0, left:"50%", height:"100%", width:"auto", maxHeight:"100%", transform:"translateX(-50%) rotate(90deg)", transformOrigin:"center top", opacity:0.92 }} />
+                      </div>
+                    ) : null}
                   </div>
                   <button onClick={rotatePhoto} style={{ width:"100%", marginTop:8, background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:14, fontWeight:600, letterSpacing:"0.02em" }}>↻ Rotate Photo</button>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
@@ -2532,9 +2575,9 @@ function CatchTab({ profile, T }) {
                     {measurementOption === "1_ruler" ? (
                       <div>
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4, lineHeight:1.45 }}>
-                          The Westcott 20-inch ruler image is overlaid on your photo. Align mouth and tail markers to the fish — each inch on the overlay equals one real inch.
+                          The Westcott 20-inch ruler sits beside your photo. Drag markers on the fish only — each inch on the photo {rulerOrientation === "vertical" ? "height" : "width"} equals one real inch.
                         </div>
-                        <div style={{ fontSize:12, color:th.green, marginBottom:8, fontWeight:700 }}>Reference scale: {RULER_REF_INCHES} inches (full width of overlay)</div>
+                        <div style={{ fontSize:12, color:th.green, marginBottom:8, fontWeight:700 }}>Reference scale: {RULER_REF_INCHES} inches (full {rulerOrientation === "vertical" ? "height" : "width"} of photo)</div>
                       </div>
                     ) : null}
                     {measurementOption === "4_custom" ? (
@@ -2789,12 +2832,24 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
   const [saved, setSaved] = useState(false);
+  const [signInEmail, setSignInEmail] = useState((profile && profile.email) || "");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInBusy, setSignInBusy] = useState(false);
+  const [signInLocalError, setSignInLocalError] = useState("");
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
+
+  useEffect(function() {
+    setForm(normalizeProfile(profile));
+  }, [profile]);
+
+  useEffect(function() {
+    if (authMember && authMember.email) setSignInEmail(authMember.email);
+  }, [authMember]);
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function setG(k, v) { setNewGear(function(g) { return Object.assign({}, g, { [k]: v }); }); }
@@ -2860,12 +2915,135 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots 
     );
   }
 
+  function handleSignInClick() {
+    setSignInLocalError("");
+    setSignInBusy(true);
+    onSignIn(signInEmail, signInPassword).catch(function(err) {
+      setSignInLocalError(err && err.message ? err.message : "Sign-in failed.");
+    }).finally(function() {
+      setSignInBusy(false);
+    });
+  }
+
+  var displayName = authMember ? authMember.displayName : (form.name || "Your Profile");
+  var displayEmail = authMember ? authMember.email : form.email;
+
   return (
     <div>
       <div style={{ textAlign:"center", padding:"16px 0 12px" }}>
-        <div style={{ fontSize:44 }}>{form.email ? "🎣" : "👤"}</div>
-        <div style={{ fontSize:18, color:th.white, fontWeight:700, marginTop:4 }}>{form.name || "Your Profile"}</div>
+        <div style={{ fontSize:44 }}>{authUser ? "🎣" : "👤"}</div>
+        <div style={{ fontSize:18, color:th.white, fontWeight:700, marginTop:4 }}>{displayName}</div>
+        {authMember ? <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>Member ID: {authMember.id}</div> : null}
       </div>
+
+      <Card T={T} borderColor={authUser ? th.green + "55" : th.orange + "55"}>
+        <SecLabel text={authUser ? "Signed in — syncs phone and browser" : "RFC member sign-in"} T={T} />
+        {authLoading ? (
+          <div style={{ fontSize:13, color:th.muted }}>Checking sign-in…</div>
+        ) : authUser && authMember ? (
+          <div>
+            <div style={{ fontSize:13, color:th.white, marginBottom:8 }}>{displayEmail}</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Catches and spots save to RFC cloud (project rfc-management). Same account on every device.</div>
+            {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
+            <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted }}>Sign out</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Only emails on the club roster can sign in. Data on this phone alone does not appear in a desktop browser until you sign in.</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password (min 10 characters)</div>
+            <input type="password" value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={iStyle} autoComplete="current-password" />
+            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+            <button type="button" onClick={handleSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
+              {signInBusy ? "Signing in…" : "Sign in with Email"}
+            </button>
+            <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:6 }}>
+              {getOAuthPlaceholderButtons().map(function(btn) {
+                return (
+                  <button
+                    key={btn.id}
+                    type="button"
+                    disabled={!btn.enabled || signInBusy}
+                    onClick={function() {
+                      setSignInLocalError("");
+                      onOAuthSignIn(btn.id).catch(function(err) {
+                        setSignInLocalError(err && err.message ? err.message : "Sign-in failed.");
+                      });
+                    }}
+                    style={{
+                      width:"100%",
+                      background: btn.enabled ? th.card : "transparent",
+                      border:"1px solid " + th.border,
+                      borderRadius:8,
+                      padding:"9px 0",
+                      cursor: btn.enabled && !signInBusy ? "pointer" : "not-allowed",
+                      fontSize:12,
+                      color: btn.enabled ? th.white : th.muted,
+                      opacity: btn.enabled ? 1 : 0.55,
+                    }}
+                  >
+                    {btn.label}{btn.enabled ? "" : " (set API key)"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card T={T} borderColor={th.gold + "44"}>
+        <SecLabel text={"Club roster (" + (localRoster || []).length + " local)"} T={T} />
+        <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.5 }}>
+          Import members for sharing pickers. Sign-in uses live Firebase roster (rfc-management). Saved on this device until cloud sync.
+        </div>
+        {rosterImportError ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{rosterImportError}</div> : null}
+        <button type="button" disabled={rosterImportBusy} onClick={onLoadSeedRoster} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 0", cursor:"pointer", fontSize:12, color:th.white, marginBottom:8 }}>
+          Load seed roster (Adam)
+        </button>
+        <label style={{ display:"block", width:"100%", background:th.green, color:"#000", borderRadius:8, padding:"9px 0", cursor:"pointer", fontSize:12, fontWeight:700, textAlign:"center" }}>
+          {rosterImportBusy ? "Importing…" : "Import roster CSV"}
+          <input type="file" accept=".csv,text/csv" style={{ display:"none" }} onChange={function(e) {
+            var f = e.target.files && e.target.files[0];
+            if (f && onImportRosterCsv) onImportRosterCsv(f);
+            e.target.value = "";
+          }} />
+        </label>
+        {!authUser && (localRoster || []).length ? (
+          <div style={{ maxHeight:160, overflowY:"auto", marginTop:10 }}>
+            {(localRoster || []).map(function(m) {
+              return (
+                <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid " + th.border, fontSize:11 }}>
+                  <span style={{ color:th.white }}>{m.name}</span>
+                  <span style={{ color:th.muted }}>{m.email || m.id}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </Card>
+
+      {authUser ? (
+        <Card T={T} borderColor={th.blue + "44"}>
+          <SecLabel text={"Club members (" + (clubMembersLoading ? "…" : String((clubMembers || []).length)) + ")"} T={T} />
+          {clubMembersLoading ? (
+            <div style={{ fontSize:12, color:th.muted }}>Loading roster…</div>
+          ) : (clubMembers || []).length ? (
+            <div style={{ maxHeight:200, overflowY:"auto" }}>
+              {(clubMembers || []).map(function(m) {
+                return (
+                  <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid " + th.border, fontSize:12 }}>
+                    <span style={{ color:th.white }}>{m.displayName || m.id}</span>
+                    <span style={{ color:th.muted, fontSize:10 }}>{m.id}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize:12, color:th.muted }}>No members loaded — check Firestore rules or roster import.</div>
+          )}
+        </Card>
+      ) : null}
 
       <Card T={T}>
         <SecLabel text="Your Info" T={T} />
@@ -2935,7 +3113,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots 
 
       <Card T={T}>
         <SecLabel text="Security and Privacy" T={T} />
-        {[["No login required","Browse everything without an account."],["Email only","No password ever."],["No data sold","Your info stays on your device."],["No ad tracking","Zero third-party analytics."]].map(function(item, i) {
+        {[["Roster only","Only uploaded RFC members can sign in."],["Passwords","Hashed by Firebase — never stored in the app."],["Cloud sync","Signed-in data saves to RFC Firebase (rfc-management)."],["No ad tracking","Zero third-party analytics."]].map(function(item, i) {
           return (
             <div key={i} style={{ display:"flex", gap:8, marginBottom:8 }}>
               <span style={{ color:th.green }}>✓</span>
@@ -2980,6 +3158,15 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [theme, setTheme] = useState("dark");
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
+  const [authUser, setAuthUser] = useState(null);
+  const [authMember, setAuthMember] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
+  const [clubMembers, setClubMembers] = useState([]);
+  const [clubMembersLoading, setClubMembersLoading] = useState(false);
+  const [localRoster, setLocalRoster] = useState(function() { return getInitialRoster(); });
+  const [rosterImportError, setRosterImportError] = useState("");
+  const [rosterImportBusy, setRosterImportBusy] = useState(false);
   const [profile, setProfile] = useState(function() {
     var stored = loadStoredProfile();
     var n = normalizeProfile(stored);
@@ -2987,13 +3174,122 @@ export default function App() {
     return n;
   });
   var th = THEMES[theme];
+  var cloudSaveTimer = useRef(null);
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
 
   useEffect(function() {
+    return subscribeAuthState(function(user, member, errMsg) {
+      setAuthUser(user);
+      setAuthMember(member);
+      setAuthLoading(false);
+      setAuthError(errMsg || "");
+    });
+  }, []);
+
+  useEffect(function() {
+    if (!authUser || !authMember) return;
+    var memberId = authMember.id;
+    pullCloudProfile(memberId, profile).then(function(merged) {
+      setProfile(function(p) {
+        var prev = normalizeProfile(p);
+        return normalizeProfile(Object.assign({}, prev, merged, {
+          name: authMember.displayName || prev.name,
+          email: authMember.email || prev.email,
+          memberId: memberId,
+          firebaseUid: authUser.uid,
+        }));
+      });
+    }).catch(function() {});
+    mergeLocalCatchesToCloud(memberId, JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")).catch(function() {});
+    loadCatchesFromCloud(memberId).then(function(cloudCatches) {
+      if (cloudCatches && cloudCatches.length) {
+        try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
+      }
+    }).catch(function() {});
+  }, [authUser ? authUser.uid : null, authMember ? authMember.id : null]);
+
+  useEffect(function() {
+    if (!authUser || !authMember) return;
+    setClubMembersLoading(true);
+    listActiveMembers(150).then(function(list) {
+      setClubMembers(list || []);
+    }).catch(function() {
+      setClubMembers([]);
+    }).finally(function() {
+      setClubMembersLoading(false);
+    });
+  }, [authUser ? authUser.uid : null]);
+
+  var handleSignIn = useCallback(function(email, password) {
+    return signInMemberEmail(email, password).then(function(result) {
+      setAuthUser(result.user);
+      setAuthMember(result.member);
+      setAuthError("");
+    });
+  }, []);
+
+  var handleSignOut = useCallback(function() {
+    signOutMember().then(function() {
+      setAuthUser(null);
+      setAuthMember(null);
+      setClubMembers([]);
+      setAuthError("");
+    });
+  }, []);
+
+  var handleOAuthSignIn = useCallback(function(providerId) {
+    return signInMemberOAuth(providerId);
+  }, []);
+
+  var handleLoadSeedRoster = useCallback(function() {
+    setRosterImportError("");
+    setRosterImportBusy(true);
+    try {
+      var rows = loadSeedRoster();
+      setLocalRoster(rows);
+    } catch (e) {
+      setRosterImportError(e.message || "Seed load failed.");
+    } finally {
+      setRosterImportBusy(false);
+    }
+  }, []);
+
+  var handleImportRosterCsv = useCallback(function(file) {
+    setRosterImportError("");
+    setRosterImportBusy(true);
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var rows = importRosterFromCsvText(String(ev.target.result || ""));
+        setLocalRoster(rows);
+      } catch (e) {
+        setRosterImportError(e.message || "CSV import failed.");
+      } finally {
+        setRosterImportBusy(false);
+      }
+    };
+    reader.onerror = function() {
+      setRosterImportError("Could not read file.");
+      setRosterImportBusy(false);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  var sharingRoster = sharingRosterFromSources(clubMembers, localRoster);
+
+  useEffect(function() {
     persistProfileToStorage(profile);
-  }, [profile]);
+    if (!authMember || !authMember.id) return;
+    if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
+    cloudSaveTimer.current = setTimeout(function() {
+      syncLocalProfileToCloud(authMember.id, profile).catch(function() {});
+    }, 1500);
+    return function() {
+      if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
+    };
+  }, [profile, authMember ? authMember.id : null]);
 
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80, paddingTop:48 }}>
@@ -3009,12 +3305,12 @@ export default function App() {
       <div style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
-        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
+        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
-        {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
+        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} />}
         {tab==="scout"     && <ScoutTab T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
