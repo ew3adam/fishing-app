@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubFeedCatches } from "./services/fishingSyncService.js";
+import SpotMapPicker from "./components/SpotMapPicker.jsx";
+import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
 
@@ -39,7 +41,9 @@ function mapsUrl(lat, lng) {
 
 // Westcott 20-inch ruler PNG — full image width = 20 inches on the overlay scale.
 var RULER_REF_INCHES = 20;
-var RULER_REF_SRC = import.meta.env.BASE_URL + "ruler-20-inches.png";
+var RULER_REF_SRC = import.meta.env.BASE_URL + "ruler-20-inches.svg";
+var RULER_STRIP_H = 56;
+var RULER_STRIP_W = 88;
 function haversineMi(lat1, lon1, lat2, lon2) {
   var R = 3958.8, r = Math.PI / 180;
   var dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
@@ -47,11 +51,38 @@ function haversineMi(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+var SPECIES_ALIASES = {
+  dogfish: "Bowfin",
+  mudfish: "Bowfin",
+  mudpuppy: "Bowfin",
+  grinnel: "Bowfin",
+  "freshwater dogfish": "Bowfin",
+  striper: "White Bass",
+  "white perch": "White Bass",
+  "king salmon": "Chinook Salmon",
+  "silver salmon": "Coho Salmon",
+  steelhead: "Steelhead",
+  "brown line": "Brown Trout",
+};
+
+var GLOSSARY = {
+  "slip float": "A float that slides on the line so you can cast far and set exact depth.",
+  "spawn sac": "Mesh bag of salmon eggs — top bait for pier coho.",
+  "texas rig": "Worm on a hook with a bullet weight — weedless for bass.",
+  "ned rig": "Tiny mushroom jig + short stick bait — great when fish are picky.",
+  "hair rig": "Carp rig where bait hangs below the hook on a hair loop.",
+};
+
+var SCOUT_HISTORY_KEY = "rfc_scout_history_v1";
+var RFC_CATCH_HINT_KEY = "rfc_catch_hint_seen_v1";
+
 // Match AI species text to a known SPECIES entry when possible.
 function matchSpeciesName(name) {
   if (!name || typeof name !== "string") return "";
   var trimmed = name.trim();
   if (!trimmed) return "";
+  var aliasKey = trimmed.toLowerCase();
+  if (SPECIES_ALIASES[aliasKey]) return SPECIES_ALIASES[aliasKey];
   var exact = SPECIES.find(function(s) { return s.name.toLowerCase() === trimmed.toLowerCase(); });
   if (exact) return exact.name;
   var partial = SPECIES.find(function(s) {
@@ -60,6 +91,51 @@ function matchSpeciesName(name) {
     return tn.indexOf(sn) >= 0 || sn.indexOf(tn) >= 0;
   });
   return partial ? partial.name : trimmed;
+}
+
+function speciesAlsoKnownAs(speciesName) {
+  var keys = Object.keys(SPECIES_ALIASES).filter(function(k) { return SPECIES_ALIASES[k] === speciesName; });
+  return keys.length ? keys.slice(0, 3).join(", ") : "";
+}
+
+function findCatalogueForRig(rigName) {
+  if (!rigName) return null;
+  var rn = rigName.toLowerCase();
+  return CATALOGUE.find(function(c) {
+    return c.name.toLowerCase() === rn || rn.indexOf(c.name.toLowerCase()) >= 0 || c.name.toLowerCase().indexOf(rn) >= 0;
+  }) || null;
+}
+
+function loadScoutHistory() {
+  try {
+    var raw = localStorage.getItem(SCOUT_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
+function saveScoutHistoryEntry(entry) {
+  var list = loadScoutHistory();
+  list.unshift(entry);
+  localStorage.setItem(SCOUT_HISTORY_KEY, JSON.stringify(list.slice(0, 30)));
+}
+
+function scoutBiteHint(spot, season) {
+  var count = (spot && spot.species && spot.species.length) || 0;
+  if (count >= 4) return "Hot spot — " + count + " species possible (" + season + ")";
+  if (count >= 2) return "Good variety — try " + (spot.species[0] || "bass");
+  return "Light pressure — explore with live bait";
+}
+
+function exportProfileDataJson(profile) {
+  var catches = [];
+  try { catches = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); } catch (e) {}
+  var blob = new Blob([JSON.stringify({ profile: profile, catches: catches, scoutHistory: loadScoutHistory(), exportedAt: new Date().toISOString() }, null, 2)], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "rfc-fishing-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // Build a spot label from IPTC location fields, then GPS / nearest known spot.
@@ -711,13 +787,213 @@ function fishingScore(wx) {
   return { score, label, emoji, color, notes };
 }
 
+var HOME_TARGET_SPECIES_KEY = "rfc_home_target_species_v1";
+var HOME_WATER_SPOTS = LOCAL_SPOTS.map(function(s) {
+  return { name:s.name, lat:s.lat, lng:s.lng, species:s.species || [], waterType:s.tag || "Water", tip:s.tip || "", parking:s.addr || "" };
+});
+
+function getSeason(monthIndex) {
+  if (monthIndex >= 2 && monthIndex <= 4) return "spring";
+  if (monthIndex >= 5 && monthIndex <= 7) return "summer";
+  if (monthIndex >= 8 && monthIndex <= 10) return "fall";
+  return "winter";
+}
+
+function getMoonInfo(date) {
+  var d = date || new Date();
+  var yr = d.getFullYear(), mo = d.getMonth() + 1, dy = d.getDate();
+  var y = yr, m = mo;
+  if (m < 3) { y--; m += 12; }
+  var jd = 365.25 * y + 30.6 * m + dy - 694039.09;
+  jd /= 29.5305882;
+  var phase = jd - Math.floor(jd);
+  var label = "Waxing";
+  if (phase < 0.03 || phase > 0.97) label = "New";
+  else if (phase >= 0.22 && phase < 0.28) label = "First Quarter";
+  else if (phase >= 0.47 && phase < 0.53) label = "Full";
+  else if (phase >= 0.72 && phase < 0.78) label = "Last Quarter";
+  else if (phase >= 0.53) label = "Waning";
+  return { phase:phase, label:label };
+}
+
+function calcBFR(wx, moonInfo) {
+  if (!wx) return null;
+  var score = 50;
+  var temp = wx.temp;
+  if (temp >= 58 && temp <= 75) score += 20;
+  else if (temp >= 50 && temp < 58) score += 10;
+  else if (temp > 75 && temp <= 85) score += 8;
+  else if (temp > 85) score -= 10;
+  else if (temp < 45) score -= 25;
+  var wind = wx.wind || 0;
+  if (wind >= 5 && wind <= 15) score += 10;
+  else if (wind > 20) score -= 15;
+  else if (wind < 3) score += 5;
+  var precip = wx.precip || 0;
+  if (precip < 20) score += 5;
+  else if (precip > 70) score -= 15;
+  else if (precip > 40) score -= 5;
+  var moon = moonInfo || getMoonInfo();
+  if (moon.label === "New" || moon.label === "Full") score += 15;
+  else if (moon.label === "First Quarter" || moon.label === "Last Quarter") score += 8;
+  else score += 4;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  var tierLabel = score >= 85 ? "EPIC" : score >= 70 ? "GREAT" : score >= 55 ? "GOOD" : score >= 40 ? "FAIR" : "POOR";
+  var tierColor = score >= 85 ? "#3ddc84" : score >= 70 ? "#6fcf6f" : score >= 55 ? "#d4a843" : score >= 40 ? "#e09030" : "#e05050";
+  return { score:score, label:tierLabel, color:tierColor };
+}
+
+function bfrTierColor(score) {
+  if (score >= 85) return "#3ddc84";
+  if (score >= 70) return "#6fcf6f";
+  if (score >= 55) return "#d4a843";
+  if (score >= 40) return "#e09030";
+  return "#e05050";
+}
+
+function windCompass(deg) {
+  if (deg == null || !isFinite(deg)) return "—";
+  var dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+function estimateWaterTemp(airTemp, monthIndex) {
+  var season = getSeason(monthIndex);
+  var offset = season === "spring" ? 8 : season === "summer" ? 5 : season === "fall" ? 6 : 10;
+  return Math.round(airTemp - offset);
+}
+
+function pressureTrendLabel(current, prior) {
+  if (current == null || prior == null) return { label:"Stable", color:"#5a9fd4" };
+  var diff = current - prior;
+  if (diff <= -1.5) return { label:"Falling", color:"#6fcf6f" };
+  if (diff >= 1.5) return { label:"Rising", color:"#d4a843" };
+  return { label:"Stable", color:"#5a9fd4" };
+}
+
+function formatTimeShort(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" });
+  } catch (e) { return "—"; }
+}
+
+function calcSolunarWindows(sunriseIso, sunsetIso) {
+  var now = new Date();
+  var sr = sunriseIso ? new Date(sunriseIso) : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 30);
+  var ss = sunsetIso ? new Date(sunsetIso) : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0);
+  function windowFrom(startMs, durationMin, type, color) {
+    var start = new Date(startMs);
+    var end = new Date(startMs + durationMin * 60000);
+    return { type:type, start:start, end:end, durationMin:durationMin, color:color, label:formatTimeShort(start.toISOString()) + " – " + formatTimeShort(end.toISOString()) };
+  }
+  return [
+    windowFrom(sr.getTime() + 90 * 60000, 120, "Major", "#d4a843"),
+    windowFrom(ss.getTime() - 150 * 60000, 120, "Major", "#d4a843"),
+    windowFrom(sr.getTime() + 6 * 3600000, 60, "Minor", "#5a9fd4"),
+    windowFrom(ss.getTime() + 2 * 3600000, 60, "Minor", "#5a9fd4"),
+  ];
+}
+
+function goldenHourMessage(sunriseIso, sunsetIso) {
+  var now = Date.now();
+  var sr = sunriseIso ? new Date(sunriseIso).getTime() : null;
+  var ss = sunsetIso ? new Date(sunsetIso).getTime() : null;
+  function minsUntil(t) { return Math.max(0, Math.round((t - now) / 60000)); }
+  if (sr && now >= sr - 45 * 60000 && now <= sr + 45 * 60000) return "🌅 Golden hour NOW — get fishing!";
+  if (ss && now >= ss - 45 * 60000 && now <= ss + 45 * 60000) return "🌅 Golden hour NOW — get fishing!";
+  if (sr && now < sr) {
+    var m = minsUntil(sr);
+    return "🌅 Golden hour in " + Math.floor(m / 60) + "h " + (m % 60) + "min";
+  }
+  if (ss && now < ss) {
+    var m2 = minsUntil(ss);
+    return "🌅 Golden hour in " + Math.floor(m2 / 60) + "h " + (m2 % 60) + "min";
+  }
+  return "🌙 Evening bite window opening";
+}
+
+function findNearestHomeWater(lat, lng) {
+  var best = null;
+  HOME_WATER_SPOTS.forEach(function(s) {
+    var d = haversineMi(lat, lng, s.lat, s.lng);
+    if (!best || d < best.dist) best = { spot:s, dist:d };
+  });
+  return best;
+}
+
+function speciesBaitTips(targetSpecies, season) {
+  var sp = targetSpecies && targetSpecies !== "All Species"
+    ? SPECIES.find(function(s) { return s.name === targetSpecies || s.name.indexOf(targetSpecies) >= 0; })
+    : null;
+  if (!sp) {
+    return [
+      { name:"Live minnow under bobber", why:"Universal — crappie, perch, walleye all eat it." },
+      { name:"Texas rig worm", why:"Bass staple in " + season + " — slow drag near cover." },
+      { name:"Inline spinner", why:"Cover water fast when fish are active." },
+    ];
+  }
+  return (sp.bait || []).slice(0, 3).map(function(b, i) {
+    return { name:b, why:i === 0 ? (sp.tips || "Top pick for " + sp.name + " this season.") : (sp.season || "Seasonal favorite") };
+  });
+}
+
+function BFRDial({ score, color, T }) {
+  var th = THEMES[T];
+  var [animScore, setAnimScore] = useState(0);
+  useEffect(function() {
+    var t = setTimeout(function() { setAnimScore(score || 0); }, 80);
+    return function() { clearTimeout(t); };
+  }, [score]);
+  var pct = Math.max(0, Math.min(100, animScore)) / 100;
+  var angle = -90 + pct * 180;
+  var arcLen = Math.PI * 90;
+  var filled = arcLen * pct;
+  return (
+    <div style={{ textAlign:"center", margin:"8px auto 4px" }}>
+      <svg width="220" height="130" viewBox="0 0 220 130" style={{ display:"block", margin:"0 auto" }}>
+        <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={th.border} strokeWidth="10" strokeLinecap="round" />
+        <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={color || th.green} strokeWidth="10" strokeLinecap="round" strokeDasharray={filled + " " + arcLen} style={{ transition:"stroke-dasharray 1s ease-out" }} />
+        <g transform={"rotate(" + angle + " 110 110)"} style={{ transition:"transform 1s ease-out" }}>
+          <line x1="110" y1="110" x2="110" y2="32" stroke={th.white} strokeWidth="3" strokeLinecap="round" />
+          <circle cx="110" cy="110" r="6" fill={color || th.green} />
+        </g>
+        <text x="110" y="98" textAnchor="middle" fill={th.white} fontSize="28" fontWeight="800">{animScore}</text>
+        <text x="110" y="118" textAnchor="middle" fill={color || th.green} fontSize="11" fontWeight="700">BITE FORECAST</text>
+      </svg>
+    </div>
+  );
+}
+
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,weathercode,precipitation_probability&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America/Chicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation_probability,surface_pressure&hourly=surface_pressure&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
-    return { temp: Math.round(c.temperature_2m), wind: Math.round(c.windspeed_10m), code: c.weathercode, precip: c.precipitation_probability || 0, icon: WX_ICON[c.weathercode] || "🌡️", condition: WX_LABEL[c.weathercode] || "Unknown" };
+    var pressureNow = c.surface_pressure;
+    var pressurePrior = pressureNow;
+    if (d.hourly && d.hourly.surface_pressure && d.hourly.surface_pressure.length > 3) {
+      pressurePrior = d.hourly.surface_pressure[Math.max(0, d.hourly.surface_pressure.length - 4)];
+    }
+    var sunrise = d.daily && d.daily.sunrise ? d.daily.sunrise[0] : null;
+    var sunset = d.daily && d.daily.sunset ? d.daily.sunset[0] : null;
+    return {
+      temp: Math.round(c.temperature_2m),
+      wind: Math.round(c.windspeed_10m),
+      windDir: c.wind_direction_10m,
+      windCompass: windCompass(c.wind_direction_10m),
+      pressure: Math.round(pressureNow * 10) / 10,
+      pressureTrend: pressureTrendLabel(pressureNow, pressurePrior),
+      sunrise: sunrise,
+      sunset: sunset,
+      code: c.weathercode,
+      precip: c.precipitation_probability || 0,
+      icon: WX_ICON[c.weathercode] || "🌡️",
+      condition: WX_LABEL[c.weathercode] || "Unknown",
+      lat: lat,
+      lng: lng,
+    };
   } catch(e) {
     // Fallback: ask Claude for estimate
     const now = new Date();
@@ -797,14 +1073,20 @@ function Pill({ label, color }) {
   return <span style={{ background:color + "22", color:color, border:"1px solid " + color + "44", borderRadius:20, padding:"2px 8px", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>;
 }
 
-// ─── HOME TAB ─────────────────────────────────────────────────────────────────
-function HomeTab({ profile, T }) {
+// ─── HOME TAB (BassForecast-style bite intel) ─────────────────────────────────
+var HOME_SPECIES_PICKS = ["All Species", "Bass (Largemouth)", "Crappie", "Channel Catfish", "Coho Salmon", "Walleye", "Yellow Perch"];
+
+function HomeTab({ profile, T, setTab }) {
   const th = THEMES[T];
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
   const [loading, setLoading] = useState(true);
   const [showRefresh, setShowRefresh] = useState(false);
   const [expandArticles, setExpandArticles] = useState(false);
+  const [targetSpecies, setTargetSpecies] = useState(function() {
+    try { return localStorage.getItem(HOME_TARGET_SPECIES_KEY) || "All Species"; } catch (e) { return "All Species"; }
+  });
+  const [nearestWater, setNearestWater] = useState(null);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
@@ -813,6 +1095,7 @@ function HomeTab({ profile, T }) {
     function doLoad(la, ln) {
       loadWeather(la, ln).then(function(w) {
         setWx(w);
+        setNearestWater(findNearestHomeWater(la, ln));
         setLoading(false);
         if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
       });
@@ -832,28 +1115,129 @@ function HomeTab({ profile, T }) {
     return function() { clearInterval(t); };
   }, []);
 
+  function pickSpecies(sp) {
+    setTargetSpecies(sp);
+    try { localStorage.setItem(HOME_TARGET_SPECIES_KEY, sp); } catch (e) {}
+  }
+
   var rating = fishingScore(wx);
-  var displayName = (profile && profile.name) ? ", " + profile.name.split(" ")[0] : "";
+  var moonInfo = getMoonInfo();
+  var bfr = calcBFR(wx, moonInfo);
+  var season = getSeason(new Date().getMonth());
+  var baits = speciesBaitTips(targetSpecies, season);
+  var solunar = wx ? calcSolunarWindows(wx.sunrise, wx.sunset) : [];
+  var waterTemp = wx ? estimateWaterTemp(wx.temp, new Date().getMonth()) : null;
+  var golden = wx ? goldenHourMessage(wx.sunrise, wx.sunset) : "";
+  var displayName = (profile && profile.name) ? profile.name.split(" ")[0] : "Angler";
+  var nearSpot = nearestWater && nearestWater.spot;
+  var nearDist = nearestWater ? nearestWater.dist.toFixed(1) : null;
+  var topSpeciesToday = nearSpot && nearSpot.species ? nearSpot.species.slice(0, 3).join(", ") : "Bass, Crappie, Catfish";
+  var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
+  var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
 
   return (
     <div style={{ paddingBottom:8 }}>
-      <div style={{ textAlign:"center", padding:"18px 0 12px" }}>
-        <div style={{ fontSize:36 }}>🎣</div>
-        <div style={{ fontSize:22, color:th.white, fontWeight:700, marginTop:4 }}>Hey{displayName}!</div>
-        <div style={{ fontSize:12, color:th.muted }}>North Riverside · Lake Michigan Corridor</div>
+      <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
+        <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
+        {loading ? (
+          <div style={{ fontSize:13, color:th.muted, padding:"12px 0" }}>Locating nearest water…</div>
+        ) : nearSpot ? (
+          <div>
+            <div style={{ fontSize:15, color:th.green, fontWeight:700 }}>{nearSpot.name} · {nearDist} mi</div>
+            <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Active: {topSpeciesToday}</div>
+            <div style={{ fontSize:13, color:th.white, marginTop:8, lineHeight:1.45 }}>
+              <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {baits[0] ? baits[0].name : "Live minnow"} — {baits[0] ? baits[0].why : "versatile starter bait"}
+            </div>
+            <div style={{ marginTop:8, display:"inline-block", background:bfrTierColor(biteScore) + "22", border:"1px solid " + bfrTierColor(biteScore), borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:bfrTierColor(biteScore) }}>
+              Bite score {biteScore}/100
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ marginBottom:10 }}>
+        <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>Fishing for today</div>
+        <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:4 }}>
+          {HOME_SPECIES_PICKS.map(function(sp) {
+            var on = targetSpecies === sp;
+            return (
+              <button key={sp} onClick={function() { pickSpecies(sp); }} style={{ flexShrink:0, background:on ? th.green + "33" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:20, padding:"6px 12px", color:on ? th.green : th.muted, fontSize:11, fontWeight:on ? 700 : 400, cursor:"pointer" }}>
+                {sp}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {showRefresh && (
         <div style={{ background:th.green + "22", border:"1px solid " + th.green + "55", borderRadius:10, padding:12, marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
             <div style={{ color:th.green, fontSize:13, fontWeight:700 }}>Ready to refresh?</div>
-            <div style={{ color:th.muted, fontSize:11 }}>Tap to load fresh weather + conditions</div>
+            <div style={{ color:th.muted, fontSize:11 }}>Tap to load fresh bite intel</div>
           </div>
           <button onClick={load} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>Update</button>
         </div>
       )}
+
+      <Card T={T} borderColor={bfr ? bfr.color : th.border} style={{ background:T === "bluesteel" ? "rgba(18,32,53,0.85)" : "rgba(10,22,28,0.9)" }}>
+        {loading ? (
+          <div style={{ textAlign:"center", padding:"24px 0", color:th.muted }}>Calculating bite forecast…</div>
+        ) : bfr && wx ? (
+          <div>
+            <BFRDial score={bfr.score} color={bfr.color} T={T} />
+            <div style={{ textAlign:"center", fontSize:18, fontWeight:800, color:bfr.color, marginBottom:12 }}>{bfr.label} DAY</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+              <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10 }}>
+                <div style={{ fontSize:10, color:th.muted }}>Wind</div>
+                <div style={{ fontSize:16, color:th.white, fontWeight:700 }}>{wx.wind} mph {wx.windCompass || ""}</div>
+                {wx.windCompass === "NW" ? <div style={{ fontSize:10, color:th.green, marginTop:4 }}>NW wind — good day for Lake Michigan</div> : null}
+              </div>
+              <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10 }}>
+                <div style={{ fontSize:10, color:th.muted }}>Pressure</div>
+                <div style={{ fontSize:16, color:wx.pressureTrend ? wx.pressureTrend.color : th.white, fontWeight:700 }}>{wx.pressureTrend ? wx.pressureTrend.label : "—"}</div>
+                <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>{wx.pressure ? wx.pressure + " mb" : ""}</div>
+              </div>
+              <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10 }}>
+                <div style={{ fontSize:10, color:th.muted }}>Water temp (est.)</div>
+                <div style={{ fontSize:16, color:th.white, fontWeight:700 }}>~{waterTemp}°F</div>
+              </div>
+              <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10 }}>
+                <div style={{ fontSize:10, color:th.muted }}>Moon</div>
+                <div style={{ fontSize:16, color:th.gold, fontWeight:700 }}>{moonInfo.label}</div>
+              </div>
+            </div>
+            {golden ? <div style={{ fontSize:12, color:th.gold, marginBottom:10, fontWeight:600 }}>{golden}</div> : null}
+            <SecLabel text="Solunar feeding windows" T={T} />
+            <div style={{ display:"grid", gap:6, marginBottom:10 }}>
+              {solunar.map(function(w, i) {
+                return (
+                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:th.card, border:"1px solid " + w.color + "55", borderRadius:8, padding:"8px 10px" }}>
+                    <span style={{ fontSize:12, color:w.color, fontWeight:700 }}>{w.type}</span>
+                    <span style={{ fontSize:11, color:th.white }}>{w.label}</span>
+                    <span style={{ fontSize:10, color:th.muted }}>{w.durationMin}m</span>
+                  </div>
+                );
+              })}
+            </div>
+            <SecLabel text={"Top baits — " + targetSpecies + " · " + season} T={T} />
+            {baits.map(function(b, i) {
+              return (
+                <div key={i} style={{ marginBottom:8, paddingBottom:8, borderBottom: i < baits.length - 1 ? "1px solid " + th.border : "none" }}>
+                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{b.name}</div>
+                  <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{b.why}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ color:th.red, fontSize:13, textAlign:"center", padding:16 }}>
+            Forecast unavailable. <span style={{ color:th.green, cursor:"pointer" }} onClick={load}>Retry</span>
+          </div>
+        )}
+      </Card>
 
       <Card T={T} borderColor={rating ? rating.color : undefined}>
         <SecLabel text="Today's Conditions" T={T} />
@@ -864,8 +1248,8 @@ function HomeTab({ profile, T }) {
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <div style={{ fontSize:42 }}>{wx.icon}</div>
-                <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}F</div>
-                <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph · {wx.precip}% rain</div>
+                <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}°F</div>
+                <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph {wx.windCompass || ""} · {wx.precip}% rain</div>
               </div>
               {rating && (
                 <div style={{ textAlign:"right" }}>
@@ -894,6 +1278,23 @@ function HomeTab({ profile, T }) {
         )}
       </Card>
 
+      {nearSpot && !loading ? (
+        <Card T={T} borderColor={th.blue + "55"}>
+          <SecLabel text="Nearest water" T={T} />
+          <div style={{ fontSize:15, color:th.white, fontWeight:700 }}>{nearSpot.name}</div>
+          <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>{nearDist} mi · {nearSpot.waterType}</div>
+          <div style={{ fontSize:11, color:th.white, marginTop:6 }}>{nearSpot.tip}</div>
+        </Card>
+      ) : null}
+
+      {profile && profile.level === "Beginner" ? (
+        <Card T={T} borderColor={th.green + "44"}>
+          <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:6 }}>New to fishing? Start here</div>
+          <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Pick a species above, check the bite score, then open Learn for gear basics.</div>
+          {setTab ? <button type="button" onClick={function() { setTab("learn"); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Open Learn tab →</button> : null}
+        </Card>
+      ) : null}
+
       <Card T={T}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
           <SecLabel text="Fishing Articles" T={T} />
@@ -916,7 +1317,7 @@ function HomeTab({ profile, T }) {
 }
 
 // ─── SPECIES TAB ──────────────────────────────────────────────────────────────
-function SpeciesTab({ T }) {
+function SpeciesTab({ T, profile, setTab }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
@@ -958,6 +1359,13 @@ function SpeciesTab({ T }) {
           <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{sp.habitat}</div>
         </div>
         {sp.alert ? <div style={{ background:th.orange + "22", border:"1px solid " + th.orange + "44", borderRadius:8, padding:"8px 12px", marginBottom:10, fontSize:12, color:th.orange }}>⚠️ {sp.alert}</div> : null}
+        {speciesAlsoKnownAs(sp.name) ? <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Also known as: {speciesAlsoKnownAs(sp.name)}</div> : null}
+        <Card T={T} borderColor={th.blue + "44"}>
+          <SecLabel text="Compare to your catch" T={T} />
+          {["Right number of fins and tail shape?","Color pattern matches this species?","Size fits typical range for local water?"].map(function(q, i) {
+            return <div key={i} style={{ fontSize:12, color:th.white, marginBottom:6 }}>☐ {q}</div>;
+          })}
+        </Card>
         <div style={{ display:"flex", gap:5, marginBottom:12, flexWrap:"wrap" }}>
           {["rigs","bait","line","hookset","tips"].map(function(t) {
             return (
@@ -970,10 +1378,15 @@ function SpeciesTab({ T }) {
         {subTab === "rigs" && (
           <div>
             {sp.rigs.map(function(r, i) {
+              var cat = findCatalogueForRig(r.name);
               return (
                 <Card key={i} T={T}>
                   <div style={{ fontWeight:700, color:th.green, fontSize:13, marginBottom:4 }}>{r.name}</div>
+                  <div style={{ fontSize:12, color:th.white, marginBottom:6, lineHeight:1.45 }}>{cat ? cat.what.slice(0, 120) + "…" : "Standard setup for " + sp.name + "."}</div>
                   <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace" }}>{r.setup}</div>
+                  {cat && setTab ? (
+                    <button type="button" onClick={function() { setTab("catalogue"); }} style={{ marginTop:8, background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0, textDecoration:"underline" }}>See {cat.name} in Tackle →</button>
+                  ) : null}
                 </Card>
               );
             })}
@@ -1011,7 +1424,12 @@ function SpeciesTab({ T }) {
     <div>
       <SecLabel text="Tap a Fish for Full Details" T={T} />
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
-        {SPECIES.map(function(sp) {
+        {SPECIES.slice().sort(function(a, b) {
+          if (!profile || profile.level !== "Beginner") return 0;
+          var ab = (a.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
+          var bb = (b.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
+          return ab - bb;
+        }).map(function(sp) {
           return (
             <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
               <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
@@ -1031,7 +1449,6 @@ function SpeciesTab({ T }) {
 function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
-  const [mapSpot, setMapSpot] = useState(null);
   const [selectedLake, setSelectedLake] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
   const [privView, setPrivView] = useState("main");
@@ -1045,6 +1462,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pastMapsPaste, setPastMapsPaste] = useState("");
   const [pastMapsParseMsg, setPastMapsParseMsg] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [pickCenter, setPickCenter] = useState({ lat:41.84, lng:-87.83 });
+  const [pickPin, setPickPin] = useState(null);
+  const [pickName, setPickName] = useState("");
+  const [pickShare, setPickShare] = useState(false);
+  const [pickBackTo, setPickBackTo] = useState("my");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
@@ -1076,42 +1498,84 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setProfile(function(p) { return Object.assign({}, p, { favSpots:updated }); });
   }
 
-  function openSaveWithCoords(lat, lng) {
+  function openPickMap(centerLat, centerLng, pin, defaultName, backTo) {
     setSaveErr("");
-    setSaveDraft({
-      name:"",
-      lat:lat,
-      lng:lng,
+    setPickCenter({ lat:centerLat || 41.84, lng:centerLng || -87.83 });
+    setPickPin(pin || null);
+    setPickName(defaultName || "");
+    setPickShare(false);
+    setPickBackTo(backTo || "my");
+    setPrivView("pickmap");
+  }
+
+  function closePickMap() {
+    setSaveErr("");
+    setPickPin(null);
+    setPickName("");
+    setPickShare(false);
+    setPrivView(pickBackTo === "main" ? "main" : "my");
+  }
+
+  function saveFromPickMap() {
+    setSaveErr("");
+    if (!pickPin) {
+      setSaveErr("Tap the map to drop a pin first.");
+      return;
+    }
+    var draft = {
+      name:pickName.trim() || "My spot",
+      lat:pickPin.lat,
+      lng:pickPin.lng,
       notes:"",
       species_present:[],
       access_info:"",
-      shareClub:false,
+      shareClub:!!pickShare,
       sharedWith:[],
-    });
-    setPrivSpotId(null);
-    setPrivView("save");
+    };
+    var res = savePrivateSpotFull(setProfile, draft, null);
+    if (res.error) {
+      setSaveErr(res.error);
+      return;
+    }
+    if (pickShare) {
+      appendSpotActivity(setProfile, "Saved and shared " + sanitizeStr(draft.name, 120) + " with the club");
+    }
+    setPickPin(null);
+    setPickName("");
+    setPickShare(false);
+    setPrivView("my");
   }
 
-  function startSaveCurrentGps() {
+  function startPickMapHere() {
     setGeoErr("");
     setGeoLoading(true);
     if (!navigator.geolocation) {
       setGeoLoading(false);
-      setGeoErr("GPS not available in this browser.");
+      openPickMap(41.84, -87.83, null, "", "my");
       return;
     }
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         setGeoLoading(false);
-        openSaveWithCoords(pos.coords.latitude, pos.coords.longitude);
+        var la = pos.coords.latitude;
+        var ln = pos.coords.longitude;
+        openPickMap(la, ln, { lat:la, lng:ln }, "", "my");
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("GPS unavailable — enter coordinates manually.");
-        setPrivView("past");
+        setGeoErr("GPS off — pan the map and tap to drop a pin.");
+        openPickMap(41.84, -87.83, null, "", "my");
       },
-      { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
+      { enableHighAccuracy:true, maximumAge:60000, timeout:20000 }
     );
+  }
+
+  function openSaveWithCoords(lat, lng) {
+    openPickMap(lat, lng, { lat:lat, lng:lng }, "", pickBackTo || "my");
+  }
+
+  function startSaveCurrentGps() {
+    startPickMapHere();
   }
 
   function getPastClusters() {
@@ -1277,23 +1741,42 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     );
   }
 
-  if (mapSpot) {
+  if (privView === "pickmap") {
+    var pickInp = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
     return (
       <div>
-        <OBtn label="← Back to Spots" onClick={function() { setMapSpot(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
-        <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:4 }}>Directions to</div>
-        <div style={{ fontSize:15, color:th.green, marginBottom:4 }}>{mapSpot.name}</div>
-        {mapSpot.addr ? <div style={{ fontSize:12, color:th.muted, marginBottom:16 }}>{mapSpot.addr}{mapSpot.dist ? " · " + mapSpot.dist : ""}</div> : null}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          <a href={mapsUrl(mapSpot.lat, mapSpot.lng).apple} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
-            <div style={{ fontSize:32 }}>🗺️</div>
-            <div style={{ fontSize:14, color:th.white, fontWeight:700, marginTop:6 }}>Apple Maps</div>
-          </a>
-          <a href={mapsUrl(mapSpot.lat, mapSpot.lng).google} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
-            <div style={{ fontSize:32 }}>📍</div>
-            <div style={{ fontSize:14, color:th.white, fontWeight:700, marginTop:6 }}>Google Maps</div>
-          </a>
-        </div>
+        <OBtn label="← Back" onClick={closePickMap} color={th.green} style={{ margin:"12px 0 10px" }} />
+        <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>Tap the map to place a pin</div>
+        <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Pan and zoom, then tap where you fish. Pin stays in the app.</div>
+        <SpotMapPicker
+          centerLat={pickCenter.lat}
+          centerLng={pickCenter.lng}
+          pinLat={pickPin ? pickPin.lat : null}
+          pinLng={pickPin ? pickPin.lng : null}
+          onPick={function(lat, lng) { setPickPin({ lat:lat, lng:lng }); setSaveErr(""); }}
+          height={300}
+        />
+        {pickPin ? (
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot name</div>
+            <input value={pickName} onChange={function(e) { setPickName(e.target.value); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Keep private or share?</div>
+            <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+              <button type="button" onClick={function() { setPickShare(false); }} style={{ flex:1, background:!pickShare ? th.green + "33" : "transparent", border:"1px solid " + (!pickShare ? th.green : th.border), borderRadius:8, color:!pickShare ? th.green : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:!pickShare ? 700 : 400 }}>Private</button>
+              <button type="button" onClick={function() { setPickShare(true); }} style={{ flex:1, background:pickShare ? th.gold + "33" : "transparent", border:"1px solid " + (pickShare ? th.gold : th.border), borderRadius:8, color:pickShare ? th.gold : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:pickShare ? 700 : 400 }}>Share with club</button>
+            </div>
+            {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:8 }}>{saveErr}</div> : null}
+            <button type="button" onClick={saveFromPickMap} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"14px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}>
+              Save my spot
+            </button>
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <a href={mapsUrl(pickPin.lat, pickPin.lng).google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", fontSize:11, color:th.muted, textDecoration:"underline" }}>Open in Google Maps</a>
+              <a href={mapsUrl(pickPin.lat, pickPin.lng).apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", fontSize:11, color:th.muted, textDecoration:"underline" }}>Open in Apple Maps</a>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize:12, color:th.muted, marginTop:10, textAlign:"center" }}>No pin yet — tap the map above.</div>
+        )}
       </div>
     );
   }
@@ -1554,9 +2037,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       <div>
         <OBtn label="← Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Club shared map</div>
-        <Card T={T} borderColor={th.gold + "44"}>
-          <div style={{ fontSize:12, color:th.white, lineHeight:1.7 }}>Turning off &quot;Share with Club&quot; removes your pin from this list immediately. A full club sync would use the Private_Spots table on the server.</div>
-        </Card>
+        <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Sample pins + your shared saves.</div>
         {MOCK_CLUB_SHARED_SPOTS.map(function(s) {
           var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=14&size=400x160&markers=" + s.lat + "," + s.lng + ",blue-pushpin";
           return (
@@ -1585,35 +2066,19 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   }
 
   if (privView === "my") {
-    var log = (profile && profile.spotActivityLog) || [];
     return (
       <div>
-        <PrimarySaveStrip />
-
         <GuideMyToggle modeGuide={false} />
-
-        <div style={{ fontSize:20, color:th.white, fontWeight:800, marginBottom:10 }}>My fishing spots</div>
-        <p style={{ fontSize:13, color:th.muted, margin:"0 0 14px", lineHeight:1.55 }}>Everything here is yours. Names, notes, and map pins stay on this device until you share.</p>
-
-        <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
-          <button type="button" onClick={function() { setPrivView("mymap"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.blue, background:th.blue + "15", color:th.blue, fontWeight:700, fontSize:14, cursor:"pointer" }}>
-            🗺️ Map of my saves
-          </button>
-          <button type="button" onClick={function() { setPrivView("club"); }} style={{ flex:1, minWidth:140, minHeight:48, padding:"10px 12px", borderRadius:10, border:"2px solid " + th.gold, background:th.gold + "12", color:th.gold, fontWeight:700, fontSize:14, cursor:"pointer" }}>
-            👥 Club map
-          </button>
+        <button type="button" disabled={geoLoading} onClick={startPickMapHere} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:geoLoading ? "wait" : "pointer", fontSize:15, fontWeight:700, marginBottom:8 }}>
+          {geoLoading ? "Finding GPS…" : "📍 Pick on map"}
+        </button>
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <button type="button" onClick={function() { setPickBackTo("my"); setPrivView("past"); }} style={{ flex:1, background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"8px", color:th.muted, fontSize:12, cursor:"pointer" }}>Paste coords</button>
+          <button type="button" onClick={function() { setPrivView("club"); }} style={{ flex:1, background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"8px", color:th.muted, fontSize:12, cursor:"pointer" }}>Club map</button>
         </div>
-
-        <OBtn label="← Back to fishing guide list" onClick={function() { setPrivView("main"); setPrivSpotId(null); }} color={th.green} style={{ margin:"0 0 14px", fontSize:13 }} />
-
-        {mySpots.length === 0 ? (
-          <Card T={T}>
-            <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:8 }}>No spots saved yet</div>
-            <div style={{ fontSize:13, color:th.muted, lineHeight:1.55 }}>Tap the big green <strong style={{ color:th.green }}>Save my fishing spot</strong> button — or use <strong style={{ color:th.white }}>Save another way</strong> from the guide tab.</div>
-          </Card>
-        ) : null}
+        {mySpots.length === 0 ? <div style={{ fontSize:13, color:th.muted, marginBottom:12 }}>No saved spots yet.</div> : null}
         {mySpots.map(function(s) {
-          var st = s.shareClub ? "Shared w/ Club" : (s.sharedWith && s.sharedWith.length ? "Shared w/ " + s.sharedWith[0].name + (s.sharedWith.length > 1 ? " +" + (s.sharedWith.length - 1) : "") : "Private");
+          var thumb = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x100&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
             <button
               key={s.id}
@@ -1623,27 +2088,16 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
                 setMemberSearch("");
                 setPrivView("detail");
               }}
-              style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, marginBottom:8, cursor:"pointer", color:th.white }}
+              style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:10, overflow:"hidden", marginBottom:8, cursor:"pointer", color:th.white, padding:0 }}
             >
-              <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Saved {formatShortDate(s.created_at)} · {st}</div>
-              <div style={{ fontSize:11, color:th.green, marginTop:4 }}>{(s.species_present || []).slice(0, 4).join(", ")}{(s.species_present && s.species_present.length > 4 ? "…" : "")}</div>
+              <img src={thumb} alt="" style={{ width:"100%", height:72, objectFit:"cover", display:"block" }} />
+              <div style={{ padding:"8px 10px" }}>
+                <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
+                <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{s.shareClub ? "Shared with club" : "Private"}</div>
+              </div>
             </button>
           );
         })}
-        <Card T={T}>
-          <SecLabel text="Sharing activity" T={T} />
-          {log.length === 0 ? <div style={{ fontSize:12, color:th.muted }}>No sharing activity yet.</div> : null}
-          {log.slice(0, 20).map(function(row) {
-            return (
-              <div key={row.id} style={{ fontSize:11, color:th.white, borderBottom:"1px solid " + th.border, paddingBottom:8, marginBottom:8 }}>
-                <span style={{ color:th.muted }}>{formatShortDate(row.at)}</span>
-                <br />
-                {row.message}
-              </div>
-            );
-          })}
-        </Card>
       </div>
     );
   }
@@ -1651,225 +2105,42 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   function SpotCard(props) {
     var s = props.s;
     return (
-      <Card T={T} borderColor={s.color + "44"} style={{ borderLeft:"3px solid " + s.color }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, color:th.white, fontSize:15 }}>{s.name}</div>
-            <div style={{ fontSize:12, color:th.muted, fontFamily:"monospace", marginTop:2 }}>{s.addr}</div>
-            {props.salmon ? <div style={{ fontSize:11, color:th.gold, marginTop:3 }}>📅 {s.season}</div> : null}
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
-            <Pill label={s.tag} color={s.color} />
-            <span style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{s.dist}</span>
-            <button type="button" onClick={function() { toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:22, minWidth:44, minHeight:44 }}>
+      <div style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"10px 12px", marginBottom:8, color:th.white }}>
+        <div onClick={function() { openPickMap(s.lat, s.lng, { lat:s.lat, lng:s.lng }, s.name, "main"); }} style={{ cursor:"pointer" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
+              <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{s.dist}{s.tag ? " · " + s.tag : ""} · tap for map</div>
+            </div>
+            <button type="button" onClick={function(e) { e.stopPropagation(); toggleFav(s.name); }} style={{ background:"transparent", border:"none", cursor:"pointer", fontSize:18, padding:4, flexShrink:0 }}>
               {favSpots.includes(s.name) ? "⭐" : "☆"}
             </button>
           </div>
         </div>
-        {s.species ? (
-          <div style={{ display:"flex", flexWrap:"wrap", gap:3, margin:"8px 0" }}>
-            {s.species.map(function(sp) { return <Pill key={sp} label={sp} color={th.green} />; })}
-          </div>
-        ) : null}
-        <div style={{ fontSize:13, color:th.white, marginBottom:8, lineHeight:1.55 }}>💡 {s.tip}</div>
-        {s.alert ? <div style={{ fontSize:11, color:th.orange, marginBottom:8 }}>⚠️ {s.alert}</div> : null}
-        <OBtn label="Open directions" onClick={function() { setMapSpot(s); }} color={th.blue} style={{ fontSize:13, padding:"8px 14px" }} />
-      </Card>
+      </div>
     );
   }
 
   function GuideMyToggle(props) {
     var modeGuide = props.modeGuide;
     return (
-      <div style={{ display:"flex", gap:10, marginBottom:14 }} role="tablist" aria-label="Choose guide or your spots">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={modeGuide}
-          onClick={function() { setPrivView("main"); setPrivSpotId(null); }}
-          style={{
-            flex:1,
-            minHeight:72,
-            padding:"12px 10px",
-            borderRadius:14,
-            border:"3px solid " + (modeGuide ? th.green : th.border),
-            background:modeGuide ? th.green + "40" : th.card,
-            color:th.white,
-            fontWeight:800,
-            fontSize:15,
-            lineHeight:1.25,
-            cursor:"pointer",
-            textAlign:"center",
-          }}
-        >
-          Fishing areas<br />
-          <span style={{ fontSize:12, fontWeight:600, color:modeGuide ? th.white : th.muted }}>(in this app)</span>
+      <div style={{ display:"flex", gap:6, marginBottom:10 }} role="tablist" aria-label="Guide or my spots">
+        <button type="button" role="tab" aria-selected={modeGuide} onClick={function() { setPrivView("main"); setPrivSpotId(null); }} style={{ flex:1, padding:"10px 8px", borderRadius:8, border:"1px solid " + (modeGuide ? th.green : th.border), background:modeGuide ? th.green + "33" : "transparent", color:modeGuide ? th.green : th.muted, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+          Guide spots
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!modeGuide}
-          onClick={function() { setPrivView("my"); setPrivSpotId(null); }}
-          style={{
-            flex:1,
-            minHeight:72,
-            padding:"12px 10px",
-            borderRadius:14,
-            border:"3px solid " + (!modeGuide ? th.green : th.border),
-            background:!modeGuide ? th.green + "40" : th.card,
-            color:th.white,
-            fontWeight:800,
-            fontSize:15,
-            lineHeight:1.25,
-            cursor:"pointer",
-            textAlign:"center",
-          }}
-        >
-          My fishing spots<br />
-          <span style={{ fontSize:12, fontWeight:600, color:!modeGuide ? th.white : th.muted }}>(your saves)</span>
+        <button type="button" role="tab" aria-selected={!modeGuide} onClick={function() { setPrivView("my"); setPrivSpotId(null); }} style={{ flex:1, padding:"10px 8px", borderRadius:8, border:"1px solid " + (!modeGuide ? th.green : th.border), background:!modeGuide ? th.green + "33" : "transparent", color:!modeGuide ? th.green : th.muted, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+          My spots
         </button>
-      </div>
-    );
-  }
-
-  function PrimarySaveStrip() {
-    return (
-      <div style={{ marginBottom:14 }}>
-        <button
-          type="button"
-          disabled={geoLoading}
-          onClick={startSaveCurrentGps}
-          style={{
-            width:"100%",
-            background:th.green,
-            color:"#081208",
-            border:"none",
-            borderRadius:14,
-            padding:"18px 16px",
-            cursor:geoLoading ? "wait" : "pointer",
-            fontSize:18,
-            fontWeight:800,
-            boxShadow:"0 6px 22px rgba(0,0,0,0.45)",
-            display:"flex",
-            alignItems:"center",
-            justifyContent:"center",
-            gap:12,
-            minHeight:56,
-          }}
-        >
-          <span style={{ fontSize:28 }} aria-hidden>📍</span>
-          <span>{geoLoading ? "Finding where you are…" : "Save my fishing spot"}</span>
-        </button>
-        <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
-          Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
-        </p>
-        {geoErr ? <div style={{ fontSize:12, color:th.orange, marginTop:8, padding:"8px 12px", background:th.orange + "15", borderRadius:8, border:"1px solid " + th.orange + "55" }}>{geoErr}</div> : null}
-      </div>
-    );
-  }
-
-  function StickySaveBar() {
-    return (
-      <div
-        style={{
-          position:"sticky",
-          bottom:76,
-          zIndex:15,
-          marginTop:20,
-          paddingTop:12,
-          paddingBottom:6,
-          background:"linear-gradient(180deg, transparent 0%, " + th.bg + " 35%)",
-        }}
-      >
-        <button
-          type="button"
-          disabled={geoLoading}
-          onClick={startSaveCurrentGps}
-          style={{
-            width:"100%",
-            background:th.green,
-            color:"#081208",
-            border:"2px solid " + th.dim,
-            borderRadius:12,
-            padding:"14px 12px",
-            cursor:geoLoading ? "wait" : "pointer",
-            fontSize:16,
-            fontWeight:800,
-            display:"flex",
-            alignItems:"center",
-            justifyContent:"center",
-            gap:8,
-            minHeight:52,
-            boxShadow:"0 -2px 12px rgba(0,0,0,0.35)",
-          }}
-        >
-          <span style={{ fontSize:22 }} aria-hidden>📍</span>
-          {geoLoading ? "Working…" : "Save my spot"}
-        </button>
-        <div style={{ fontSize:11, color:th.muted, textAlign:"center", marginTop:6 }}>Tap here anytime while you scroll the list</div>
       </div>
     );
   }
 
   return (
     <div>
-      <PrimarySaveStrip />
-
       <GuideMyToggle modeGuide={true} />
-      {geoErr ? (
-        <div style={{ fontSize:13, color:th.orange, marginBottom:12, padding:10, background:th.orange + "15", borderRadius:10, border:"1px solid " + th.orange + "55" }}>
-          {geoErr}
-        </div>
-      ) : null}
+      {geoErr ? <div style={{ fontSize:12, color:th.orange, marginBottom:10 }}>{geoErr}</div> : null}
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-        <button
-          type="button"
-          onClick={function() { setPrivView("past"); }}
-          style={{
-            minHeight:64,
-            padding:12,
-            borderRadius:12,
-            border:"2px solid " + th.blue,
-            background:th.blue + "18",
-            color:th.blue,
-            fontWeight:700,
-            fontSize:14,
-            cursor:"pointer",
-            lineHeight:1.35,
-          }}
-        >
-          🗺️ Save another way<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>map, past point, type coords</span>
-        </button>
-        <button
-          type="button"
-          onClick={function() { setPrivView("club"); }}
-          style={{
-            minHeight:64,
-            padding:12,
-            borderRadius:12,
-            border:"2px solid " + th.gold,
-            background:th.gold + "12",
-            color:th.gold,
-            fontWeight:700,
-            fontSize:14,
-            cursor:"pointer",
-            lineHeight:1.35,
-          }}
-        >
-          👥 Club shared map<br />
-          <span style={{ fontSize:11, fontWeight:600, color:th.muted }}>optional</span>
-        </button>
-      </div>
-
-      <div style={{ fontSize:11, color:th.muted, fontFamily:"monospace", letterSpacing:1.2, marginBottom:6, textTransform:"uppercase" }}>Guide — picks in the app</div>
-      <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>Places in this app</div>
-      <p style={{ fontSize:13, color:th.muted, margin:"0 0 12px", lineHeight:1.5 }}>
-        These are <strong style={{ color:th.white }}>not</strong> your personal saves. Use the green <strong style={{ color:th.green }}>Save my fishing spot</strong> button above to keep your own place.
-      </p>
-
-      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
         <button
           type="button"
           onClick={function() { setView("local"); }}
@@ -1948,26 +2219,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           }}
         />
       )}
-      {view === "salmon" && (
-        <div>
-          <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
-            <div style={{ fontSize:11, color:th.blue, fontFamily:"monospace", marginBottom:5 }}>SOUTH TO NORTH CORRIDOR</div>
-            <div style={{ fontSize:13, color:th.white, lineHeight:1.6 }}>Spring run: Indiana first, Waukegan last. Fall run reverses. NW winds = go day on any pier.</div>
-          </div>
-          <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "44", borderRadius:8, padding:10, marginBottom:10 }}>
-            <div style={{ fontSize:12, color:th.orange, marginBottom:3 }}>⚠️ Indiana license</div>
-            <div style={{ fontSize:12, color:th.white }}>Illinois rules do not carry across the state line. Indiana spots need an Indiana license.</div>
-          </div>
-          {SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
-        </div>
-      )}
+      {view === "salmon" && SALMON_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} salmon />; })}
       {view === "fav" && (
         <div>
           {LOCAL_SPOTS.concat(SALMON_SPOTS).filter(function(s) { return favSpots.includes(s.name); }).map(function(s, i) { return <SpotCard key={i} s={s} />; })}
         </div>
       )}
 
-      <StickySaveBar />
     </div>
   );
 }
@@ -2162,9 +2420,54 @@ function CatchTab({ profile, authMember, T }) {
   const [rfcLink, setRfcLink] = useState("");
   const [speciesSearch, setSpeciesSearch] = useState("");
   const [rulerOrientation, setRulerOrientation] = useState("horizontal");
+  const [rulerBoxH, setRulerBoxH] = useState(360);
   const [spotMetaSource, setSpotMetaSource] = useState("");
+  const [showAdvancedMeasure, setShowAdvancedMeasure] = useState(false);
+  const [customSpecies, setCustomSpecies] = useState("");
+  const [catchVisibility, setCatchVisibility] = useState("private");
+  const [clubFeed, setClubFeed] = useState([]);
+  const [clubFeedLoading, setClubFeedLoading] = useState(false);
+  const [showCatchHint, setShowCatchHint] = useState(function() {
+    try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
+  });
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+
+  useEffect(function() {
+    if (!authMember) return;
+    setClubFeedLoading(true);
+    loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() { setClubFeed([]); }).finally(function() { setClubFeedLoading(false); });
+  }, [authMember ? authMember.id : null]);
+
+  function dismissCatchHint() {
+    setShowCatchHint(false);
+    try { localStorage.setItem(RFC_CATCH_HINT_KEY, "1"); } catch (e) {}
+  }
+
+  function speciesAlertFor(name) {
+    var sp = SPECIES.find(function(s) { return s.name === name || name.indexOf(s.name) >= 0; });
+    return sp && sp.alert ? sp.alert : null;
+  }
+
+  function baitChipsForSpecies(speciesName) {
+    return speciesBaitTips(speciesName, getSeason(new Date().getMonth())).map(function(b) { return b.name; });
+  }
+
+  useEffect(function() {
+    if (step !== 2 || measurementOption !== "1_ruler" || rulerOrientation !== "vertical") return;
+    function measureRulerBox() {
+      if (photoContainerRef.current) {
+        setRulerBoxH(photoContainerRef.current.offsetHeight || 360);
+      }
+    }
+    measureRulerBox();
+    window.addEventListener("resize", measureRulerBox);
+    var timer = setTimeout(measureRulerBox, 250);
+    return function() {
+      window.removeEventListener("resize", measureRulerBox);
+      clearTimeout(timer);
+    };
+  }, [step, photo, rulerOrientation, measurementOption, aiLoading]);
 
   function applyPhotoMetadata(exif) {
     if (!exif) return;
@@ -2342,10 +2645,15 @@ function CatchTab({ profile, authMember, T }) {
   }
 
   function submitCatch() {
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo, visibility:"private" };
+    var vis = catchVisibility === "club" && authMember ? "club" : "private";
+    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo, visibility:vis };
     setCatches(function(c) { return [entry].concat(c); });
     if (authMember && authMember.id) {
-      saveCatchToCloud(authMember.id, entry).catch(function() {});
+      saveCatchToCloud(authMember.id, entry).then(function() {
+        if (vis === "club") {
+          loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() {});
+        }
+      }).catch(function() {});
     }
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
@@ -2399,7 +2707,20 @@ function CatchTab({ profile, authMember, T }) {
 
       {view === "feed" && (
         <div>
-          <SecLabel text="Recent Catches — All App Users" T={T} />
+          <SecLabel text="Club catch feed" T={T} />
+          {clubFeedLoading ? <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Loading club catches…</div> : null}
+          {!authMember ? <Card T={T}><div style={{ fontSize:12, color:th.muted }}>Sign in to see club member catches. Local catches below.</div></Card> : null}
+          {clubFeed.map(function(c, i) {
+            return (
+              <Card key={"club_" + i} T={T} borderColor={th.gold + "44"}>
+                <div style={{ fontSize:10, color:th.gold, marginBottom:4 }}>{c.memberName || "Member"} · shared with club</div>
+                {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:8, maxHeight:140, objectFit:"cover" }} /> : null}
+                <div style={{ fontWeight:700, color:th.white }}>{c.species}</div>
+                <div style={{ fontSize:12, color:th.muted }}>{c.length} · {c.bait} · {c.spot}</div>
+              </Card>
+            );
+          })}
+          <SecLabel text="Your catches (this device)" T={T} />
           {catches.map(function(c, i) {
             return (
               <Card key={i} T={T}>
@@ -2424,6 +2745,13 @@ function CatchTab({ profile, authMember, T }) {
 
       {view === "log" && (
         <div>
+          {showCatchHint && step === 0 ? (
+            <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
+              <div style={{ fontSize:13, color:th.white, fontWeight:700, marginBottom:6 }}>Log a catch in 3 steps</div>
+              <div style={{ fontSize:12, color:th.muted, lineHeight:1.5 }}>1) Add photo · 2) Measure & pick species · 3) Review & save</div>
+              <button type="button" onClick={dismissCatchHint} style={{ marginTop:8, background:th.green, color:"#000", border:"none", borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Got it</button>
+            </Card>
+          ) : null}
           {step === 0 && (
             <div style={{ textAlign:"center", padding:"20px 0" }}>
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
@@ -2451,13 +2779,13 @@ function CatchTab({ profile, authMember, T }) {
                       style={{
                         position:"relative",
                         touchAction:"none",
-                        marginBottom: measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? 52 : 0,
-                        marginRight: measurementOption === "1_ruler" && rulerOrientation === "vertical" ? 52 : 0,
+                        marginBottom: measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? RULER_STRIP_H : 0,
+                        marginRight: measurementOption === "1_ruler" && rulerOrientation === "vertical" ? RULER_STRIP_W : 0,
                       }}
                     >
                       <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
                       {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
-                      <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
+                      <img src={photo} alt="catch" onLoad={function() { if (photoContainerRef.current) setRulerBoxH(photoContainerRef.current.offsetHeight || 360); }} style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
                       {measurementOption === "1_ruler" ? (
                         rulerOrientation === "horizontal" ? (
                           <div style={{ position:"absolute", left:0, right:0, top:0, bottom:0, pointerEvents:"none" }}>
@@ -2523,13 +2851,29 @@ function CatchTab({ profile, authMember, T }) {
                     )}
                     </div>
                     {measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? (
-                      <div style={{ position:"absolute", left:0, right:0, bottom:0, height:52, overflow:"hidden", pointerEvents:"none", borderTop:"1px solid rgba(255,255,255,0.15)" }}>
-                        <img src={RULER_REF_SRC} alt="" draggable={false} style={{ width:"100%", height:"100%", objectFit:"fill", opacity:0.92, display:"block" }} />
+                      <div style={{ position:"absolute", left:0, right:0, bottom:0, height:RULER_STRIP_H, overflow:"hidden", pointerEvents:"none", borderTop:"1px solid rgba(255,255,255,0.15)", background:"#ebe3d3" }}>
+                        <img src={RULER_REF_SRC} alt="20 inch ruler" draggable={false} style={{ width:"100%", height:"100%", objectFit:"fill", opacity:1, display:"block" }} />
                       </div>
                     ) : null}
                     {measurementOption === "1_ruler" && rulerOrientation === "vertical" ? (
-                      <div style={{ position:"absolute", top:0, right:0, bottom:0, width:52, overflow:"hidden", pointerEvents:"none", borderLeft:"1px solid rgba(255,255,255,0.15)" }}>
-                        <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", top:0, left:"50%", height:"100%", width:"auto", maxHeight:"100%", transform:"translateX(-50%) rotate(90deg)", transformOrigin:"center top", opacity:0.92 }} />
+                      <div style={{ position:"absolute", top:0, right:0, bottom:0, width:RULER_STRIP_W, overflow:"hidden", pointerEvents:"none", borderLeft:"1px solid rgba(255,255,255,0.15)", background:"#ebe3d3" }}>
+                        <img
+                          src={RULER_REF_SRC}
+                          alt="20 inch ruler"
+                          draggable={false}
+                          style={{
+                            position:"absolute",
+                            top:0,
+                            left:"100%",
+                            width:rulerBoxH,
+                            height:RULER_STRIP_W,
+                            maxWidth:"none",
+                            objectFit:"fill",
+                            transformOrigin:"top left",
+                            transform:"rotate(-90deg) translateX(-100%)",
+                            display:"block",
+                          }}
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -2551,7 +2895,10 @@ function CatchTab({ profile, authMember, T }) {
                         ["4_custom","4. Custom ref size"],
                         ["5_none","5. No reference (estimate)"],
                         ["6_depth","6. Multi-photo depth assist"],
-                      ].map(function(opt) {
+                      ].filter(function(opt) {
+                        if (!profile || profile.level !== "Beginner" || showAdvancedMeasure) return true;
+                        return opt[0] === "1_ruler";
+                      }).map(function(opt) {
                         return (
                           <button
                             key={opt[0]}
@@ -2572,6 +2919,9 @@ function CatchTab({ profile, authMember, T }) {
                         );
                       })}
                     </div>
+                    {profile && profile.level === "Beginner" && !showAdvancedMeasure ? (
+                      <button type="button" onClick={function() { setShowAdvancedMeasure(true); }} style={{ width:"100%", background:"transparent", border:"1px dashed " + th.border, borderRadius:7, padding:"8px", cursor:"pointer", fontSize:12, color:th.muted, marginBottom:10 }}>Show more measure methods (2–6)</button>
+                    ) : null}
                     {measurementOption === "1_ruler" ? (
                       <div>
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4, lineHeight:1.45 }}>
@@ -2668,6 +3018,11 @@ function CatchTab({ profile, authMember, T }) {
                   );
                 })}
               </div>
+              <div style={{ fontSize:12, color:th.muted, margin:"12px 0 6px" }}>Not listed? Type your own:</div>
+              <input value={customSpecies} onChange={function(e) { setCustomSpecies(e.target.value); }} placeholder="e.g. Hybrid sunfish" style={inputStyle} />
+              <button type="button" onClick={function() { var n = customSpecies.trim(); if (n) setF("species", n); }} disabled={!customSpecies.trim()} style={{ width:"100%", background:customSpecies.trim() ? th.blue + "33" : th.border, color:customSpecies.trim() ? th.blue : th.muted, border:"1px solid " + (customSpecies.trim() ? th.blue : th.border), borderRadius:8, padding:"9px 0", cursor:customSpecies.trim() ? "pointer" : "not-allowed", fontSize:13, fontWeight:600, marginBottom:12 }}>
+                Use custom species name
+              </button>
               <button onClick={function() { if (form.length) setStep(4); else { setF("length", ""); setStep(4); } }} disabled={!form.species} style={{ width:"100%", background:form.species ? th.green : th.border, color:form.species ? "#000" : th.muted, border:"none", borderRadius:8, padding:"11px 0", cursor:form.species ? "pointer" : "not-allowed", fontSize:14, fontWeight:700 }}>
                 {form.species ? "Continue → Catch Details" : "Select a species to continue"}
               </button>
@@ -2724,6 +3079,16 @@ function CatchTab({ profile, authMember, T }) {
               </div>
               <div style={{ marginBottom:10 }}>
                 <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Bait used</div>
+                {form.species && baitChipsForSpecies(form.species).length ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                    {baitChipsForSpecies(form.species).map(function(b) {
+                      var on = form.bait === b;
+                      return (
+                        <button key={b} type="button" onClick={function() { setF("bait", b); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:20, color:on ? th.green : th.muted, padding:"5px 12px", cursor:"pointer", fontSize:11 }}>{b}</button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <input value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder={photo ? "What did you catch it on?" : ""} style={inputStyle} />
               </div>
               {estWeightLabel ? <div style={{ fontSize:11, color:th.muted, marginBottom:12, fontStyle:"italic" }}>Est. weight: {estWeightLabel} (length-weight formula)</div> : null}
@@ -2756,7 +3121,20 @@ function CatchTab({ profile, authMember, T }) {
                   );
                 })}
               </Card>
-              <button onClick={submitCatch} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginBottom:8 }}>Post to Community Feed</button>
+              {speciesAlertFor(form.species) ? (
+                <Card T={T} borderColor={th.orange + "44"} style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:12, color:th.orange, lineHeight:1.5 }}>⚠️ {speciesAlertFor(form.species)}</div>
+                </Card>
+              ) : null}
+              <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Who can see this catch?</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button type="button" onClick={function() { setCatchVisibility("private"); }} style={{ flex:1, background:catchVisibility === "private" ? th.green + "33" : "transparent", border:"1px solid " + (catchVisibility === "private" ? th.green : th.border), borderRadius:8, color:catchVisibility === "private" ? th.green : th.muted, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:catchVisibility === "private" ? 700 : 400 }}>Private (just me)</button>
+                  <button type="button" onClick={function() { setCatchVisibility("club"); }} style={{ flex:1, background:catchVisibility === "club" ? th.gold + "33" : "transparent", border:"1px solid " + (catchVisibility === "club" ? th.gold : th.border), borderRadius:8, color:catchVisibility === "club" ? th.gold : th.muted, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:catchVisibility === "club" ? 700 : 400 }}>Share with club</button>
+                </div>
+                {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
+              </Card>
+              <button onClick={submitCatch} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginBottom:8 }}>{catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
@@ -2766,13 +3144,13 @@ function CatchTab({ profile, authMember, T }) {
               <div style={{ fontSize:48, marginBottom:12 }}>🎉</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:6 }}>Catch Posted!</div>
               {form.species ? <div style={{ fontSize:14, color:th.green, fontWeight:600, marginBottom:4 }}>{form.species} · {form.length}{estWeightLabel ? " · ~" + estWeightLabel : ""}</div> : null}
-              <div style={{ fontSize:13, color:th.muted, marginBottom:20 }}>Your catch is live on the community feed.</div>
+              <div style={{ fontSize:13, color:th.muted, marginBottom:20 }}>{catchVisibility === "club" ? "Your catch is on the club feed for signed-in members." : "Saved privately on this device and your account."}</div>
               <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:10, padding:16, marginBottom:16, textAlign:"left" }}>
                 <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Share with Riverside Fishing Club?</div>
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies(""); setCatchVisibility("private"); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
@@ -3111,6 +3489,12 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
         <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>More themes coming in a future update.</div>
       </Card>
 
+      <Card T={T} borderColor={th.blue + "44"}>
+        <SecLabel text="Download my data" T={T} />
+        <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Export profile, catches, and scout history as a JSON backup file.</div>
+        <button type="button" onClick={function() { exportProfileDataJson(profile); }} style={{ width:"100%", background:th.blue + "22", color:th.blue, border:"1px solid " + th.blue + "55", borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, fontWeight:700 }}>Download my data</button>
+      </Card>
+
       <Card T={T}>
         <SecLabel text="Security and Privacy" T={T} />
         {[["Roster only","Only uploaded RFC members can sign in."],["Passwords","Hashed by Firebase — never stored in the app."],["Cloud sync","Signed-in data saves to RFC Firebase (rfc-management)."],["No ad tracking","Zero third-party analytics."]].map(function(item, i) {
@@ -3131,14 +3515,191 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   );
 }
 
-// ─── SCOUT TAB (placeholder) ──────────────────────────────────────────────────
-function ScoutTab({ T }) {
+// ─── SCOUT TAB ────────────────────────────────────────────────────────────────
+function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var th = THEMES[T];
+  var fileRef = useRef();
+  var [section, setSection] = useState("near");
+  var [scoutPhoto, setScoutPhoto] = useState(null);
+  var [scoutB64, setScoutB64] = useState(null);
+  var [scoutLoading, setScoutLoading] = useState(false);
+  var [scoutResult, setScoutResult] = useState(null);
+  var [gpsLoading, setGpsLoading] = useState(true);
+  var [userPos, setUserPos] = useState({ lat:41.84, lng:-87.83 });
+  var [history, setHistory] = useState(loadScoutHistory);
+  var season = getSeason(new Date().getMonth());
+
+  useEffect(function() {
+    setGpsLoading(true);
+    if (!navigator.geolocation) { setGpsLoading(false); return; }
+    navigator.geolocation.getCurrentPosition(
+      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); },
+      function() { setGpsLoading(false); },
+      { timeout:8000, enableHighAccuracy:true }
+    );
+  }, []);
+
+  var nearSpots = SCOUT_SPOTS.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(userPos.lat, userPos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= 10; }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  function handleScoutPhoto(e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    readImageFileScout(f).then(function(img) {
+      setScoutPhoto(img.full);
+      setScoutB64(img.b64);
+      setScoutResult(null);
+      setScoutLoading(true);
+      fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:600,
+          messages:[{
+            role:"user",
+            content:[
+              { type:"image", source:{ type:"base64", media_type:img.type || "image/jpeg", data:img.b64 } },
+              { type:"text", text:"You are a fishing location identification expert for Chicago metro (DPR, Cal-Sag, Salt Creek, Lake Michigan). Return ONLY raw JSON: {\"confidence\":85,\"location\":\"Des Plaines River — Summit\",\"waterType\":\"River\",\"lat\":41.778,\"lng\":-87.815,\"species\":[\"Largemouth Bass\"],\"reasoning\":\"brief\",\"bait1\":\"rig + bait\",\"bait2\":\"second option\",\"cannotIdentify\":false}. If unknown set cannotIdentify true and blank other fields." },
+            ],
+          }],
+        }),
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        var txt = (data.content && data.content[0] && data.content[0].text) || "";
+        var m = txt.match(/\{[\s\S]*\}/);
+        var parsed = m ? JSON.parse(m[0]) : { cannotIdentify:true };
+        setScoutResult(parsed);
+        if (!parsed.cannotIdentify) {
+          saveScoutHistoryEntry({ at:new Date().toISOString(), location:parsed.location, confidence:parsed.confidence });
+          setHistory(loadScoutHistory());
+        }
+      }).catch(function() {
+        setScoutResult({ cannotIdentify:true });
+      }).finally(function() { setScoutLoading(false); });
+    });
+    e.target.value = "";
+  }
+
+  function readImageFileScout(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var full = ev.target.result;
+        resolve({ full:full, b64:(full && full.split(",")[1]) || "", type:file.type || "image/jpeg" });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function saveScoutToPrivateSpots() {
+    if (!scoutResult || scoutResult.cannotIdentify || !setProfile) return;
+    var spot = {
+      id:"scout_" + Date.now(),
+      name:scoutResult.location || "Scout spot",
+      lat:parseFloat(scoutResult.lat) || userPos.lat,
+      lng:parseFloat(scoutResult.lng) || userPos.lng,
+      notes:scoutResult.reasoning || "",
+      species_present:scoutResult.species || [],
+      shareClub:false,
+      sharedWith:[],
+      created_at:new Date().toISOString(),
+    };
+    setProfile(function(p) {
+      var base = normalizeProfile(p);
+      var spots = (base.privateSpots || []).concat([spot]);
+      return Object.assign({}, base, { privateSpots:spots });
+    });
+    appendSpotActivity(setProfile, "Saved scout result to My Private Spots");
+    if (typeof goMyPrivateSpots === "function") goMyPrivateSpots();
+  }
+
+  var confColor = scoutResult && scoutResult.confidence >= 70 ? th.green : scoutResult && scoutResult.confidence >= 50 ? th.gold : th.red;
+
   return (
-    <div style={{ padding:"32px 0", textAlign:"center" }}>
-      <div style={{ fontSize:48 }}>🔍</div>
-      <div style={{ fontSize:20, color:th.white, fontWeight:700, marginTop:12 }}>Scout</div>
-      <div style={{ fontSize:13, color:th.muted, marginTop:8 }}>Coming soon — spot ID and local discovery</div>
+    <div>
+      <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
+        <OBtn label="Near Me" onClick={function() { setSection("near"); }} color={section === "near" ? th.green : th.muted} />
+        <OBtn label="Identify Spot" onClick={function() { setSection("identify"); }} color={section === "identify" ? th.green : th.muted} />
+      </div>
+
+      {section === "identify" ? (
+        <div>
+          <div style={{ fontSize:18, color:th.white, fontWeight:800, marginBottom:4 }}>🔍 Identify This Spot</div>
+          <div style={{ fontSize:12, color:th.muted, marginBottom:12, lineHeight:1.5 }}>Upload any fishing photo — Instagram, TikTok, or your own.</div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleScoutPhoto} />
+          <button type="button" onClick={function() { fileRef.current && fileRef.current.click(); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:10, padding:"14px 0", fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:12 }}>
+            📷 Upload photo
+          </button>
+          {scoutPhoto ? <img src={scoutPhoto} alt="scout" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:200, objectFit:"cover" }} /> : null}
+          {scoutLoading ? <Card T={T}><div style={{ textAlign:"center", padding:16, color:th.muted }}>Analyzing location…</div></Card> : null}
+          {scoutResult && !scoutLoading && scoutResult.cannotIdentify ? (
+            <Card T={T} borderColor={th.orange + "55"}>
+              <div style={{ fontSize:14, color:th.orange, fontWeight:700, marginBottom:6 }}>Could not identify this location</div>
+              <div style={{ fontSize:12, color:th.muted, lineHeight:1.5 }}>Try a photo with a visible bridge, road sign, or landmark.</div>
+            </Card>
+          ) : null}
+          {scoutResult && !scoutLoading && !scoutResult.cannotIdentify ? (
+            <Card T={T} borderColor={confColor + "55"}>
+              <div style={{ fontSize:11, color:confColor, fontWeight:700, marginBottom:6 }}>{scoutResult.confidence}% confident</div>
+              <div style={{ fontSize:17, color:th.white, fontWeight:800, marginBottom:6 }}>{scoutResult.location}</div>
+              <Pill label={scoutResult.waterType || "Water"} color={th.blue} />
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, margin:"10px 0" }}>
+                {(scoutResult.species || []).map(function(sp, i) { return <Pill key={i} label={sp} color={th.green} />; })}
+              </div>
+              <div style={{ fontSize:12, color:th.muted, marginBottom:8, lineHeight:1.5 }}>{scoutResult.reasoning}</div>
+              <div style={{ fontSize:12, color:th.white, marginBottom:4 }}><strong>Bait 1:</strong> {scoutResult.bait1}</div>
+              <div style={{ fontSize:12, color:th.white, marginBottom:10 }}><strong>Bait 2:</strong> {scoutResult.bait2}</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <a href={mapsUrl(scoutResult.lat, scoutResult.lng).google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.blue, fontSize:12, fontWeight:700, textDecoration:"none" }}>Google Maps</a>
+                <a href={mapsUrl(scoutResult.lat, scoutResult.lng).apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.green, fontSize:12, fontWeight:700, textDecoration:"none" }}>Apple Maps</a>
+              </div>
+              <button type="button" onClick={saveScoutToPrivateSpots} style={{ width:"100%", marginTop:10, background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:8, padding:"10px 0", color:th.gold, fontWeight:700, cursor:"pointer", fontSize:13 }}>Save to My Private Spots</button>
+            </Card>
+          ) : null}
+        </div>
+      ) : (
+        <div>
+          <div style={{ fontSize:18, color:th.white, fontWeight:800, marginBottom:4 }}>📍 Fishable Water Near You</div>
+          <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Within 10 miles · sorted nearest first</div>
+          {gpsLoading ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
+          {!gpsLoading && nearSpots.length === 0 ? (
+            <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No scout spots within 10 miles. Try Identify Spot with a photo.</div></Card>
+          ) : null}
+          {nearSpots.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={idx} T={T} borderColor={th.blue + "33"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <Pill label={s.waterType} color={th.blue} />
+                </div>
+                <div style={{ fontSize:12, color:th.green, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · {scoutBiteHint(s, season)}</div>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>🅿️ {s.parking}</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+                  {s.species.slice(0, 4).map(function(sp, i) { return <Pill key={i} label={sp} color={th.green} />; })}
+                </div>
+                <div style={{ fontSize:11, color:th.white, lineHeight:1.45, marginBottom:6 }}>{s.tip}</div>
+                {s.alert ? <div style={{ fontSize:11, color:th.orange, marginBottom:8 }}>⚠️ {s.alert}</div> : null}
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {history.length ? (
+        <Card T={T} style={{ marginTop:12 }}>
+          <SecLabel text="Recent scout results" T={T} />
+          {history.slice(0, 5).map(function(h, i) {
+            return <div key={i} style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{h.location} · {h.confidence}%</div>;
+          })}
+        </Card>
+      ) : null}
     </div>
   );
 }
@@ -3303,12 +3864,12 @@ export default function App() {
         </button>
       </div>
       <div style={{ padding:"0 14px" }}>
-        {tab==="home"      && <HomeTab profile={profile} T={theme} />}
-        {tab==="fish"      && <SpeciesTab T={theme} />}
+        {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} />}
+        {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} />}
-        {tab==="scout"     && <ScoutTab T={theme} />}
+        {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>

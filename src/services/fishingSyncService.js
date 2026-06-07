@@ -5,6 +5,7 @@
  */
 import { doc, getDoc, setDoc, collection, getDocs, writeBatch } from "firebase/firestore";
 import { getFirebaseDb } from "../lib/firebase.js";
+import { listActiveMembers } from "./memberService.js";
 
 function profileRef(memberId) {
   return doc(getFirebaseDb(), "members", memberId, "fishingProfile", "main");
@@ -92,4 +93,30 @@ export async function saveCatchToCloud(memberId, catchEntry) {
   var id = String(catchEntry.id || Date.now());
   var ref = doc(catchesCol(memberId), id);
   await setDoc(ref, Object.assign({}, catchEntry, { syncedAt: new Date().toISOString() }), { merge: true });
+}
+
+/** Club-wide feed — catches with visibility club or public_feed from all active members. */
+export async function loadClubFeedCatches() {
+  var members = await listActiveMembers(120);
+  var feed = [];
+  var i;
+  for (i = 0; i < members.length; i++) {
+    var m = members[i];
+    try {
+      var snap = await getDocs(catchesCol(m.id));
+      snap.docs.forEach(function(d) {
+        var data = d.data() || {};
+        if (data.visibility === "club" || data.visibility === "public_feed") {
+          feed.push(Object.assign({}, data, {
+            id: d.id,
+            memberId: m.id,
+            memberName: m.displayName || m.id,
+          }));
+        }
+      });
+    } catch (e) { /* skip member if rules block */ }
+  }
+  return feed.sort(function(a, b) {
+    return String(b.date || b.id || "").localeCompare(String(a.date || a.id || ""));
+  });
 }
