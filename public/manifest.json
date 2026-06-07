@@ -1,6 +1,6 @@
 {
-  "name": "North Riverside Fishing Guide",
-  "short_name": "Fish Guide",
+  "name": "RFC Fishing",
+  "short_name": "RFC",
   "description": "Shore fishing guide for North Riverside, Cook County, and Lake Michigan corridor",
   "start_url": "/fishing-app/",
   "display": "standalone",

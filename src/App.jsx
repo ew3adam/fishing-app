@@ -2098,6 +2098,8 @@ function CatchTab({ profile, T }) {
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
+  const photoContainerRef = useRef();
+  const draggingMarker = useRef(null);
   const [catches, setCatches] = useState(function() {
     try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
     return [
@@ -2195,6 +2197,46 @@ function CatchTab({ profile, T }) {
     e.target.value = "";
   }
 
+  function rotatePhoto() {
+    if (!photo) return;
+    var canvas = document.createElement("canvas");
+    var img = new Image();
+    img.onload = function() {
+      canvas.width = img.height;
+      canvas.height = img.width;
+      var ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      setPhoto(canvas.toDataURL("image/jpeg", 0.9));
+      setMouthPct(10);
+      setTailPct(90);
+    };
+    img.src = photo;
+  }
+  function handleOverlayTouchStart(e) {
+    if (!photoContainerRef.current) return;
+    var rect = photoContainerRef.current.getBoundingClientRect();
+    var touch = e.touches[0];
+    var pct = rulerOrientation === "horizontal"
+      ? ((touch.clientX - rect.left) / rect.width) * 100
+      : ((touch.clientY - rect.top) / rect.height) * 100;
+    pct = Math.max(0, Math.min(100, pct));
+    draggingMarker.current = Math.abs(pct - mouthPct) <= Math.abs(pct - tailPct) ? "mouth" : "tail";
+  }
+  function handleOverlayTouchMove(e) {
+    if (!draggingMarker.current || !photoContainerRef.current) return;
+    var rect = photoContainerRef.current.getBoundingClientRect();
+    var touch = e.touches[0];
+    var pct = rulerOrientation === "horizontal"
+      ? ((touch.clientX - rect.left) / rect.width) * 100
+      : ((touch.clientY - rect.top) / rect.height) * 100;
+    pct = Math.max(0, Math.min(100, pct));
+    if (draggingMarker.current === "mouth") setMouthPct(pct);
+    else setTailPct(pct);
+  }
+  function handleOverlayTouchEnd() { draggingMarker.current = null; }
+
   function handleReferencePhotos(e) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -2287,8 +2329,9 @@ function CatchTab({ profile, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
               {photo ? (
                 <div style={{ marginBottom:12 }}>
-                  <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border }}>
-                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }} />
+                  <div ref={photoContainerRef} onTouchStart={handleOverlayTouchStart} onTouchMove={handleOverlayTouchMove} onTouchEnd={handleOverlayTouchEnd} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000", touchAction:"none" }}>
+                    <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
+                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
                     {rulerOrientation === "horizontal" ? (
                       <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
                         {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
