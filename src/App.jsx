@@ -1034,7 +1034,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       },
       function() {
         setGeoLoading(false);
-        setGeoErr("Could not read GPS. Try Save Past Location to enter coordinates or pick from the map.");
+        setGeoErr("GPS unavailable — enter coordinates manually.");
+        setPrivView("past");
       },
       { enableHighAccuracy:true, maximumAge:60000, timeout:25000 }
     );
@@ -1614,6 +1615,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <p style={{ fontSize:13, color:th.muted, textAlign:"center", marginTop:10, marginBottom:0, lineHeight:1.5 }}>
           Stored on <strong style={{ color:th.white }}>this device only</strong> until you choose to share.
         </p>
+        {geoErr ? <div style={{ fontSize:12, color:th.orange, marginTop:8, padding:"8px 12px", background:th.orange + "15", borderRadius:8, border:"1px solid " + th.orange + "55" }}>{geoErr}</div> : null}
       </div>
     );
   }
