@@ -31,11 +31,64 @@ function mapsUrl(lat, lng) {
     google: "https://www.google.com/maps/dir/?api=1&destination=" + coord,
   };
 }
+
+// Westcott 20-inch ruler PNG — full image width = 20 inches on the overlay scale.
+var RULER_REF_INCHES = 20;
+var RULER_REF_SRC = import.meta.env.BASE_URL + "ruler-20-inches.png";
 function haversineMi(lat1, lon1, lat2, lon2) {
   var R = 3958.8, r = Math.PI / 180;
   var dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
   var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)*Math.sin(dLon/2);
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Match AI species text to a known SPECIES entry when possible.
+function matchSpeciesName(name) {
+  if (!name || typeof name !== "string") return "";
+  var trimmed = name.trim();
+  if (!trimmed) return "";
+  var exact = SPECIES.find(function(s) { return s.name.toLowerCase() === trimmed.toLowerCase(); });
+  if (exact) return exact.name;
+  var partial = SPECIES.find(function(s) {
+    var sn = s.name.toLowerCase();
+    var tn = trimmed.toLowerCase();
+    return tn.indexOf(sn) >= 0 || sn.indexOf(tn) >= 0;
+  });
+  return partial ? partial.name : trimmed;
+}
+
+// Build a spot label from IPTC location fields, then GPS / nearest known spot.
+function resolveSpotFromExif(exif) {
+  if (!exif) return { spot:"", source:"" };
+  var parts = [];
+  if (exif.Location) parts.push(String(exif.Location).trim());
+  else if (exif.Sublocation) parts.push(String(exif.Sublocation).trim());
+  if (exif.City) parts.push(String(exif.City).trim());
+  var state = exif.State || exif.ProvinceState;
+  if (state) parts.push(String(state).trim());
+  var country = exif.Country || exif.CountryName;
+  if (country) parts.push(String(country).trim());
+  var iptcSpot = parts.filter(Boolean).join(", ");
+  if (iptcSpot) return { spot:iptcSpot, source:"Photo location (IPTC)" };
+
+  if (exif.GPSLatitude != null && exif.GPSLongitude != null) {
+    var nearest = KNOWN_SPOTS.reduce(function(best, s) {
+      var d = haversineMi(exif.GPSLatitude, exif.GPSLongitude, s.lat, s.lng);
+      return d < best.d ? { d:d, name:s.name } : best;
+    }, { d:Infinity, name:null });
+    if (nearest.name && nearest.d < 0.3) return { spot:nearest.name, source:"GPS near known spot" };
+    return {
+      spot:exif.GPSLatitude.toFixed(4) + ", " + exif.GPSLongitude.toFixed(4),
+      source:"GPS coordinates",
+    };
+  }
+  return { spot:"", source:"" };
+}
+
+function formatCatchLengthInches(inches) {
+  var n = parseFloat(inches);
+  if (!isFinite(n)) return "";
+  return n.toFixed(1) + " inches";
 }
 
 // ─── WEIGHT ESTIMATION (length-weight regression) ─────────────────────────────
@@ -968,6 +1021,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const th = THEMES[T];
   const [view, setView] = useState("local");
   const [mapSpot, setMapSpot] = useState(null);
+  const [selectedLake, setSelectedLake] = useState(null);
+  const [lakeTab, setLakeTab] = useState("overview");
   const [privView, setPrivView] = useState("main");
   const [privSpotId, setPrivSpotId] = useState(null);
   const [saveDraft, setSaveDraft] = useState(null);
@@ -1137,12 +1192,87 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     appendSpotActivity(setProfile, msg);
   }
 
+  if (selectedLake) {
+    var lake = selectedLake;
+    var now2 = new Date(); var mo2 = now2.getMonth();
+    var curSeason = mo2 >= 2 && mo2 <= 4 ? "spring" : mo2 >= 5 && mo2 <= 7 ? "summer" : mo2 >= 8 && mo2 <= 10 ? "fall" : "winter";
+    var zColors = [THEMES[T].teal, THEMES[T].blue, THEMES[T].indigo];
+    var seasonIcons = { spring:"🌱", summer:"☀️", fall:"🍂", winter:"❄️" };
+    return (
+      <div>
+        <OBtn label="← Back to Spots" onClick={function() { setSelectedLake(null); setLakeTab("overview"); }} color={th.green} style={{ margin:"12px 0 10px" }} />
+        <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:12, padding:16, marginBottom:12 }}>
+          <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{lake.name}</div>
+          {lake.aka ? <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
+          <div style={{ fontSize:12, color:th.muted, marginTop:2 }}>{lake.addr} · {lake.dist}</div>
+          <div style={{ display:"flex", gap:16, marginTop:10 }}>
+            <div style={{ textAlign:"center" }}><div style={{ fontSize:22, color:th.blue, fontWeight:700 }}>{lake.maxDepth}<span style={{ fontSize:12 }}> ft</span></div><div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>MAX DEPTH</div></div>
+            <div style={{ textAlign:"center" }}><div style={{ fontSize:22, color:th.teal, fontWeight:700 }}>{lake.avgDepth}<span style={{ fontSize:12 }}> ft</span></div><div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>AVG DEPTH</div></div>
+            <div style={{ textAlign:"center" }}><div style={{ fontSize:22, color:th.green, fontWeight:700 }}>{lake.species.length}</div><div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>SPECIES</div></div>
+          </div>
+          {lake.alert ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>⚠️ {lake.alert}</div> : null}
+          {lake.stateNote ? <div style={{ fontSize:11, color:th.blue, marginTop:4 }}>ℹ️ {lake.stateNote}</div> : null}
+        </div>
+        <div style={{ display:"flex", gap:5, marginBottom:12, flexWrap:"wrap" }}>
+          {["overview","depth","spots","season"].map(function(t) {
+            return <button key={t} onClick={function() { setLakeTab(t); }} style={{ background:lakeTab===t ? th.green + "33" : "transparent", border:"1px solid " + (lakeTab===t ? th.green : th.border), borderRadius:8, color:lakeTab===t ? th.green : th.muted, padding:"6px 10px", cursor:"pointer", fontSize:11, fontFamily:"monospace" }}>{t.toUpperCase()}</button>;
+          })}
+        </div>
+        {lakeTab === "overview" && (
+          <div>
+            <Card T={T} borderColor={th.green + "44"}>
+              <SecLabel text="Fishing Briefing — Right Now" T={T} />
+              <div style={{ fontSize:13, color:th.white, marginBottom:6 }}>Best species today: <strong style={{ color:th.green }}>{lake.primary}</strong></div>
+              <div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{lake.season[curSeason]}</div>
+            </Card>
+            <div style={{ display:"flex", gap:8, marginTop:4 }}>
+              <a href={mapsUrl(lake.lat, lake.lng).apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}><div style={{ fontSize:24 }}>🗺️</div><div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Apple Maps</div></a>
+              <a href={mapsUrl(lake.lat, lake.lng).google} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}><div style={{ fontSize:24 }}>📍</div><div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Google Maps</div></a>
+              <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}><div style={{ fontSize:24 }}>🗺️</div><div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>LakeLink</div></a>
+            </div>
+          </div>
+        )}
+        {lakeTab === "depth" && (
+          <div>
+            {lake.zones.map(function(z, i) {
+              return (
+                <Card key={i} T={T}>
+                  <div style={{ fontWeight:700, color:zColors[i], fontSize:13, marginBottom:2 }}>{z.depth}</div>
+                  <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>{z.loc}</div>
+                  <div style={{ width:"100%", height:8, background:th.border, borderRadius:4, overflow:"hidden", marginBottom:6 }}><div style={{ width:((i + 1) * 33) + "%", height:"100%", background:zColors[i], borderRadius:4 }} /></div>
+                  <div style={{ fontSize:12, color:th.white }}>💡 {z.tip}</div>
+                </Card>
+              );
+            })}
+            <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}><div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Full Contour Map on LakeLink</div></a>
+          </div>
+        )}
+        {lakeTab === "spots" && (
+          <div>
+            {lake.bankSpots.map(function(s, i) {
+              return <Card key={i} T={T} style={{ borderLeft:"3px solid " + th.green }}><div style={{ fontWeight:700, color:th.green, fontSize:13, marginBottom:4 }}>📌 {s.name}</div><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{s.tip}</div></Card>;
+            })}
+          </div>
+        )}
+        {lakeTab === "season" && (
+          <div>
+            {Object.entries(lake.season).map(function(entry) {
+              var s = entry[0], tip = entry[1];
+              return <Card key={s} T={T} borderColor={s === curSeason ? th.green : undefined}><div style={{ fontWeight:700, color:s === curSeason ? th.green : th.white, fontSize:13, marginBottom:4 }}>{seasonIcons[s]} {s.charAt(0).toUpperCase() + s.slice(1)}{s === curSeason ? " ← NOW" : ""}</div><div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{tip}</div></Card>;
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (mapSpot) {
     return (
       <div>
-        <OBtn label="Back" onClick={function() { setMapSpot(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
+        <OBtn label="← Back to Spots" onClick={function() { setMapSpot(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:4 }}>Directions to</div>
-        <div style={{ fontSize:15, color:th.green, marginBottom:16 }}>{mapSpot.name}</div>
+        <div style={{ fontSize:15, color:th.green, marginBottom:4 }}>{mapSpot.name}</div>
+        {mapSpot.addr ? <div style={{ fontSize:12, color:th.muted, marginBottom:16 }}>{mapSpot.addr}{mapSpot.dist ? " · " + mapSpot.dist : ""}</div> : null}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
           <a href={mapsUrl(mapSpot.lat, mapSpot.lng).apple} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:32 }}>🗺️</div>
@@ -1798,7 +1928,15 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       </div>
 
       {view === "local" && LOCAL_SPOTS.map(function(s, i) { return <SpotCard key={i} s={s} />; })}
-      {view === "lakes" && <LakesTab T={T} />}
+      {view === "lakes" && (
+        <LakesTab
+          T={T}
+          onSelectLake={function(lake) {
+            setSelectedLake(lake);
+            setLakeTab("overview");
+          }}
+        />
+      )}
       {view === "salmon" && (
         <div>
           <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, marginBottom:10 }}>
@@ -1824,134 +1962,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
 }
 
 // ─── LAKES TAB ────────────────────────────────────────────────────────────────
-function LakesTab({ T }) {
+function LakesTab({ T, onSelectLake }) {
   const th = THEMES[T];
   const [search, setSearch] = useState("");
-  const [sel, setSel] = useState(null);
-  const [lakeTab, setLakeTab] = useState("overview");
-  var now = new Date();
-  var mo = now.getMonth();
-  var curSeason = mo >= 2 && mo <= 4 ? "spring" : mo >= 5 && mo <= 7 ? "summer" : mo >= 8 && mo <= 10 ? "fall" : "winter";
 
   var filtered = LAKES.filter(function(l) {
     return !search || l.name.toLowerCase().includes(search.toLowerCase());
   });
-
-  if (sel) {
-    var lake = sel;
-    var seasonColors = { spring:"#5a9a5a", summer:"#e09030", fall:"#c08040", winter:"#5a9fd4" };
-    return (
-      <div>
-        <OBtn label="Back" onClick={function() { setSel(null); }} color={th.green} style={{ margin:"12px 0 10px" }} />
-        <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:12, padding:16, marginBottom:12 }}>
-          <div style={{ fontSize:20, color:th.white, fontWeight:700 }}>{lake.name}</div>
-          {lake.aka ? <div style={{ fontSize:11, color:th.green, fontFamily:"monospace" }}>{lake.aka}</div> : null}
-          <div style={{ fontSize:12, color:th.muted, marginTop:2 }}>{lake.addr} · {lake.dist}</div>
-          <div style={{ display:"flex", gap:16, marginTop:10 }}>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:22, color:th.blue, fontWeight:700 }}>{lake.maxDepth}<span style={{ fontSize:12 }}> ft</span></div>
-              <div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>MAX DEPTH</div>
-            </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:22, color:th.teal, fontWeight:700 }}>{lake.avgDepth}<span style={{ fontSize:12 }}> ft</span></div>
-              <div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>AVG DEPTH</div>
-            </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:22, color:th.green, fontWeight:700 }}>{lake.species.length}</div>
-              <div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>SPECIES</div>
-            </div>
-          </div>
-          {lake.alert ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>⚠️ {lake.alert}</div> : null}
-          {lake.stateNote ? <div style={{ fontSize:11, color:th.blue, marginTop:4 }}>ℹ️ {lake.stateNote}</div> : null}
-        </div>
-
-        <div style={{ display:"flex", gap:5, marginBottom:12, flexWrap:"wrap" }}>
-          {["overview","depth","spots","season"].map(function(t) {
-            return (
-              <button key={t} onClick={function() { setLakeTab(t); }} style={{ background:lakeTab===t ? th.green + "33" : "transparent", border:"1px solid " + (lakeTab===t ? th.green : th.border), borderRadius:8, color:lakeTab===t ? th.green : th.muted, padding:"6px 10px", cursor:"pointer", fontSize:11, fontFamily:"monospace" }}>
-                {t.toUpperCase()}
-              </button>
-            );
-          })}
-        </div>
-
-        {lakeTab === "overview" && (
-          <div>
-            <Card T={T} borderColor={th.green + "44"}>
-              <SecLabel text="Fishing Briefing — Right Now" T={T} />
-              <div style={{ fontSize:13, color:th.white, marginBottom:6 }}>Best species today: <strong style={{ color:th.green }}>{lake.primary}</strong></div>
-              <div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{lake.season[curSeason]}</div>
-            </Card>
-            <div style={{ display:"flex", gap:8, marginTop:4 }}>
-              <a href={lake.apple} style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-                <div style={{ fontSize:24 }}>🗺️</div>
-                <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Apple Maps</div>
-              </a>
-              <a href={lake.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-                <div style={{ fontSize:24 }}>📍</div>
-                <div style={{ fontSize:12, color:th.white, fontWeight:700, marginTop:4 }}>Google Maps</div>
-              </a>
-              <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ flex:1, display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-                <div style={{ fontSize:24 }}>🗺️</div>
-                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginTop:4 }}>LakeLink</div>
-              </a>
-            </div>
-          </div>
-        )}
-
-        {lakeTab === "depth" && (
-          <div>
-            {lake.zones.map(function(z, i) {
-              var zColors = [th.teal, th.blue, th.indigo];
-              return (
-                <Card key={i} T={T}>
-                  <div style={{ fontWeight:700, color:zColors[i], fontSize:13, marginBottom:2 }}>{z.depth}</div>
-                  <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>{z.loc}</div>
-                  <div style={{ width:"100%", height:8, background:th.border, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-                    <div style={{ width:((i + 1) * 33) + "%", height:"100%", background:zColors[i], borderRadius:4 }} />
-                  </div>
-                  <div style={{ fontSize:12, color:th.white }}>💡 {z.tip}</div>
-                </Card>
-              );
-            })}
-            <a href={lake.lakelink} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.blue + "18", border:"1px solid " + th.blue + "44", borderRadius:10, padding:12, textDecoration:"none", textAlign:"center" }}>
-              <div style={{ fontSize:13, color:th.blue, fontWeight:700 }}>View Full Contour Map on LakeLink</div>
-            </a>
-          </div>
-        )}
-
-        {lakeTab === "spots" && (
-          <div>
-            {lake.bankSpots.map(function(s, i) {
-              return (
-                <Card key={i} T={T} style={{ borderLeft:"3px solid " + th.green }}>
-                  <div style={{ fontWeight:700, color:th.green, fontSize:13, marginBottom:4 }}>📌 {s.name}</div>
-                  <div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{s.tip}</div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
-        {lakeTab === "season" && (
-          <div>
-            {Object.entries(lake.season).map(function(entry) {
-              var s = entry[0], tip = entry[1];
-              var icons = { spring:"🌱", summer:"☀️", fall:"🍂", winter:"❄️" };
-              return (
-                <Card key={s} T={T} borderColor={s === curSeason ? th.green : undefined}>
-                  <div style={{ fontWeight:700, color:s === curSeason ? th.green : th.white, fontSize:13, marginBottom:4 }}>
-                    {icons[s]} {s.charAt(0).toUpperCase() + s.slice(1)}{s === curSeason ? " ← NOW" : ""}
-                  </div>
-                  <div style={{ fontSize:13, color:th.white, lineHeight:1.7 }}>{tip}</div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -1959,7 +1976,7 @@ function LakesTab({ T }) {
       <SecLabel text={filtered.length + " Lakes Within 50 Miles"} T={T} />
       {filtered.map(function(lake, i) {
         return (
-          <div key={i} onClick={function() { setSel(lake); setLakeTab("overview"); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
+          <div key={i} onClick={function() { if (typeof onSelectLake === "function") onSelectLake(lake); }} style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
             <div style={{ display:"flex", justifyContent:"space-between" }}>
               <div>
                 <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{lake.name}</div>
@@ -2123,7 +2140,7 @@ function CatchTab({ profile, T }) {
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [measurementOption, setMeasurementOption] = useState("1_ruler");
-  const [rulerMaxInches, setRulerMaxInches] = useState(24);
+  const [rulerMaxInches, setRulerMaxInches] = useState(RULER_REF_INCHES);
   const [referenceInches, setReferenceInches] = useState("3.37");
   const [refStartPct, setRefStartPct] = useState(20);
   const [refEndPct, setRefEndPct] = useState(34);
@@ -2133,8 +2150,20 @@ function CatchTab({ profile, T }) {
   const [rfcLink, setRfcLink] = useState("");
   const [speciesSearch, setSpeciesSearch] = useState("");
   const [rulerOrientation, setRulerOrientation] = useState("horizontal");
+  const [spotMetaSource, setSpotMetaSource] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
+
+  function applyPhotoMetadata(exif) {
+    if (!exif) return;
+    var resolved = resolveSpotFromExif(exif);
+    if (resolved.spot) {
+      setF("spot", resolved.spot);
+      setSpotMetaSource(resolved.source);
+    }
+    var dt = exif.DateTimeOriginal || exif.CreateDate;
+    if (dt) setF("date", new Date(dt).toLocaleDateString());
+  }
   useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
@@ -2152,23 +2181,23 @@ function CatchTab({ profile, T }) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
     var primary = files[0];
-    // Parse EXIF GPS + timestamp to auto-fill spot and date
-    exifr.parse(primary, ["GPSLatitude", "GPSLongitude", "DateTimeOriginal"]).then(function(exif) {
-      if (!exif) return;
-      if (exif.GPSLatitude && exif.GPSLongitude) {
-        var nearest = KNOWN_SPOTS.reduce(function(best, s) {
-          var d = haversineMi(exif.GPSLatitude, exif.GPSLongitude, s.lat, s.lng);
-          return d < best.d ? { d:d, name:s.name } : best;
-        }, { d:Infinity, name:null });
-        if (nearest.d < 0.3) setF("spot", nearest.name);
-      }
-      if (exif.DateTimeOriginal) setF("date", new Date(exif.DateTimeOriginal).toLocaleDateString());
+    // Parse EXIF GPS, IPTC location, and capture date for auto-fill.
+    exifr.parse(primary, {
+      gps:true,
+      iptc:true,
+      tiff:true,
+      pick:[
+        "GPSLatitude", "GPSLongitude", "DateTimeOriginal", "CreateDate",
+        "Location", "Sublocation", "City", "State", "ProvinceState", "Country", "CountryName",
+      ],
+    }).then(function(exif) {
+      applyPhotoMetadata(exif);
     }).catch(function() {});
     readImageFile(primary).then(function(img) {
       setPhoto(img.full);
       setPhotoB64(img.b64);
       setMeasurementOption("1_ruler");
-      setRulerMaxInches(24);
+      setRulerMaxInches(RULER_REF_INCHES);
       setReferenceInches("3.37");
       setRefStartPct(20);
       setRefEndPct(34);
@@ -2200,7 +2229,10 @@ function CatchTab({ profile, T }) {
           try {
             var res = JSON.parse(m[0]);
             setAiResult(res);
-            setForm(function(f) { return Object.assign({}, f, { species: res.species || f.species, length: res.length || f.length }); });
+            var matchedSpecies = matchSpeciesName(res.species);
+            if (matchedSpecies) {
+              setForm(function(f) { return Object.assign({}, f, { species:matchedSpecies }); });
+            }
             var rot = parseInt(res.rotation, 10) || 0;
             var mPct = parseFloat(res.mouth_pct);
             var tPct = parseFloat(res.tail_pct);
@@ -2301,14 +2333,15 @@ function CatchTab({ profile, T }) {
 
   var gear = (profile && profile.gear) || [];
   // Clamp ruler input so the overlay always has a valid scale.
-  var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || 24));
+  var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || RULER_REF_INCHES));
+  var effectiveRulerInches = measurementOption === "1_ruler" ? RULER_REF_INCHES : rulerInches;
   var usesObjectReference = measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth";
   var fishSpanPct = Math.abs(tailPct - mouthPct);
   var refSpanPct = Math.max(0.1, Math.abs(refEndPct - refStartPct));
   var customReferenceLen = Math.max(0, parseFloat(referenceInches) || 0);
   var referenceLenInches = measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : customReferenceLen;
   // Convert marker distance (percentage of image width) into inches.
-  var measuredByRuler = (fishSpanPct / 100) * rulerInches;
+  var measuredByRuler = (fishSpanPct / 100) * effectiveRulerInches;
   var measuredByReference = (fishSpanPct / refSpanPct) * referenceLenInches;
   var measuredInches = usesObjectReference && referenceLenInches > 0 ? measuredByReference : measuredByRuler;
   var estimatedLengthLabel = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredByRuler.toFixed(1) + " inches (estimate)";
@@ -2316,6 +2349,22 @@ function CatchTab({ profile, T }) {
   var needsMorePhotos = !!photo && referencePhotos.length === 0;
   var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
   var estWeightLabel = estimateWeightLbs(form.species, form.length);
+
+  // Carry measured length + recognized species into the details form — skip re-entry.
+  function continueFromMeasurement() {
+    var len = measurementOption === "5_none" && aiResult && aiResult.length
+      ? aiResult.length
+      : formatCatchLengthInches(measuredInches);
+    if (len) setF("length", len);
+    var sp = form.species || (aiResult && matchSpeciesName(aiResult.species)) || "";
+    if (sp) setF("species", sp);
+    if (sp) {
+      setStep(4);
+    } else {
+      setStep(3);
+      setSpeciesSearch("");
+    }
+  }
 
   var inputStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"10px 12px", color:th.white, fontSize:14, boxSizing:"border-box", outline:"none", marginBottom:10 };
 
@@ -2375,44 +2424,70 @@ function CatchTab({ profile, T }) {
                     <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
                     {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
                     <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
-                    {rulerOrientation === "horizontal" ? (
-                      <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                          var left = (i / rulerInches) * 100;
-                          var major = i % 5 === 0;
-                          return (
-                            <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                              {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                            </div>
-                          );
-                        })}
-                        <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.18)" }} />
-                        <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
-                          <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                    {measurementOption === "1_ruler" ? (
+                      rulerOrientation === "horizontal" ? (
+                        <div style={{ position:"absolute", left:0, right:0, bottom:0, height:52, overflow:"hidden", pointerEvents:"none" }}>
+                          <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", left:0, right:0, bottom:0, width:"100%", height:"100%", objectFit:"fill", opacity:0.92 }} />
+                          <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.22)" }} />
+                          <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                            <div style={{ position:"absolute", top:-18, left:-20, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
+                          </div>
+                          <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                            <div style={{ position:"absolute", top:-18, left:-12, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
+                          </div>
                         </div>
-                        <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
-                          <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                      ) : (
+                        <div style={{ position:"absolute", top:0, bottom:0, right:0, width:52, overflow:"hidden", pointerEvents:"none" }}>
+                          <img src={RULER_REF_SRC} alt="" draggable={false} style={{ position:"absolute", top:"50%", left:"50%", height:"100%", width:"auto", maxWidth:"none", transform:"translate(-50%, -50%) rotate(90deg)", opacity:0.92 }} />
+                          <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.22)" }} />
+                          <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                            <div style={{ position:"absolute", top:-8, right:56, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
+                          </div>
+                          <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
+                            <div style={{ position:"absolute", top:-8, right:56, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
+                          </div>
                         </div>
-                      </div>
+                      )
                     ) : (
-                      <div style={{ position:"absolute", top:10, bottom:10, right:10, width:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                        {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                          var top = (i / rulerInches) * 100;
-                          var major = i % 5 === 0;
-                          return (
-                            <div key={"tick_" + i} style={{ position:"absolute", top:top + "%", right:0, height:1, width:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                              {major ? <div style={{ position:"absolute", right:24, top:-6, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                            </div>
-                          );
-                        })}
-                        <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.18)" }} />
-                        <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green }}>
-                          <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                      rulerOrientation === "horizontal" ? (
+                        <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                          {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                            var left = (i / rulerInches) * 100;
+                            var major = i % 5 === 0;
+                            return (
+                              <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                                {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                              </div>
+                            );
+                          })}
+                          <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.18)" }} />
+                          <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
+                            <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                          </div>
+                          <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
+                            <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                          </div>
                         </div>
-                        <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange }}>
-                          <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                      ) : (
+                        <div style={{ position:"absolute", top:10, bottom:10, right:10, width:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
+                          {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
+                            var top = (i / rulerInches) * 100;
+                            var major = i % 5 === 0;
+                            return (
+                              <div key={"tick_" + i} style={{ position:"absolute", top:top + "%", right:0, height:1, width:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
+                                {major ? <div style={{ position:"absolute", right:24, top:-6, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
+                              </div>
+                            );
+                          })}
+                          <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.18)" }} />
+                          <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green }}>
+                            <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
+                          </div>
+                          <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange }}>
+                            <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
+                          </div>
                         </div>
-                      </div>
+                      )
                     )}
                   </div>
                   <button onClick={rotatePhoto} style={{ width:"100%", marginTop:8, background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:14, fontWeight:600, letterSpacing:"0.02em" }}>↻ Rotate Photo</button>
@@ -2427,7 +2502,7 @@ function CatchTab({ profile, T }) {
                     <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
                       {[
-                        ["1_ruler","1. Ruler in photo"],
+                        ["1_ruler","1. Westcott ruler (20 in)"],
                         ["2_card","2. Credit card ref"],
                         ["3_coin","3. Quarter ref"],
                         ["4_custom","4. Custom ref size"],
@@ -2456,8 +2531,10 @@ function CatchTab({ profile, T }) {
                     </div>
                     {measurementOption === "1_ruler" ? (
                       <div>
-                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Visible ruler inches in photo</div>
-                        <input type="number" min="10" max="60" value={rulerInches} onChange={function(e) { setRulerMaxInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4, lineHeight:1.45 }}>
+                          The Westcott 20-inch ruler image is overlaid on your photo. Align mouth and tail markers to the fish — each inch on the overlay equals one real inch.
+                        </div>
+                        <div style={{ fontSize:12, color:th.green, marginBottom:8, fontWeight:700 }}>Reference scale: {RULER_REF_INCHES} inches (full width of overlay)</div>
                       </div>
                     ) : null}
                     {measurementOption === "4_custom" ? (
@@ -2501,16 +2578,14 @@ function CatchTab({ profile, T }) {
                         })}
                       </div>
                     ) : null}
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                      <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Measured length: {measuredLengthLabel}</div>
-                      <button onClick={function() { setF("length", measuredLengthLabel); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                        Use this length
-                      </button>
-                    </div>
+                    <div style={{ fontSize:13, color:th.white, fontWeight:700, marginBottom:4 }}>Measured length: {measuredLengthLabel}</div>
+                    <div style={{ fontSize:11, color:th.muted, lineHeight:1.45 }}>This length will carry forward automatically — no need to enter it again on the next screen.</div>
                   </Card>
                 </div>
               ) : null}
-              <button onClick={function() { setStep(3); setSpeciesSearch(""); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginTop:8 }}>Confirm Length → Pick Species</button>
+              <button onClick={continueFromMeasurement} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginTop:8 }}>
+                {form.species || (aiResult && aiResult.species) ? "Continue → Catch Details" : "Confirm Length → Pick Species"}
+              </button>
             </div>
           )}
 
@@ -2528,7 +2603,7 @@ function CatchTab({ profile, T }) {
                   <div style={{ fontSize:11, color:th.green, fontFamily:"monospace", marginBottom:4 }}>AI RESULT — {aiResult.confidence}% CONFIDENT</div>
                   <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:4 }}>{aiResult.species}</div>
                   <div style={{ fontSize:12, color:th.muted, marginBottom:10 }}>{aiResult.notes}</div>
-                  <button onClick={function() { setF("species", aiResult.species); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Use "{aiResult.species}"</button>
+                  <button onClick={function() { setF("species", matchSpeciesName(aiResult.species)); setStep(4); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Use "{matchSpeciesName(aiResult.species)}"</button>
                 </Card>
               ) : null}
               {!aiResult && !aiLoading ? (
@@ -2550,8 +2625,8 @@ function CatchTab({ profile, T }) {
                   );
                 })}
               </div>
-              <button onClick={function() { setStep(4); }} disabled={!form.species} style={{ width:"100%", background:form.species ? th.green : th.border, color:form.species ? "#000" : th.muted, border:"none", borderRadius:8, padding:"11px 0", cursor:form.species ? "pointer" : "not-allowed", fontSize:14, fontWeight:700 }}>
-                {form.species ? "Confirm " + form.species + " →" : "Select a species to continue"}
+              <button onClick={function() { if (form.length) setStep(4); else { setF("length", ""); setStep(4); } }} disabled={!form.species} style={{ width:"100%", background:form.species ? th.green : th.border, color:form.species ? "#000" : th.muted, border:"none", borderRadius:8, padding:"11px 0", cursor:form.species ? "pointer" : "not-allowed", fontSize:14, fontWeight:700 }}>
+                {form.species ? "Continue → Catch Details" : "Select a species to continue"}
               </button>
             </div>
           )}
@@ -2559,14 +2634,55 @@ function CatchTab({ profile, T }) {
           {step === 4 && (
             <div>
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Catch Details</div>
-              {["species","length","bait","spot","date"].map(function(k) {
-                return (
-                  <div key={k}>
-                    <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
-                    <input value={form[k]} onChange={function(e) { setF(k, e.target.value); }} style={inputStyle} />
-                  </div>
-                );
-              })}
+              {photo ? (
+                <Card T={T} borderColor={th.green + "44"} style={{ marginBottom:14 }}>
+                  <SecLabel text="Already captured from your photo" T={T} />
+                  {form.species ? (
+                    <div style={{ marginBottom:12 }}>
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>
+                        Species{aiResult && aiResult.confidence ? " · AI " + aiResult.confidence + "% confident" : ""}
+                      </div>
+                      <div style={{ fontSize:16, color:th.white, fontWeight:700 }}>{form.species}</div>
+                      <button type="button" onClick={function() { setStep(3); setSpeciesSearch(""); }} style={{ marginTop:6, background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, padding:0, textDecoration:"underline" }}>Change species</button>
+                    </div>
+                  ) : null}
+                  {form.length ? (
+                    <div style={{ marginBottom:12 }}>
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>Length · from ruler measure</div>
+                      <div style={{ fontSize:16, color:th.white, fontWeight:700 }}>{form.length}</div>
+                      <button type="button" onClick={function() { setStep(2); }} style={{ marginTop:6, background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, padding:0, textDecoration:"underline" }}>Adjust measurement</button>
+                    </div>
+                  ) : null}
+                  {form.date ? (
+                    <div style={{ marginBottom:4 }}>
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>Date · from photo metadata</div>
+                      <div style={{ fontSize:14, color:th.white }}>{form.date}</div>
+                    </div>
+                  ) : null}
+                </Card>
+              ) : (
+                ["species","length","spot","date"].map(function(k) {
+                  return (
+                    <div key={k}>
+                      <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{k.charAt(0).toUpperCase() + k.slice(1)}</div>
+                      <input value={form[k]} onChange={function(e) { setF(k, e.target.value); }} style={inputStyle} />
+                    </div>
+                  );
+                })
+              )}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>
+                  Location name{spotMetaSource ? " · " + spotMetaSource : photo ? " · name this spot" : ""}
+                </div>
+                <input value={form.spot} onChange={function(e) { setF("spot", e.target.value); setSpotMetaSource(""); }} placeholder="e.g. Busse south cove" style={inputStyle} />
+                {photo && spotMetaSource ? (
+                  <div style={{ fontSize:11, color:th.muted, marginTop:-6, marginBottom:10, lineHeight:1.45 }}>Pre-filled from your photo. Edit the name if you want something easier to remember.</div>
+                ) : null}
+              </div>
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Bait used</div>
+                <input value={form.bait} onChange={function(e) { setF("bait", e.target.value); }} placeholder={photo ? "What did you catch it on?" : ""} style={inputStyle} />
+              </div>
               {estWeightLabel ? <div style={{ fontSize:11, color:th.muted, marginBottom:12, fontStyle:"italic" }}>Est. weight: {estWeightLabel} (length-weight formula)</div> : null}
               {gear.length > 0 ? (
                 <div>
@@ -2613,7 +2729,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
