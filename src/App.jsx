@@ -2609,16 +2609,27 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots 
   );
 }
 
+// ─── SCOUT TAB (placeholder) ──────────────────────────────────────────────────
+function ScoutTab({ T }) {
+  var th = THEMES[T];
+  return (
+    <div style={{ padding:"32px 0", textAlign:"center" }}>
+      <div style={{ fontSize:48 }}>🔍</div>
+      <div style={{ fontSize:20, color:th.white, fontWeight:700, marginTop:12 }}>Scout</div>
+      <div style={{ fontSize:13, color:th.muted, marginTop:8 }}>Coming soon — spot ID and local discovery</div>
+    </div>
+  );
+}
+
 // ─── NAV + APP ────────────────────────────────────────────────────────────────
 var NAV = [
   {id:"home",emoji:"🏠",label:"Home"},
   {id:"fish",emoji:"🐟",label:"Species"},
   {id:"spots",emoji:"📍",label:"Spots"},
-  {id:"lakes",emoji:"🌊",label:"Lakes"},
   {id:"catalogue",emoji:"📚",label:"Tackle"},
   {id:"catch",emoji:"📸",label:"Catch"},
+  {id:"scout",emoji:"🔍",label:"Scout"},
   {id:"learn",emoji:"📖",label:"Learn"},
-  {id:"me",emoji:"👤",label:"Me"},
 ];
 
 export default function App() {
@@ -2646,11 +2657,10 @@ export default function App() {
         {tab==="home"      && <HomeTab profile={profile} T={theme} />}
         {tab==="fish"      && <SpeciesTab T={theme} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} />}
-        {tab==="lakes"     && <LakesTab T={theme} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab profile={profile} T={theme} />}
+        {tab==="scout"     && <ScoutTab T={theme} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
