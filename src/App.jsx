@@ -2177,21 +2177,41 @@ function CatchTab({ profile, T }) {
         setReferencePhotos([]);
       }
       setAiLoading(true);
+      var photoDataUrl = img.full;
       fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300,
+        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400,
           messages:[{role:"user",content:[
             {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
-            {type:"text",text:"Identify the fish species in this photo. If a ruler or reference object is visible estimate the length. If no ruler estimate from proportions. Respond ONLY with raw JSON no markdown: {\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Typical largemouth coloring\"}"}
+            {type:"text",text:"Identify the fish species and analyze its orientation. Respond ONLY with raw JSON (no markdown, no extra text):\n{\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Brief ID note\",\"rotation\":90,\"mouth_pct\":15,\"tail_pct\":85}\n\nRules:\n- rotation: degrees clockwise (0, 90, 180, or 270) needed to orient fish horizontally with mouth pointing LEFT\n- mouth_pct: horizontal % position (0=left edge, 100=right edge) of fish mouth AFTER applying that rotation\n- tail_pct: horizontal % position of fish tail tip AFTER applying that rotation\n- If no fish visible use rotation:0, mouth_pct:10, tail_pct:90\n- If ruler visible in photo, estimate length from it; otherwise estimate from body proportions"}
           ]}]
         })
       }).then(function(r) { return r.json(); }).then(function(data) {
         var txt = (data.content && data.content[0] && data.content[0].text) || "";
-        var m = txt.match(/\{[^}]+\}/);
+        var m = txt.match(/\{[\s\S]*\}/);
         if (m) {
-          var res = JSON.parse(m[0]);
-          setAiResult(res);
-          setForm(function(f) { return Object.assign({}, f, { species: res.species || f.species, length: res.length || f.length }); });
+          try {
+            var res = JSON.parse(m[0]);
+            setAiResult(res);
+            setForm(function(f) { return Object.assign({}, f, { species: res.species || f.species, length: res.length || f.length }); });
+            var rot = parseInt(res.rotation, 10) || 0;
+            var mPct = parseFloat(res.mouth_pct);
+            var tPct = parseFloat(res.tail_pct);
+            var applyMarkers = function() {
+              if (isFinite(mPct) && isFinite(tPct)) {
+                setMouthPct(Math.max(2, Math.min(98, mPct)));
+                setTailPct(Math.max(2, Math.min(98, tPct)));
+              }
+            };
+            if (rot !== 0) {
+              applyCanvasRotation(photoDataUrl, rot).then(function(rotated) {
+                setPhoto(rotated);
+                applyMarkers();
+              });
+            } else {
+              applyMarkers();
+            }
+          } catch(e) {}
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
@@ -2199,22 +2219,35 @@ function CatchTab({ profile, T }) {
     e.target.value = "";
   }
 
+  function applyCanvasRotation(dataUrl, degrees) {
+    return new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement("canvas");
+        var rad = (degrees * Math.PI) / 180;
+        if (degrees === 90 || degrees === 270) {
+          canvas.width = img.height;
+          canvas.height = img.width;
+        } else {
+          canvas.width = img.width;
+          canvas.height = img.height;
+        }
+        var ctx = canvas.getContext("2d");
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(rad);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.src = dataUrl;
+    });
+  }
   function rotatePhoto() {
     if (!photo) return;
-    var canvas = document.createElement("canvas");
-    var img = new Image();
-    img.onload = function() {
-      canvas.width = img.height;
-      canvas.height = img.width;
-      var ctx = canvas.getContext("2d");
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
-      setPhoto(canvas.toDataURL("image/jpeg", 0.9));
+    applyCanvasRotation(photo, 90).then(function(rotated) {
+      setPhoto(rotated);
       setMouthPct(10);
       setTailPct(90);
-    };
-    img.src = photo;
+    });
   }
   function handleOverlayTouchStart(e) {
     if (!photoContainerRef.current) return;
@@ -2333,6 +2366,7 @@ function CatchTab({ profile, T }) {
                 <div style={{ marginBottom:12 }}>
                   <div ref={photoContainerRef} onTouchStart={handleOverlayTouchStart} onTouchMove={handleOverlayTouchMove} onTouchEnd={handleOverlayTouchEnd} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000", touchAction:"none" }}>
                     <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
+                    {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
                     <img src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
                     {rulerOrientation === "horizontal" ? (
                       <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
