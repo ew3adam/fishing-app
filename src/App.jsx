@@ -24,6 +24,13 @@ const KNOWN_SPOTS = [
   { name:"Waukegan Harbor Pier",         lat:42.359, lng:-87.829 },
   { name:"Hammond Marina Breakwall",     lat:41.694, lng:-87.512 },
 ];
+function mapsUrl(lat, lng) {
+  var coord = lat + "," + lng;
+  return {
+    apple:  "https://maps.apple.com/?daddr=" + coord,
+    google: "https://www.google.com/maps/dir/?api=1&destination=" + coord,
+  };
+}
 function haversineMi(lat1, lon1, lat2, lon2) {
   var R = 3958.8, r = Math.PI / 180;
   var dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
@@ -1137,11 +1144,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:4 }}>Directions to</div>
         <div style={{ fontSize:15, color:th.green, marginBottom:16 }}>{mapSpot.name}</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          <a href={mapSpot.apple} style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
+          <a href={mapsUrl(mapSpot.lat, mapSpot.lng).apple} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:32 }}>🗺️</div>
             <div style={{ fontSize:14, color:th.white, fontWeight:700, marginTop:6 }}>Apple Maps</div>
           </a>
-          <a href={mapSpot.google} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
+          <a href={mapsUrl(mapSpot.lat, mapSpot.lng).google} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:16, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:32 }}>📍</div>
             <div style={{ fontSize:14, color:th.white, fontWeight:700, marginTop:6 }}>Google Maps</div>
           </a>
@@ -1319,8 +1326,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <div style={{ fontSize:11, color:th.gold, marginBottom:12 }}>{shareLabel}</div>
         <img src={mapImg} alt="" style={{ width:"100%", borderRadius:10, border:"1px solid " + th.border, marginBottom:12 }} />
         <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-          <a href={"https://maps.google.com/?q=" + selectedSpot.lat + "," + selectedSpot.lng} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
-          <a href={"maps://maps.apple.com/?daddr=" + selectedSpot.lat + "," + selectedSpot.lng} style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
+          <a href={mapsUrl(selectedSpot.lat, selectedSpot.lng).google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
+          <a href={mapsUrl(selectedSpot.lat, selectedSpot.lng).apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
         </div>
         <Card T={T}>
           <SecLabel text="Coordinates" T={T} />
@@ -1391,7 +1398,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <Card key={s.id} T={T}>
               <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
               <img src={img} alt="" style={{ width:"100%", borderRadius:8, border:"1px solid " + th.border }} />
-              <OBtn label="Open in maps" onClick={function() { window.open("https://maps.google.com/?q=" + s.lat + "," + s.lng, "_blank"); }} color={th.blue} style={{ marginTop:8, fontSize:11 }} />
+              <OBtn label="Directions" onClick={function() { window.open(mapsUrl(s.lat, s.lng).apple, "_blank"); }} color={th.green} style={{ marginTop:8, fontSize:11 }} />
             </Card>
           );
         })}
