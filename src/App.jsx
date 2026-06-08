@@ -2,7 +2,20 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubFeedCatches } from "./services/fishingSyncService.js";
+import { syncCatchesForMember, loadCatchesFromCloud, saveCatchToCloud, loadClubFeedCatches } from "./services/fishingSyncService.js";
+import { calcBiteScore, calcPeakLightWindows, goldenHourMessage, getMoonInfo as biteMoonInfo } from "./services/biteScoreService.js";
+import { loadWaterClarity, saveWaterClarity, getClarityLabel, getClarityOptions } from "./services/clubReportService.js";
+import { runScoutNow } from "./services/scoutAdvisorService.js";
+import { loadCachedScoutCard, saveCachedScoutCard } from "./services/scoutCacheService.js";
+import { enqueueCatch, installOutboxSync, flushCatchOutbox } from "./services/catchOutboxService.js";
+import { verifyCatchPhotos, verifyCatchLocally } from "./services/verifyCatchService.js";
+import { analyzeCatchPhotosProxy } from "./services/aiProxyService.js";
+import { compressImageFile, compressDataUrl, formatBytes } from "./utils/compressImage.js";
+import { mergePhotoAnalysis } from "./utils/analyzeCatchPhotos.js";
+import { measureFishInches, findRulerPhotoIndex, aggregateLengthFromAllPhotos } from "./utils/fishLengthMeasure.js";
+import { getLearnedHeadInches } from "./utils/headSizeLearn.js";
+import EmbeddedRulerOverlay from "./components/EmbeddedRulerOverlay.jsx";
+import FishMeasureGuides from "./components/FishMeasureGuides.jsx";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
@@ -41,9 +54,15 @@ function mapsUrl(lat, lng) {
 
 // Westcott 20-inch ruler PNG — full image width = 20 inches on the overlay scale.
 var RULER_REF_INCHES = 20;
-var RULER_REF_SRC = import.meta.env.BASE_URL + "ruler-20-inches.svg";
-var RULER_STRIP_H = 56;
-var RULER_STRIP_W = 88;
+var EXIF_PARSE_OPTS = {
+  gps:true,
+  iptc:true,
+  tiff:true,
+  pick:[
+    "GPSLatitude", "GPSLongitude", "DateTimeOriginal", "CreateDate",
+    "Location", "Sublocation", "City", "State", "ProvinceState", "Country", "CountryName",
+  ],
+};
 function haversineMi(lat1, lon1, lat2, lon2) {
   var R = 3958.8, r = Math.PI / 180;
   var dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
@@ -768,25 +787,6 @@ const ARTICLES = [
 ];
 
 // ─── WEATHER UTIL ─────────────────────────────────────────────────────────────
-function fishingScore(wx) {
-  if (!wx) return null;
-  let score = 60, notes = [];
-  if (wx.temp < 35) { score -= 35; notes.push("Too cold — fish very sluggish"); }
-  else if (wx.temp < 50) { score -= 15; notes.push("Cool — fish slow, try deep water"); }
-  else if (wx.temp >= 60 && wx.temp <= 78) { score += 15; notes.push("Prime temperature range"); }
-  else if (wx.temp > 88) { score -= 20; notes.push("Very hot — fish deep or night fish"); }
-  if (wx.wind > 20) { score -= 25; notes.push("High winds — tough casting, stay off open piers"); }
-  else if (wx.wind > 12) { score -= 8; notes.push("Breezy — fish the windward shore"); }
-  else { score += 5; notes.push("Calm winds — great casting conditions"); }
-  if (wx.precip > 60) { score -= 20; notes.push("Rain likely — fish aggressively before the storm"); }
-  else { score += 5; notes.push("Low rain chance — comfortable day out"); }
-  score = Math.max(0, Math.min(100, score));
-  const label = score >= 75 ? "GREAT DAY" : score >= 55 ? "GOOD DAY" : score >= 35 ? "FAIR DAY" : "STAY HOME";
-  const emoji = score >= 75 ? "🎣" : score >= 55 ? "👍" : score >= 35 ? "😐" : "🚫";
-  const color = score >= 75 ? "#6fcf6f" : score >= 55 ? "#d4a843" : score >= 35 ? "#e09030" : "#e05050";
-  return { score, label, emoji, color, notes };
-}
-
 var HOME_TARGET_SPECIES_KEY = "rfc_home_target_species_v1";
 var HOME_WATER_SPOTS = LOCAL_SPOTS.map(function(s) {
   return { name:s.name, lat:s.lat, lng:s.lng, species:s.species || [], waterType:s.tag || "Water", tip:s.tip || "", parking:s.addr || "" };
@@ -797,50 +797,6 @@ function getSeason(monthIndex) {
   if (monthIndex >= 5 && monthIndex <= 7) return "summer";
   if (monthIndex >= 8 && monthIndex <= 10) return "fall";
   return "winter";
-}
-
-function getMoonInfo(date) {
-  var d = date || new Date();
-  var yr = d.getFullYear(), mo = d.getMonth() + 1, dy = d.getDate();
-  var y = yr, m = mo;
-  if (m < 3) { y--; m += 12; }
-  var jd = 365.25 * y + 30.6 * m + dy - 694039.09;
-  jd /= 29.5305882;
-  var phase = jd - Math.floor(jd);
-  var label = "Waxing";
-  if (phase < 0.03 || phase > 0.97) label = "New";
-  else if (phase >= 0.22 && phase < 0.28) label = "First Quarter";
-  else if (phase >= 0.47 && phase < 0.53) label = "Full";
-  else if (phase >= 0.72 && phase < 0.78) label = "Last Quarter";
-  else if (phase >= 0.53) label = "Waning";
-  return { phase:phase, label:label };
-}
-
-function calcBFR(wx, moonInfo) {
-  if (!wx) return null;
-  var score = 50;
-  var temp = wx.temp;
-  if (temp >= 58 && temp <= 75) score += 20;
-  else if (temp >= 50 && temp < 58) score += 10;
-  else if (temp > 75 && temp <= 85) score += 8;
-  else if (temp > 85) score -= 10;
-  else if (temp < 45) score -= 25;
-  var wind = wx.wind || 0;
-  if (wind >= 5 && wind <= 15) score += 10;
-  else if (wind > 20) score -= 15;
-  else if (wind < 3) score += 5;
-  var precip = wx.precip || 0;
-  if (precip < 20) score += 5;
-  else if (precip > 70) score -= 15;
-  else if (precip > 40) score -= 5;
-  var moon = moonInfo || getMoonInfo();
-  if (moon.label === "New" || moon.label === "Full") score += 15;
-  else if (moon.label === "First Quarter" || moon.label === "Last Quarter") score += 8;
-  else score += 4;
-  score = Math.max(0, Math.min(100, Math.round(score)));
-  var tierLabel = score >= 85 ? "EPIC" : score >= 70 ? "GREAT" : score >= 55 ? "GOOD" : score >= 40 ? "FAIR" : "POOR";
-  var tierColor = score >= 85 ? "#3ddc84" : score >= 70 ? "#6fcf6f" : score >= 55 ? "#d4a843" : score >= 40 ? "#e09030" : "#e05050";
-  return { score:score, label:tierLabel, color:tierColor };
 }
 
 function bfrTierColor(score) {
@@ -876,41 +832,6 @@ function formatTimeShort(iso) {
   try {
     return new Date(iso).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" });
   } catch (e) { return "—"; }
-}
-
-function calcSolunarWindows(sunriseIso, sunsetIso) {
-  var now = new Date();
-  var sr = sunriseIso ? new Date(sunriseIso) : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 30);
-  var ss = sunsetIso ? new Date(sunsetIso) : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0);
-  function windowFrom(startMs, durationMin, type, color) {
-    var start = new Date(startMs);
-    var end = new Date(startMs + durationMin * 60000);
-    return { type:type, start:start, end:end, durationMin:durationMin, color:color, label:formatTimeShort(start.toISOString()) + " – " + formatTimeShort(end.toISOString()) };
-  }
-  return [
-    windowFrom(sr.getTime() + 90 * 60000, 120, "Major", "#d4a843"),
-    windowFrom(ss.getTime() - 150 * 60000, 120, "Major", "#d4a843"),
-    windowFrom(sr.getTime() + 6 * 3600000, 60, "Minor", "#5a9fd4"),
-    windowFrom(ss.getTime() + 2 * 3600000, 60, "Minor", "#5a9fd4"),
-  ];
-}
-
-function goldenHourMessage(sunriseIso, sunsetIso) {
-  var now = Date.now();
-  var sr = sunriseIso ? new Date(sunriseIso).getTime() : null;
-  var ss = sunsetIso ? new Date(sunsetIso).getTime() : null;
-  function minsUntil(t) { return Math.max(0, Math.round((t - now) / 60000)); }
-  if (sr && now >= sr - 45 * 60000 && now <= sr + 45 * 60000) return "🌅 Golden hour NOW — get fishing!";
-  if (ss && now >= ss - 45 * 60000 && now <= ss + 45 * 60000) return "🌅 Golden hour NOW — get fishing!";
-  if (sr && now < sr) {
-    var m = minsUntil(sr);
-    return "🌅 Golden hour in " + Math.floor(m / 60) + "h " + (m % 60) + "min";
-  }
-  if (ss && now < ss) {
-    var m2 = minsUntil(ss);
-    return "🌅 Golden hour in " + Math.floor(m2 / 60) + "h " + (m2 % 60) + "min";
-  }
-  return "🌙 Evening bite window opening";
 }
 
 function findNearestHomeWater(lat, lng) {
@@ -1120,19 +1041,17 @@ function HomeTab({ profile, T, setTab }) {
     try { localStorage.setItem(HOME_TARGET_SPECIES_KEY, sp); } catch (e) {}
   }
 
-  var rating = fishingScore(wx);
-  var moonInfo = getMoonInfo();
-  var bfr = calcBFR(wx, moonInfo);
+  var moonInfo = biteMoonInfo();
+  var bite = calcBiteScore(wx, moonInfo);
   var season = getSeason(new Date().getMonth());
   var baits = speciesBaitTips(targetSpecies, season);
-  var solunar = wx ? calcSolunarWindows(wx.sunrise, wx.sunset) : [];
+  var peakLight = wx ? calcPeakLightWindows(wx.sunrise, wx.sunset) : [];
   var waterTemp = wx ? estimateWaterTemp(wx.temp, new Date().getMonth()) : null;
   var golden = wx ? goldenHourMessage(wx.sunrise, wx.sunset) : "";
-  var displayName = (profile && profile.name) ? profile.name.split(" ")[0] : "Angler";
   var nearSpot = nearestWater && nearestWater.spot;
   var nearDist = nearestWater ? nearestWater.dist.toFixed(1) : null;
   var topSpeciesToday = nearSpot && nearSpot.species ? nearSpot.species.slice(0, 3).join(", ") : "Bass, Crappie, Catfish";
-  var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
+  var biteScore = bite ? bite.score : 0;
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
   var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
@@ -1182,13 +1101,13 @@ function HomeTab({ profile, T, setTab }) {
         </div>
       )}
 
-      <Card T={T} borderColor={bfr ? bfr.color : th.border} style={{ background:T === "bluesteel" ? "rgba(18,32,53,0.85)" : "rgba(10,22,28,0.9)" }}>
+      <Card T={T} borderColor={bite ? bite.color : th.border} style={{ background:T === "bluesteel" ? "rgba(18,32,53,0.85)" : "rgba(10,22,28,0.9)" }}>
         {loading ? (
           <div style={{ textAlign:"center", padding:"24px 0", color:th.muted }}>Calculating bite forecast…</div>
-        ) : bfr && wx ? (
+        ) : bite && wx ? (
           <div>
-            <BFRDial score={bfr.score} color={bfr.color} T={T} />
-            <div style={{ textAlign:"center", fontSize:18, fontWeight:800, color:bfr.color, marginBottom:12 }}>{bfr.label} DAY</div>
+            <BFRDial score={bite.score} color={bite.color} T={T} />
+            <div style={{ textAlign:"center", fontSize:18, fontWeight:800, color:bite.color, marginBottom:12 }}>{bite.label} · {bite.dayLabel}</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
               <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10 }}>
                 <div style={{ fontSize:10, color:th.muted }}>Wind</div>
@@ -1210,9 +1129,15 @@ function HomeTab({ profile, T, setTab }) {
               </div>
             </div>
             {golden ? <div style={{ fontSize:12, color:th.gold, marginBottom:10, fontWeight:600 }}>{golden}</div> : null}
-            <SecLabel text="Solunar feeding windows" T={T} />
+            {bite.notes && bite.notes.length ? (
+              <div style={{ marginBottom:10 }}>
+                {bite.notes.map(function(n, i) { return <div key={i} style={{ fontSize:12, color:th.white, marginBottom:3 }}>{n}</div>; })}
+              </div>
+            ) : null}
+            <SecLabel text="Peak light windows" T={T} />
+            <div style={{ fontSize:10, color:th.muted, marginBottom:6 }}>Based on sunrise/sunset — not moon solunar tables</div>
             <div style={{ display:"grid", gap:6, marginBottom:10 }}>
-              {solunar.map(function(w, i) {
+              {peakLight.map(function(w, i) {
                 return (
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:th.card, border:"1px solid " + w.color + "55", borderRadius:8, padding:"8px 10px" }}>
                     <span style={{ fontSize:12, color:w.color, fontWeight:700 }}>{w.type}</span>
@@ -1239,8 +1164,8 @@ function HomeTab({ profile, T, setTab }) {
         )}
       </Card>
 
-      <Card T={T} borderColor={rating ? rating.color : undefined}>
-        <SecLabel text="Today's Conditions" T={T} />
+      <Card T={T} borderColor={bite ? bite.color : undefined}>
+        <SecLabel text="Live conditions" T={T} />
         {loading ? (
           <div style={{ textAlign:"center", padding:"20px 0", color:th.muted }}>Fetching live conditions...</div>
         ) : wx ? (
@@ -1251,21 +1176,16 @@ function HomeTab({ profile, T, setTab }) {
                 <div style={{ fontSize:26, color:th.white, fontWeight:700 }}>{wx.temp}°F</div>
                 <div style={{ fontSize:12, color:th.muted }}>{wx.condition} · {wx.wind} mph {wx.windCompass || ""} · {wx.precip}% rain</div>
               </div>
-              {rating && (
+              {bite && (
                 <div style={{ textAlign:"right" }}>
-                  <div style={{ fontSize:16, fontWeight:700, color:rating.color }}>{rating.emoji} {rating.label}</div>
+                  <div style={{ fontSize:16, fontWeight:700, color:bite.color }}>{bite.emoji} {bite.score}/100</div>
                   <div style={{ width:90, height:8, background:th.border, borderRadius:4, marginTop:6, overflow:"hidden" }}>
-                    <div style={{ width:rating.score + "%", height:"100%", background:rating.color, borderRadius:4 }} />
+                    <div style={{ width:bite.score + "%", height:"100%", background:bite.color, borderRadius:4 }} />
                   </div>
-                  <div style={{ fontSize:11, color:th.muted, marginTop:3 }}>{rating.score}/100</div>
+                  <div style={{ fontSize:11, color:th.muted, marginTop:3 }}>RFC bite score</div>
                 </div>
               )}
             </div>
-            {rating && (
-              <div style={{ marginTop:10, borderTop:"1px solid " + th.border, paddingTop:8 }}>
-                {rating.notes.map(function(n, i) { return <div key={i} style={{ fontSize:12, color:th.white, marginBottom:3 }}>{n}</div>; })}
-              </div>
-            )}
             {tip ? <div style={{ marginTop:8, fontSize:12, color:th.green, fontStyle:"italic" }}>💡 {tip}</div> : null}
             <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>
               <span style={{ color:th.green, cursor:"pointer" }} onClick={load}>↻ Refresh conditions</span>
@@ -1977,6 +1897,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <input type="checkbox" checked={!!selectedSpot.shareClub} onChange={toggleShareClub} />
             <span style={{ fontSize:13, color:th.white }}>Share with Club (club map)</span>
           </label>
+          <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>Shows on your device club map now. Full sync to every member phone is still rolling out.</div>
           <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members</div>
           <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search roster…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
@@ -2387,14 +2308,61 @@ function CatalogueTab({ T }) {
 }
 
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
-function CatchTab({ profile, authMember, T }) {
+function ClubTab({ authMember, T }) {
   const th = THEMES[T];
-  const [view, setView] = useState("feed");
+  const [clubFeed, setClubFeed] = useState([]);
+  const [clubFeedLoading, setClubFeedLoading] = useState(false);
+
+  useEffect(function() {
+    if (!authMember) return;
+    setClubFeedLoading(true);
+    loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() { setClubFeed([]); }).finally(function() { setClubFeedLoading(false); });
+  }, [authMember ? authMember.id : null]);
+
+  return (
+    <div>
+      <div style={{ fontSize:18, color:th.white, fontWeight:800, margin:"12px 0 4px" }}>RFC Club Feed</div>
+      <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Verified catches from roster members</div>
+      {clubFeedLoading ? <div style={{ fontSize:12, color:th.muted }}>Loading…</div> : null}
+      {!authMember ? (
+        <Card T={T}><div style={{ fontSize:13, color:th.muted }}>Sign in with your roster account to see club catches.</div></Card>
+      ) : null}
+      {authMember && !clubFeedLoading && clubFeed.length === 0 ? (
+        <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No club catches yet. Log one and share with the club.</div></Card>
+      ) : null}
+      {clubFeed.map(function(c, i) {
+        var verified = c.verification && c.verification.verified;
+        return (
+          <Card key={"club_" + i} T={T} borderColor={verified ? th.gold + "66" : th.border}>
+            {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:8, maxHeight:200, objectFit:"cover" }} /> : null}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+              <div style={{ fontSize:10, color:th.gold, fontWeight:700 }}>{c.memberName || "Member"}</div>
+              {verified ? <span style={{ fontSize:11, color:th.gold, fontWeight:800, background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:12, padding:"2px 8px" }}>✓ Verified</span> : null}
+            </div>
+            <div style={{ fontWeight:700, color:th.white, fontSize:15 }}>{c.species}</div>
+            <div style={{ fontSize:12, color:th.green, marginTop:2 }}>{c.length}{c.estWeight ? " · ~" + c.estWeight : ""}</div>
+            <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>{c.bait} · {c.spot}</div>
+            {c.notes ? <div style={{ fontSize:12, color:th.white, marginTop:6, fontStyle:"italic" }}>"{c.notes}"</div> : null}
+            <div style={{ marginTop:8, display:"flex", gap:6 }}>
+              <button type="button" style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:16, padding:"4px 10px", color:th.green, fontSize:11, cursor:"default" }}>Nice fish</button>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function CatchTab({ profile, authMember, T, logMode: initialLogMode }) {
+  const th = THEMES[T];
+  const [logMode, setLogMode] = useState(initialLogMode || null);
+  const [clubPhase, setClubPhase] = useState("hero");
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
   const photoContainerRef = useRef();
   const photoAreaRef = useRef();
+  const photoImgRef = useRef();
   const draggingMarker = useRef(null);
   const [catches, setCatches] = useState(function() {
     try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
@@ -2405,7 +2373,8 @@ function CatchTab({ profile, authMember, T }) {
   });
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
-  const [referencePhotos, setReferencePhotos] = useState([]);
+  const [fishPhotos, setFishPhotos] = useState([]);
+  const [activePhotoIdx, setActivePhotoIdx] = useState(0);
   const [photoB64, setPhotoB64] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -2416,27 +2385,31 @@ function CatchTab({ profile, authMember, T }) {
   const [refEndPct, setRefEndPct] = useState(34);
   const [mouthPct, setMouthPct] = useState(10);
   const [tailPct, setTailPct] = useState(90);
-  const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
+  const [form, setForm] = useState({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString(), catchTime:"" });
   const [rfcLink, setRfcLink] = useState("");
   const [speciesSearch, setSpeciesSearch] = useState("");
   const [rulerOrientation, setRulerOrientation] = useState("horizontal");
-  const [rulerBoxH, setRulerBoxH] = useState(360);
   const [spotMetaSource, setSpotMetaSource] = useState("");
   const [showAdvancedMeasure, setShowAdvancedMeasure] = useState(false);
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
-  const [clubFeed, setClubFeed] = useState([]);
-  const [clubFeedLoading, setClubFeedLoading] = useState(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
+  const [photoCompressNote, setPhotoCompressNote] = useState("");
+  const [photoAnalysisSummary, setPhotoAnalysisSummary] = useState("");
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
 
   useEffect(function() {
-    if (!authMember) return;
-    setClubFeedLoading(true);
-    loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() { setClubFeed([]); }).finally(function() { setClubFeedLoading(false); });
+    if (!authMember || !authMember.id) return;
+    loadCatchesFromCloud(authMember.id).then(function(cloudCatches) {
+      if (cloudCatches && cloudCatches.length) {
+        setCatches(cloudCatches);
+        try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
+      }
+    }).catch(function() {});
+    flushCatchOutbox().catch(function() {});
   }, [authMember ? authMember.id : null]);
 
   function dismissCatchHint() {
@@ -2453,64 +2426,211 @@ function CatchTab({ profile, authMember, T }) {
     return speciesBaitTips(speciesName, getSeason(new Date().getMonth())).map(function(b) { return b.name; });
   }
 
-  useEffect(function() {
-    if (step !== 2 || measurementOption !== "1_ruler" || rulerOrientation !== "vertical") return;
-    function measureRulerBox() {
-      if (photoContainerRef.current) {
-        setRulerBoxH(photoContainerRef.current.offsetHeight || 360);
-      }
-    }
-    measureRulerBox();
-    window.addEventListener("resize", measureRulerBox);
-    var timer = setTimeout(measureRulerBox, 250);
-    return function() {
-      window.removeEventListener("resize", measureRulerBox);
-      clearTimeout(timer);
+  var MAX_FISH_PHOTOS = 6;
+
+  function defaultFishMarkers() {
+    return { mouthPct:10, tailPct:90, refStartPct:20, refEndPct:34 };
+  }
+
+  function buildFishPhoto(img) {
+    return {
+      id:"fp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+      src:img.full,
+      b64:img.b64 || "",
+      markers:defaultFishMarkers(),
+      hasRulerInPhoto:false,
+      hasPlanoBox:false,
+      rulerStartPct:0,
+      rulerEndPct:100,
+      rulerStartInch:null,
+      rulerEndInch:null,
+      rulerInchesInView:20,
+      planoStartPct:20,
+      planoEndPct:34,
+      hasHeadVisible:false,
+      headTopPct:null,
+      headBottomPct:null,
+      speciesHint:"",
+      aiConfidence:0,
+      aiLengthInches:null,
+      aiInitialMouthPct:null,
+      aiInitialTailPct:null,
+      photoOrientation:"horizontal",
+      aiRotation:0,
     };
-  }, [step, photo, rulerOrientation, measurementOption, aiLoading]);
+  }
+
+  function applyActiveFishPhoto(idx, list) {
+    var p = list[idx];
+    if (!p) return;
+    setActivePhotoIdx(idx);
+    setPhoto(p.src);
+    setPhotoB64(p.b64 || "");
+    setMouthPct(p.markers.mouthPct);
+    setTailPct(p.markers.tailPct);
+    setRefStartPct(p.markers.refStartPct);
+    setRefEndPct(p.markers.refEndPct);
+    if (p.photoOrientation && !p.hasRulerInPhoto) setRulerOrientation(p.photoOrientation);
+    if (p.hasRulerInPhoto) {
+      setRulerOrientation("horizontal");
+      if (isFinite(p.rulerStartPct)) setRefStartPct(p.rulerStartPct);
+      if (isFinite(p.rulerEndPct)) setRefEndPct(p.rulerEndPct);
+    } else if (p.hasPlanoBox) {
+      if (isFinite(p.planoStartPct)) setRefStartPct(p.planoStartPct);
+      if (isFinite(p.planoEndPct)) setRefEndPct(p.planoEndPct);
+    }
+  }
+
+  function getMeasurePhotoIndex(list) {
+    var photos = list || fishPhotos;
+    return findRulerPhotoIndex(photos) >= 0 ? findRulerPhotoIndex(photos) : activePhotoIdx;
+  }
+
+  function persistActivePhotoMarkers(list) {
+    return list.map(function(p, i) {
+      if (i !== activePhotoIdx) return p;
+      var next = Object.assign({}, p, {
+        src:photo || p.src,
+        markers:{ mouthPct:mouthPct, tailPct:tailPct, refStartPct:refStartPct, refEndPct:refEndPct },
+      });
+      if (p.hasRulerInPhoto) {
+        next.rulerStartPct = refStartPct;
+        next.rulerEndPct = refEndPct;
+      }
+      if (p.hasPlanoBox) {
+        next.planoStartPct = refStartPct;
+        next.planoEndPct = refEndPct;
+      }
+      return next;
+    });
+  }
+
+  function selectFishPhoto(idx) {
+    if (idx === activePhotoIdx) return;
+    setFishPhotos(function(list) {
+      var updated = persistActivePhotoMarkers(list);
+      applyActiveFishPhoto(idx, updated);
+      return updated;
+    });
+  }
 
   function applyPhotoMetadata(exif) {
     if (!exif) return;
     var resolved = resolveSpotFromExif(exif);
-    if (resolved.spot) {
-      setF("spot", resolved.spot);
-      setSpotMetaSource(resolved.source);
+    setForm(function(f) {
+      var next = Object.assign({}, f);
+      if (resolved.spot) {
+        next.spot = resolved.spot;
+        setSpotMetaSource(resolved.source);
+      }
+      var dt = exif.DateTimeOriginal || exif.CreateDate;
+      if (dt) {
+        var d = new Date(dt);
+        if (!isNaN(d.getTime())) {
+          next.date = d.toLocaleDateString();
+          next.catchTime = d.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+        }
+      }
+      return next;
+    });
+  }
+
+  function parseExifFromFiles(files) {
+    return Promise.all(files.map(function(file) {
+      return exifr.parse(file, EXIF_PARSE_OPTS).catch(function() { return null; });
+    })).then(function(rows) {
+      rows.forEach(applyPhotoMetadata);
+    });
+  }
+
+  function applyCatchPhotoAnalysis(analyzed, list) {
+    if (!list.length) {
+      setAiLoading(false);
+      return;
     }
-    var dt = exif.DateTimeOriginal || exif.CreateDate;
-    if (dt) setF("date", new Date(dt).toLocaleDateString());
+    var merged = mergePhotoAnalysis(list, analyzed);
+    var measureIdx = analyzed && isFinite(analyzed.best_measure_index) ? analyzed.best_measure_index : 0;
+    if (analyzed && Array.isArray(analyzed.photos)) {
+      var rulerIdx = analyzed.photos.findIndex(function(r) { return r.has_ruler; });
+      if (rulerIdx >= 0) measureIdx = rulerIdx;
+    }
+    measureIdx = Math.max(0, Math.min(merged.length - 1, measureIdx));
+
+    merged = merged.map(function(p) {
+      if (!p.hasRulerInPhoto) return p;
+      var span = Math.abs((p.markers && p.markers.tailPct) - (p.markers && p.markers.mouthPct));
+      if (span < 20 && p.aiInitialMouthPct != null && p.aiInitialTailPct != null) {
+        p = Object.assign({}, p, {
+          markers:Object.assign({}, p.markers, {
+            mouthPct:p.aiInitialMouthPct,
+            tailPct:p.aiInitialTailPct,
+          }),
+        });
+      }
+      if ((!p.rulerInchesInView || p.rulerInchesInView <= 0) && p.aiLengthInches >= 6) {
+        p = Object.assign({}, p, { rulerInchesInView:Math.max(p.aiLengthInches, 14) });
+      }
+      return p;
+    });
+
+    var bestSp = "";
+    var bestConf = 0;
+    merged.forEach(function(p) {
+      if (p.speciesHint && p.aiConfidence >= bestConf) {
+        bestConf = p.aiConfidence;
+        bestSp = p.speciesHint;
+      }
+    });
+    var measurePhoto = merged[measureIdx] || merged[0];
+    var matchedSpecies = matchSpeciesName(bestSp || measurePhoto.speciesHint || "");
+    var lenStr = measurePhoto.aiLengthInches != null ? formatCatchLengthInches(measurePhoto.aiLengthInches) : "";
+    setAiResult({
+      species:matchedSpecies || bestSp || measurePhoto.speciesHint || "",
+      confidence:bestConf || measurePhoto.aiConfidence || 0,
+      length:lenStr,
+      notes:(analyzed && analyzed.notes) || (measurePhoto.hasRulerInPhoto ? "Length read from ruler in photo " + (measureIdx + 1) + "." : "Adjust markers if needed."),
+    });
+    if (matchedSpecies) setF("species", matchedSpecies);
+    if (lenStr) setF("length", lenStr);
+    if (measurePhoto.hasRulerInPhoto) {
+      setMeasurementOption("1_ruler");
+    } else if (measurePhoto.hasPlanoBox) {
+      setMeasurementOption("7_plano");
+      setReferenceInches("10");
+    }
+    setPhotoAnalysisSummary(
+      measurePhoto.hasRulerInPhoto
+        ? "Photo " + (measureIdx + 1) + " has ruler + references — all photos checked for length."
+        : merged.length > 1
+          ? "Checking ruler, Plano box, and head references across photos."
+          : "Drag mouth/tail guides on the fish."
+    );
+
+    var finish = function(updatedList) {
+      setFishPhotos(updatedList);
+      applyActiveFishPhoto(measureIdx, updatedList);
+      setAiLoading(false);
+    };
+    finish(merged);
   }
   useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
+
   function readImageFile(file) {
-    return new Promise(function(resolve, reject) {
-      var reader = new FileReader();
-      reader.onload = function(ev) {
-        var full = ev.target.result;
-        resolve({ full:full, b64:(full && full.split(",")[1]) || "", type:file.type || "image/jpeg" });
-      };
-      reader.onerror = function() { reject(new Error("read_failed")); };
-      reader.readAsDataURL(file);
-    });
+    return compressImageFile(file, { maxEdge:1280, quality:0.82 });
   }
 
   function handlePhoto(e) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
-    var primary = files[0];
-    // Parse EXIF GPS, IPTC location, and capture date for auto-fill.
-    exifr.parse(primary, {
-      gps:true,
-      iptc:true,
-      tiff:true,
-      pick:[
-        "GPSLatitude", "GPSLongitude", "DateTimeOriginal", "CreateDate",
-        "Location", "Sublocation", "City", "State", "ProvinceState", "Country", "CountryName",
-      ],
-    }).then(function(exif) {
-      applyPhotoMetadata(exif);
-    }).catch(function() {});
-    readImageFile(primary).then(function(img) {
-      setPhoto(img.full);
-      setPhotoB64(img.b64);
+    parseExifFromFiles(files.slice(0, MAX_FISH_PHOTOS)).catch(function() {});
+    var batch = files.slice(0, MAX_FISH_PHOTOS);
+    Promise.all(batch.map(readImageFile)).then(function(allImgs) {
+      if (!allImgs.length) return;
+      var totalBytes = allImgs.reduce(function(sum, img) { return sum + (img.bytes || 0); }, 0);
+      setPhotoCompressNote(allImgs.length + " photo(s) resized on this device (~" + formatBytes(totalBytes) + " total)");
+      var newList = allImgs.map(buildFishPhoto);
+      setFishPhotos(newList);
+      applyActiveFishPhoto(0, newList);
       setMeasurementOption("1_ruler");
       setRulerMaxInches(RULER_REF_INCHES);
       setReferenceInches("3.37");
@@ -2518,57 +2638,26 @@ function CatchTab({ profile, authMember, T }) {
       setRefEndPct(34);
       setMouthPct(10);
       setTailPct(90);
-      setStep(2);
-      // If multiple images are uploaded together, treat extras as reference shots.
-      if (files.length > 1) {
-        Promise.all(files.slice(1).map(readImageFile)).then(function(extra) {
-          setReferencePhotos(extra.map(function(x) { return x.full; }).slice(0, 4));
-        }).catch(function() { setReferencePhotos([]); });
+      setPhotoAnalysisSummary("");
+      if (logMode === "fast") {
+        setMeasurementOption("5_none");
+        setStep(4);
+        setAiLoading(true);
       } else {
-        setReferencePhotos([]);
+        setStep(2);
+        setAiLoading(true);
       }
-      setAiLoading(true);
-      var photoDataUrl = img.full;
-      fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400,
-          messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
-            {type:"text",text:"Identify the fish species and analyze its orientation. Respond ONLY with raw JSON (no markdown, no extra text):\n{\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Brief ID note\",\"rotation\":90,\"mouth_pct\":15,\"tail_pct\":85}\n\nRules:\n- rotation: degrees clockwise (0, 90, 180, or 270) needed to orient fish horizontally with mouth pointing LEFT\n- mouth_pct: horizontal % position (0=left edge, 100=right edge) of fish mouth AFTER applying that rotation\n- tail_pct: horizontal % position of fish tail tip AFTER applying that rotation\n- If no fish visible use rotation:0, mouth_pct:10, tail_pct:90\n- If ruler visible in photo, estimate length from it; otherwise estimate from body proportions"}
-          ]}]
-        })
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        var txt = (data.content && data.content[0] && data.content[0].text) || "";
-        var m = txt.match(/\{[\s\S]*\}/);
-        if (m) {
-          try {
-            var res = JSON.parse(m[0]);
-            setAiResult(res);
-            var matchedSpecies = matchSpeciesName(res.species);
-            if (matchedSpecies) {
-              setForm(function(f) { return Object.assign({}, f, { species:matchedSpecies }); });
-            }
-            var rot = parseInt(res.rotation, 10) || 0;
-            var mPct = parseFloat(res.mouth_pct);
-            var tPct = parseFloat(res.tail_pct);
-            var applyMarkers = function() {
-              if (isFinite(mPct) && isFinite(tPct)) {
-                setMouthPct(Math.max(2, Math.min(98, mPct)));
-                setTailPct(Math.max(2, Math.min(98, tPct)));
-              }
-            };
-            if (rot !== 0) {
-              applyCanvasRotation(photoDataUrl, rot).then(function(rotated) {
-                setPhoto(rotated);
-                applyMarkers();
-              });
-            } else {
-              applyMarkers();
-            }
-          } catch(e) {}
+      analyzeCatchPhotosProxy(allImgs).then(function(analyzed) {
+        if (analyzed) {
+          applyCatchPhotoAnalysis(analyzed, newList);
+        } else {
+          setPhotoAnalysisSummary("AI scan unavailable — use markers or add a ruler photo.");
+          setAiLoading(false);
         }
+      }).catch(function() {
+        setPhotoAnalysisSummary("AI scan unavailable — use markers or add a ruler photo.");
         setAiLoading(false);
-      }).catch(function() { setAiLoading(false); });
+      });
     }).catch(function() {});
     e.target.value = "";
   }
@@ -2590,15 +2679,31 @@ function CatchTab({ profile, authMember, T }) {
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.rotate(rad);
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
-        resolve(canvas.toDataURL("image/jpeg", 0.9));
+        var raw = canvas.toDataURL("image/jpeg", 0.92);
+        compressDataUrl(raw, { maxEdge:1280, quality:0.82 }).then(function(c) {
+          resolve(c.full);
+        }).catch(function() { resolve(raw); });
       };
+      img.onerror = function() { resolve(dataUrl); };
       img.src = dataUrl;
     });
   }
-  function rotatePhoto() {
+  function rotatePhoto(degrees) {
     if (!photo) return;
-    applyCanvasRotation(photo, 90).then(function(rotated) {
+    var deg = degrees || 90;
+    applyCanvasRotation(photo, deg).then(function(rotated) {
       setPhoto(rotated);
+      setFishPhotos(function(list) {
+        return list.map(function(p, i) {
+          if (i !== activePhotoIdx) return p;
+          return Object.assign({}, p, {
+            src:rotated,
+            markers:defaultFishMarkers(),
+            aiInitialMouthPct:null,
+            aiInitialTailPct:null,
+          });
+        });
+      });
       setMouthPct(10);
       setTailPct(90);
     });
@@ -2607,81 +2712,232 @@ function CatchTab({ profile, authMember, T }) {
     if (measurementOption === "1_ruler" && photoAreaRef.current) return photoAreaRef.current;
     return photoContainerRef.current;
   }
-  function handleOverlayTouchStart(e) {
+  function pctFromOverlayEvent(e) {
     var el = overlayMeasureEl();
-    if (!el) return;
+    if (!el) return 0;
     var rect = el.getBoundingClientRect();
-    var touch = e.touches[0];
+    var clientX = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var clientY = e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
     var pct = rulerOrientation === "horizontal"
-      ? ((touch.clientX - rect.left) / rect.width) * 100
-      : ((touch.clientY - rect.top) / rect.height) * 100;
-    pct = Math.max(0, Math.min(100, pct));
+      ? ((clientX - rect.left) / rect.width) * 100
+      : ((clientY - rect.top) / rect.height) * 100;
+    return Math.max(0, Math.min(100, pct));
+  }
+  function handleOverlayTouchStart(e) {
+    var pct = pctFromOverlayEvent(e);
     draggingMarker.current = Math.abs(pct - mouthPct) <= Math.abs(pct - tailPct) ? "mouth" : "tail";
   }
   function handleOverlayTouchMove(e) {
     if (!draggingMarker.current) return;
-    var el = overlayMeasureEl();
-    if (!el) return;
-    var rect = el.getBoundingClientRect();
-    var touch = e.touches[0];
-    var pct = rulerOrientation === "horizontal"
-      ? ((touch.clientX - rect.left) / rect.width) * 100
-      : ((touch.clientY - rect.top) / rect.height) * 100;
-    pct = Math.max(0, Math.min(100, pct));
+    var pct = pctFromOverlayEvent(e);
     if (draggingMarker.current === "mouth") setMouthPct(pct);
     else setTailPct(pct);
   }
   function handleOverlayTouchEnd() { draggingMarker.current = null; }
 
-  function handleReferencePhotos(e) {
+  function handleAddFishPhotos(e) {
     var files = Array.from(e.target.files || []);
     if (!files.length) return;
-    Promise.all(files.map(readImageFile)).then(function(extra) {
-      setReferencePhotos(function(prev) {
-        return prev.concat(extra.map(function(x) { return x.full; })).slice(0, 4);
+    Promise.all(files.map(readImageFile)).then(function(imgs) {
+      if (imgs.length) {
+        var addBytes = imgs.reduce(function(sum, img) { return sum + (img.bytes || 0); }, 0);
+        setPhotoCompressNote("Added photo(s) resized (~" + formatBytes(addBytes) + ")");
+      }
+      setFishPhotos(function(prev) {
+        var room = MAX_FISH_PHOTOS - prev.length;
+        if (room <= 0) return prev;
+        var added = imgs.slice(0, room).map(buildFishPhoto);
+        var next = prev.concat(added);
+        if (!prev.length && added.length) applyActiveFishPhoto(0, next);
+        return next;
       });
     }).catch(function() {});
     e.target.value = "";
   }
 
   function submitCatch() {
-    var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo, visibility:vis };
-    setCatches(function(c) { return [entry].concat(c); });
-    if (authMember && authMember.id) {
-      saveCatchToCloud(authMember.id, entry).then(function() {
-        if (vis === "club") {
-          loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() {});
-        }
-      }).catch(function() {});
+    var vis = (logMode === "club" || catchVisibility === "club") && authMember ? "club" : "private";
+    var photoList = fishPhotos.length ? fishPhotos.map(function(p) { return p.src; }) : (photo ? [photo] : []);
+    var rulerIdx = findRulerPhotoIndex(fishPhotos);
+    var heroIdx = fishPhotos.findIndex(function(p) { return p.hasHeadVisible || p.photoOrientation === "vertical"; });
+    if (heroIdx < 0) heroIdx = 0;
+    var refIdx = rulerIdx >= 0 ? rulerIdx : -1;
+    var lenIn = parseFloat(String(form.length).replace(/[^\d.]/g, "")) || measuredInches || 0;
+    var entry = {
+      id:Date.now(),
+      user:(profile && profile.name) || "Angler",
+      species:form.species,
+      length:form.length,
+      lengthInches:lenIn,
+      estWeight:estimateWeightLbs(form.species, form.length),
+      bait:form.bait,
+      rod:form.rod,
+      spot:form.spot,
+      notes:form.notes,
+      date:form.date,
+      catchTime:form.catchTime,
+      photo:photoList[heroIdx >= 0 ? heroIdx : 0] || photoList[0] || photo,
+      photos:photoList,
+      heroPhotoIndex:heroIdx,
+      referencePhotoIndex:refIdx,
+      visibility:vis,
+      spotPublic:true,
+      pinPrivate:true,
+    };
+    if (vis === "club" && refIdx < 0) {
+      alert("Club share requires a reference photo with a ruler.");
+      return;
     }
-    var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
-    var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
-    setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
-    setStep(6);
+    var finishSave = function(verification) {
+      if (verification) entry.verification = verification;
+      setCatches(function(c) { return [entry].concat(c); });
+      try { localStorage.setItem("rfc_catches_v1", JSON.stringify([entry].concat(JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")))); } catch (e) {}
+      if (authMember && authMember.id) {
+        if (navigator.onLine) {
+          saveCatchToCloud(authMember.id, entry).catch(function() { enqueueCatch(authMember.id, entry); });
+        } else {
+          enqueueCatch(authMember.id, entry);
+        }
+      }
+      var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
+      var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + (form.catchTime ? " " + form.catchTime : "") + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
+      setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
+      setStep(6);
+    };
+    if (vis === "club") {
+      verifyCatchPhotos(entry, fishPhotos).then(finishSave).catch(function() {
+        finishSave(verifyCatchLocally(entry, fishPhotos));
+      });
+    } else {
+      finishSave(null);
+    }
   }
 
   var gear = (profile && profile.gear) || [];
   // Clamp ruler input so the overlay always has a valid scale.
   var rulerInches = Math.max(10, Math.min(60, parseInt(rulerMaxInches, 10) || RULER_REF_INCHES));
   var effectiveRulerInches = measurementOption === "1_ruler" ? RULER_REF_INCHES : rulerInches;
-  var usesObjectReference = measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth";
-  var fishSpanPct = Math.abs(tailPct - mouthPct);
-  var refSpanPct = Math.max(0.1, Math.abs(refEndPct - refStartPct));
+  var usesObjectReference = measurementOption === "2_card" || measurementOption === "3_coin" || measurementOption === "4_custom" || measurementOption === "6_depth" || measurementOption === "7_plano";
+  var measurePhotoIdx = getMeasurePhotoIndex();
+  var rulerPhotoIdx = findRulerPhotoIndex(fishPhotos);
+  var lengthLockedToRuler = rulerPhotoIdx >= 0;
+  var isPreviewOnlyPhoto = lengthLockedToRuler && activePhotoIdx !== rulerPhotoIdx;
+  var measurePhoto = fishPhotos[measurePhotoIdx] || fishPhotos[activePhotoIdx] || null;
+  var measureMouthPct = isPreviewOnlyPhoto && measurePhoto ? measurePhoto.markers.mouthPct : mouthPct;
+  var measureTailPct = isPreviewOnlyPhoto && measurePhoto ? measurePhoto.markers.tailPct : tailPct;
+  var measureRefStart = isPreviewOnlyPhoto && measurePhoto ? measurePhoto.markers.refStartPct : refStartPct;
+  var measureRefEnd = isPreviewOnlyPhoto && measurePhoto ? measurePhoto.markers.refEndPct : refEndPct;
   var customReferenceLen = Math.max(0, parseFloat(referenceInches) || 0);
-  var referenceLenInches = measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : customReferenceLen;
-  // Convert marker distance (percentage of image width) into inches.
-  var measuredByRuler = (fishSpanPct / 100) * effectiveRulerInches;
-  var measuredByReference = (fishSpanPct / refSpanPct) * referenceLenInches;
-  var measuredInches = usesObjectReference && referenceLenInches > 0 ? measuredByReference : measuredByRuler;
+  var referenceLenInches = measurementOption === "2_card" ? 3.37 : measurementOption === "3_coin" ? 0.955 : measurementOption === "7_plano" ? 10 : customReferenceLen;
+  var usingPhotoRuler = measurementOption === "1_ruler" && measurePhoto && measurePhoto.hasRulerInPhoto;
+  var photoRulerStart = usingPhotoRuler ? (measurePhoto.rulerStartPct != null ? measurePhoto.rulerStartPct : measureRefStart) : 0;
+  var photoRulerEnd = usingPhotoRuler ? (measurePhoto.rulerEndPct != null ? measurePhoto.rulerEndPct : measureRefEnd) : 100;
+  var photoRulerSpan = Math.max(0.1, Math.abs(photoRulerEnd - photoRulerStart));
+  var liveMarkers = {
+    mouthPct:measureMouthPct,
+    tailPct:measureTailPct,
+    refStartPct:measureRefStart,
+    refEndPct:measureRefEnd,
+  };
+  var lengthAgg = aggregateLengthFromAllPhotos(fishPhotos, {
+    measurementOption:measurementOption,
+    mouthPct:measureMouthPct,
+    tailPct:measureTailPct,
+    refStartPct:measureRefStart,
+    refEndPct:measureRefEnd,
+    photo:measurePhoto,
+    effectiveRulerInches:effectiveRulerInches,
+    referenceLenInches:referenceLenInches,
+    usesObjectReference:usesObjectReference,
+    allPhotos:fishPhotos,
+    activeIdx:measurePhotoIdx,
+    liveMarkers:liveMarkers,
+  });
+  var measuredInches = lengthAgg.inches != null ? lengthAgg.inches : (measureFishInches({
+    measurementOption:measurementOption,
+    mouthPct:measureMouthPct,
+    tailPct:measureTailPct,
+    refStartPct:measureRefStart,
+    refEndPct:measureRefEnd,
+    photo:measurePhoto,
+    effectiveRulerInches:effectiveRulerInches,
+    referenceLenInches:referenceLenInches,
+    usesObjectReference:usesObjectReference,
+  }) || 0);
+  var learnedHeadInches = lengthAgg.learnedHead || getLearnedHeadInches();
+  var fishSpanPct = Math.abs(measureTailPct - measureMouthPct);
+  var refSpanPct = Math.max(0.1, Math.abs(measureRefEnd - measureRefStart));
+  var measuredByRuler = measuredInches;
   var estimatedLengthLabel = aiResult && aiResult.length ? aiResult.length + " (estimate)" : measuredByRuler.toFixed(1) + " inches (estimate)";
   var measuredLengthLabel = measurementOption === "5_none" ? estimatedLengthLabel : measuredInches.toFixed(1) + " inches";
-  var needsMorePhotos = !!photo && referencePhotos.length === 0;
-  var needsDepthPhotos = measurementOption === "6_depth" && referencePhotos.length < 2;
+  var showEmbeddedRuler = measurementOption === "1_ruler" && !usingPhotoRuler && !lengthLockedToRuler;
+  var showRefGuidesOnPhoto = (usingPhotoRuler || usesObjectReference) && !isPreviewOnlyPhoto;
+  function syncRefStartPct(v) {
+    setRefStartPct(v);
+    setFishPhotos(function(list) {
+      return list.map(function(p, i) {
+        if (i !== activePhotoIdx) return p;
+        var next = Object.assign({}, p, { markers:Object.assign({}, p.markers, { refStartPct:v }) });
+        if (p.hasRulerInPhoto) next.rulerStartPct = v;
+        if (p.hasPlanoBox) next.planoStartPct = v;
+        return next;
+      });
+    });
+  }
+  function syncRefEndPct(v) {
+    setRefEndPct(v);
+    setFishPhotos(function(list) {
+      return list.map(function(p, i) {
+        if (i !== activePhotoIdx) return p;
+        var next = Object.assign({}, p, { markers:Object.assign({}, p.markers, { refEndPct:v }) });
+        if (p.hasRulerInPhoto) next.rulerEndPct = v;
+        if (p.hasPlanoBox) next.planoEndPct = v;
+        return next;
+      });
+    });
+  }
+  function syncRulerInchesInView(v) {
+    var n = Math.max(1, Math.min(24, parseFloat(v) || 20));
+    setFishPhotos(function(list) {
+      return list.map(function(p, i) {
+        if (i !== measurePhotoIdx) return p;
+        return Object.assign({}, p, { rulerInchesInView:n });
+      });
+    });
+  }
+  function computeInchesFromMarkers(markers, photoMeta) {
+    if (!markers) return null;
+    var agg = aggregateLengthFromAllPhotos(fishPhotos.length ? fishPhotos : (photoMeta ? [photoMeta] : []), {
+      measurementOption:measurementOption,
+      photo:photoMeta,
+      effectiveRulerInches:effectiveRulerInches,
+      referenceLenInches:referenceLenInches,
+      usesObjectReference:usesObjectReference,
+      activeIdx:photoMeta ? fishPhotos.findIndex(function(p) { return p.id === photoMeta.id; }) : activePhotoIdx,
+      liveMarkers:markers,
+    });
+    if (agg.inches != null) return agg.inches;
+    return measureFishInches({
+      measurementOption:measurementOption,
+      mouthPct:markers.mouthPct,
+      tailPct:markers.tailPct,
+      refStartPct:markers.refStartPct,
+      refEndPct:markers.refEndPct,
+      photo:photoMeta,
+      effectiveRulerInches:effectiveRulerInches,
+      referenceLenInches:referenceLenInches,
+      usesObjectReference:usesObjectReference,
+    });
+  }
+  var needsMorePhotos = fishPhotos.length < 2 && measurementOption !== "1_ruler" && measurementOption !== "5_none";
+  var needsDepthPhotos = measurementOption === "6_depth" && fishPhotos.length < 2;
   var estWeightLabel = estimateWeightLbs(form.species, form.length);
 
   // Carry measured length + recognized species into the details form — skip re-entry.
   function continueFromMeasurement() {
+    setFishPhotos(function(list) {
+      return persistActivePhotoMarkers(list);
+    });
     var len = measurementOption === "5_none" && aiResult && aiResult.length
       ? aiResult.length
       : formatCatchLengthInches(measuredInches);
@@ -2700,50 +2956,6 @@ function CatchTab({ profile, authMember, T }) {
 
   return (
     <div>
-      <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
-        <OBtn label="Community Feed" onClick={function() { setView("feed"); }} color={view==="feed" ? th.green : th.muted} />
-        <OBtn label="Log a Catch" onClick={function() { setView("log"); setStep(0); }} color={view==="log" ? th.green : th.muted} />
-      </div>
-
-      {view === "feed" && (
-        <div>
-          <SecLabel text="Club catch feed" T={T} />
-          {clubFeedLoading ? <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Loading club catches…</div> : null}
-          {!authMember ? <Card T={T}><div style={{ fontSize:12, color:th.muted }}>Sign in to see club member catches. Local catches below.</div></Card> : null}
-          {clubFeed.map(function(c, i) {
-            return (
-              <Card key={"club_" + i} T={T} borderColor={th.gold + "44"}>
-                <div style={{ fontSize:10, color:th.gold, marginBottom:4 }}>{c.memberName || "Member"} · shared with club</div>
-                {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:8, maxHeight:140, objectFit:"cover" }} /> : null}
-                <div style={{ fontWeight:700, color:th.white }}>{c.species}</div>
-                <div style={{ fontSize:12, color:th.muted }}>{c.length} · {c.bait} · {c.spot}</div>
-              </Card>
-            );
-          })}
-          <SecLabel text="Your catches (this device)" T={T} />
-          {catches.map(function(c, i) {
-            return (
-              <Card key={i} T={T}>
-                {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:10, maxHeight:160, objectFit:"cover" }} /> : null}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{c.species}</div>
-                    <div style={{ fontSize:12, color:th.green }}>{c.length}{c.estWeight ? " · ~" + c.estWeight : ""}</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:11, color:th.muted }}>{c.user}</div>
-                    <div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>{c.date}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{c.bait} · {c.spot}</div>
-                {c.notes ? <div style={{ fontSize:12, color:th.white, marginTop:4, fontStyle:"italic" }}>"{c.notes}"</div> : null}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {view === "log" && (
         <div>
           {showCatchHint && step === 0 ? (
             <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
@@ -2752,135 +2964,184 @@ function CatchTab({ profile, authMember, T }) {
               <button type="button" onClick={dismissCatchHint} style={{ marginTop:8, background:th.green, color:"#000", border:"none", borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Got it</button>
             </Card>
           ) : null}
-          {step === 0 && (
+          {step === 0 && !logMode && (
             <div style={{ textAlign:"center", padding:"20px 0" }}>
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
-              <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
+              <div style={{ fontSize:13, color:th.muted, marginBottom:20, lineHeight:1.5 }}>Private log in under 60 seconds — or verify two photos for the club feed.</div>
+              <button onClick={function() { setLogMode("fast"); setCatchVisibility("private"); setMeasurementOption("5_none"); setStep(0); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:10, padding:16, cursor:"pointer", fontSize:15, fontWeight:700, marginBottom:10 }}>⚡ Quick private log</button>
+              <button onClick={function() { setLogMode("club"); setCatchVisibility("club"); setClubPhase("hero"); setStep(0); }} style={{ width:"100%", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:10, padding:16, cursor:"pointer", color:th.gold, fontSize:14, fontWeight:700, marginBottom:10 }}>🏆 Club verified share</button>
+              <button onClick={function() { setLogMode("fast"); setStep(3); }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:10, padding:12, cursor:"pointer", color:th.muted, fontSize:13 }}>📝 No photo — log only</button>
+            </div>
+          )}
+          {step === 0 && logMode === "fast" && (
+            <div style={{ textAlign:"center", padding:"20px 0" }}>
+              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:8 }}>Quick private log</div>
+              <div style={{ fontSize:12, color:th.muted, marginBottom:16 }}>One photo optional — skip ruler for speed</div>
               <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-                <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Use Photo</button>
-                <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
-              </div>
+              <button onClick={function() { fileRef.current.click(); }} style={{ width:"100%", background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:14, fontWeight:700, marginBottom:10 }}>📷 Add photo</button>
+              <button onClick={function() { setStep(4); }} style={{ width:"100%", background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:14, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>Skip photo → details</button>
+            </div>
+          )}
+          {step === 0 && logMode === "club" && clubPhase === "hero" && (
+            <div style={{ textAlign:"center", padding:"20px 0" }}>
+              <div style={{ fontSize:16, color:th.gold, fontWeight:700, marginBottom:8 }}>Step 1 — Hero shot</div>
+              <div style={{ fontSize:12, color:th.muted, marginBottom:16, lineHeight:1.5 }}>Selfie or hold-up photo for the club feed (not used for length).</div>
+              <input type="file" accept="image/*" capture="user" ref={fileRef} onChange={function(e) {
+                var f = e.target.files && e.target.files[0];
+                if (!f) return;
+                readImageFile(f).then(function(img) {
+                  var p = buildFishPhoto(img);
+                  p.hasHeadVisible = true;
+                  setFishPhotos([p]);
+                  applyActiveFishPhoto(0, [p]);
+                  setPhoto(img.full);
+                  setClubPhase("reference");
+                });
+                e.target.value = "";
+              }} style={{ display:"none" }} />
+              <button onClick={function() { fileRef.current.click(); }} style={{ width:"100%", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:10, padding:16, cursor:"pointer", color:th.gold, fontSize:14, fontWeight:700 }}>📷 Add hero photo</button>
+            </div>
+          )}
+          {step === 0 && logMode === "club" && clubPhase === "reference" && (
+            <div style={{ textAlign:"center", padding:"20px 0" }}>
+              <div style={{ fontSize:16, color:th.green, fontWeight:700, marginBottom:8 }}>Step 2 — Reference shot (required)</div>
+              <div style={{ fontSize:12, color:th.muted, marginBottom:16, lineHeight:1.5 }}>Fish flat on board with ruler visible from above — official length source.</div>
+              <input type="file" accept="image/*" capture="environment" ref={refFileRef} onChange={function(e) {
+                var f = e.target.files && e.target.files[0];
+                if (!f) return;
+                readImageFile(f).then(function(img) {
+                  setFishPhotos(function(prev) {
+                    var ref = buildFishPhoto(img);
+                    ref.hasRulerInPhoto = true;
+                    var next = prev.concat([ref]);
+                    setMeasurementOption("1_ruler");
+                    setStep(2);
+                    setAiLoading(true);
+                    analyzeCatchPhotosProxy([img]).then(function(analyzed) {
+                      if (analyzed) applyCatchPhotoAnalysis(analyzed, next);
+                      else setAiLoading(false);
+                    }).catch(function() { setAiLoading(false); });
+                    return next;
+                  });
+                });
+                e.target.value = "";
+              }} style={{ display:"none" }} />
+              <button onClick={function() { refFileRef.current.click(); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:10, padding:16, cursor:"pointer", fontSize:14, fontWeight:700 }}>📏 Add ruler reference photo</button>
             </div>
           )}
 
           {step === 2 && (
             <div>
-              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
+              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Measure & Identify</div>
+              {!aiLoading && (aiResult || photoAnalysisSummary || form.spot) ? (
+                <Card T={T} borderColor={th.green + "44"} style={{ marginBottom:12 }}>
+                  {aiResult && aiResult.species ? (
+                    <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:4 }}>
+                      {aiResult.species}{aiResult.confidence ? " · " + aiResult.confidence + "% sure" : ""}
+                    </div>
+                  ) : null}
+                  {photoAnalysisSummary ? <div style={{ fontSize:12, color:th.green, marginBottom:6, lineHeight:1.45 }}>{photoAnalysisSummary}</div> : null}
+                  {form.spot ? <div style={{ fontSize:12, color:th.muted, marginBottom:2 }}>📍 {form.spot}{spotMetaSource ? " · " + spotMetaSource : ""}</div> : null}
+                  {(form.date || form.catchTime) ? (
+                    <div style={{ fontSize:12, color:th.muted }}>🕐 {form.date}{form.catchTime ? " · " + form.catchTime : ""} · from photo IPTC/EXIF</div>
+                  ) : null}
+                  {measuredLengthLabel && measurementOption !== "5_none" ? (
+                    <div style={{ fontSize:13, color:th.white, fontWeight:600, marginTop:8 }}>Length: {measuredLengthLabel}{lengthAgg.source ? " · " + lengthAgg.source : ""}</div>
+                  ) : null}
+                  {lengthAgg.breakdown && lengthAgg.breakdown.length > 1 ? (
+                    <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45 }}>
+                      {lengthAgg.breakdown.map(function(line, i) { return <div key={"lb_" + i}>{line}</div>; })}
+                    </div>
+                  ) : null}
+                  {learnedHeadInches ? (
+                    <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>Your head size learned: ~{learnedHeadInches.toFixed(1)} in (used on selfies)</div>
+                  ) : null}
+                </Card>
+              ) : null}
               {photo ? (
                 <div style={{ marginBottom:12 }}>
+                  {fishPhotos.length > 0 ? (
+                    <div style={{ marginBottom:10 }}>
+                      {photoCompressNote ? <div style={{ fontSize:11, color:th.green, marginBottom:6 }}>{photoCompressNote}</div> : null}
+                      <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Photos ({fishPhotos.length}/{MAX_FISH_PHOTOS}) — tap to measure each</div>
+                      <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:8, paddingBottom:4 }}>
+                        {fishPhotos.map(function(p, idx) {
+                          var srcPhoto = lengthLockedToRuler ? fishPhotos[rulerPhotoIdx] : p;
+                          var srcMarkers = lengthLockedToRuler
+                            ? fishPhotos[rulerPhotoIdx].markers
+                            : (idx === activePhotoIdx ? { mouthPct:mouthPct, tailPct:tailPct, refStartPct:refStartPct, refEndPct:refEndPct } : p.markers);
+                          var lenIn = computeInchesFromMarkers(srcMarkers, srcPhoto);
+                          var lenLbl = lenIn != null ? formatCatchLengthInches(lenIn) : "";
+                          var badge = p.hasRulerInPhoto ? "📏" : (p.speciesHint ? "🎣" : "");
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={function() { selectFishPhoto(idx); }}
+                              style={{ flexShrink:0, background:"transparent", border:activePhotoIdx === idx ? "2px solid " + th.green : "1px solid " + th.border, borderRadius:8, padding:2, cursor:"pointer", position:"relative" }}
+                            >
+                              <img src={p.src} alt={"fish_" + (idx + 1)} style={{ width:64, height:64, objectFit:"cover", borderRadius:6, display:"block" }} />
+                              {badge ? <div style={{ position:"absolute", top:4, right:4, fontSize:10, background:"rgba(0,0,0,0.65)", borderRadius:4, padding:"1px 3px" }}>{badge}</div> : null}
+                              <div style={{ fontSize:9, color:activePhotoIdx === idx ? th.green : th.muted, textAlign:"center", marginTop:2, maxWidth:64 }}>{lenLbl || "Photo " + (idx + 1)}</div>
+                            </button>
+                          );
+                        })}
+                        {fishPhotos.length < MAX_FISH_PHOTOS ? (
+                          <button type="button" onClick={function() { refFileRef.current.click(); }} style={{ flexShrink:0, width:64, height:64, borderRadius:8, border:"1px dashed " + th.border, background:"transparent", color:th.muted, cursor:"pointer", fontSize:22 }} title="Add photo">+</button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {isPreviewOnlyPhoto ? (
+                    <div style={{ background:th.gold + "22", border:"1px solid " + th.gold + "66", borderRadius:8, padding:10, marginBottom:10, fontSize:12, color:th.white, lineHeight:1.5 }}>
+                      Preview only — length <strong>{measuredLengthLabel}</strong> comes from Photo {rulerPhotoIdx + 1} (ruler). Selfie photos cannot measure length.
+                      <button type="button" onClick={function() { selectFishPhoto(rulerPhotoIdx); }} style={{ display:"block", marginTop:8, background:th.gold, color:"#120900", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Open ruler photo to adjust</button>
+                    </div>
+                  ) : null}
                   <div ref={photoContainerRef} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000" }}>
                     <div
                       ref={photoAreaRef}
-                      onTouchStart={handleOverlayTouchStart}
-                      onTouchMove={handleOverlayTouchMove}
-                      onTouchEnd={handleOverlayTouchEnd}
-                      style={{
-                        position:"relative",
-                        touchAction:"none",
-                        marginBottom: measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? RULER_STRIP_H : 0,
-                        marginRight: measurementOption === "1_ruler" && rulerOrientation === "vertical" ? RULER_STRIP_W : 0,
-                      }}
+                      onTouchStart={!isPreviewOnlyPhoto ? undefined : handleOverlayTouchStart}
+                      onTouchMove={!isPreviewOnlyPhoto ? undefined : handleOverlayTouchMove}
+                      onTouchEnd={!isPreviewOnlyPhoto ? undefined : handleOverlayTouchEnd}
+                      style={{ position:"relative", touchAction:!isPreviewOnlyPhoto ? "auto" : "none" }}
                     >
-                      <button onClick={rotatePhoto} style={{ position:"absolute", top:8, left:8, zIndex:10, background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:18, padding:"4px 9px", cursor:"pointer", lineHeight:1 }} title="Rotate 90°">↻</button>
-                      {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI orienting photo…</div></div>}
-                      <img src={photo} alt="catch" onLoad={function() { if (photoContainerRef.current) setRulerBoxH(photoContainerRef.current.offsetHeight || 360); }} style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
-                      {measurementOption === "1_ruler" ? (
-                        rulerOrientation === "horizontal" ? (
-                          <div style={{ position:"absolute", left:0, right:0, top:0, bottom:0, pointerEvents:"none" }}>
-                            <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.22)" }} />
-                            <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                              <div style={{ position:"absolute", top:8, left:-20, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
-                            </div>
-                            <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                              <div style={{ position:"absolute", top:8, left:-12, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ position:"absolute", left:0, right:0, top:0, bottom:0, pointerEvents:"none" }}>
-                            <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.22)" }} />
-                            <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                              <div style={{ position:"absolute", left:8, top:-8, fontSize:10, color:th.green, fontWeight:700, textShadow:"0 1px 3px #000" }}>MOUTH</div>
-                            </div>
-                            <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange, boxShadow:"0 0 4px rgba(0,0,0,0.8)" }}>
-                              <div style={{ position:"absolute", left:8, top:-8, fontSize:10, color:th.orange, fontWeight:700, textShadow:"0 1px 3px #000" }}>TAIL</div>
-                            </div>
-                          </div>
-                        )
-                      ) : (
-                      rulerOrientation === "horizontal" ? (
-                        <div style={{ position:"absolute", left:10, right:10, bottom:10, height:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                          {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                            var left = (i / rulerInches) * 100;
-                            var major = i % 5 === 0;
-                            return (
-                              <div key={"tick_" + i} style={{ position:"absolute", left:left + "%", bottom:0, width:1, height:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                                {major ? <div style={{ position:"absolute", bottom:24, left:-8, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                              </div>
-                            );
-                          })}
-                          <div style={{ position:"absolute", left:Math.min(mouthPct,tailPct) + "%", width:Math.abs(tailPct-mouthPct) + "%", top:0, bottom:0, background:"rgba(111,207,111,0.18)" }} />
-                          <div style={{ position:"absolute", left:mouthPct + "%", top:0, bottom:0, width:2, background:th.green }}>
-                            <div style={{ position:"absolute", top:-16, left:-18, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
-                          </div>
-                          <div style={{ position:"absolute", left:tailPct + "%", top:0, bottom:0, width:2, background:th.orange }}>
-                            <div style={{ position:"absolute", top:-16, left:-13, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ position:"absolute", top:10, bottom:10, right:10, width:36, borderRadius:8, background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.2)", overflow:"hidden" }}>
-                          {Array.from({ length:rulerInches + 1 }).map(function(_, i) {
-                            var top = (i / rulerInches) * 100;
-                            var major = i % 5 === 0;
-                            return (
-                              <div key={"tick_" + i} style={{ position:"absolute", top:top + "%", right:0, height:1, width:major ? 22 : 12, background:major ? "#fff" : "rgba(255,255,255,0.65)" }}>
-                                {major ? <div style={{ position:"absolute", right:24, top:-6, fontSize:9, color:"#fff", fontFamily:"monospace" }}>{i}</div> : null}
-                              </div>
-                            );
-                          })}
-                          <div style={{ position:"absolute", top:Math.min(mouthPct,tailPct) + "%", height:Math.abs(tailPct-mouthPct) + "%", left:0, right:0, background:"rgba(111,207,111,0.18)" }} />
-                          <div style={{ position:"absolute", top:mouthPct + "%", left:0, right:0, height:2, background:th.green }}>
-                            <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.green, fontWeight:700 }}>MOUTH</div>
-                          </div>
-                          <div style={{ position:"absolute", top:tailPct + "%", left:0, right:0, height:2, background:th.orange }}>
-                            <div style={{ position:"absolute", top:-8, right:38, fontSize:10, color:th.orange, fontWeight:700 }}>TAIL</div>
-                          </div>
-                        </div>
-                      )
-                    )}
-                    </div>
-                    {measurementOption === "1_ruler" && rulerOrientation === "horizontal" ? (
-                      <div style={{ position:"absolute", left:0, right:0, bottom:0, height:RULER_STRIP_H, overflow:"hidden", pointerEvents:"none", borderTop:"1px solid rgba(255,255,255,0.15)", background:"#ebe3d3" }}>
-                        <img src={RULER_REF_SRC} alt="20 inch ruler" draggable={false} style={{ width:"100%", height:"100%", objectFit:"fill", opacity:1, display:"block" }} />
+                      <div style={{ position:"absolute", top:8, left:8, zIndex:10, display:"flex", gap:6 }}>
+                        <button type="button" onClick={function() { rotatePhoto(90); }} style={{ background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:12, padding:"5px 8px", cursor:"pointer", fontWeight:600 }} title="Rotate 90°">↻ 90°</button>
+                        <button type="button" onClick={function() { rotatePhoto(180); }} style={{ background:"rgba(0,0,0,0.65)", border:"1px solid rgba(255,255,255,0.3)", borderRadius:6, color:"#fff", fontSize:12, padding:"5px 8px", cursor:"pointer", fontWeight:600 }} title="Flip upside down">↕ 180°</button>
                       </div>
-                    ) : null}
-                    {measurementOption === "1_ruler" && rulerOrientation === "vertical" ? (
-                      <div style={{ position:"absolute", top:0, right:0, bottom:0, width:RULER_STRIP_W, overflow:"hidden", pointerEvents:"none", borderLeft:"1px solid rgba(255,255,255,0.15)", background:"#ebe3d3" }}>
-                        <img
-                          src={RULER_REF_SRC}
-                          alt="20 inch ruler"
-                          draggable={false}
-                          style={{
-                            position:"absolute",
-                            top:0,
-                            left:"100%",
-                            width:rulerBoxH,
-                            height:RULER_STRIP_W,
-                            maxWidth:"none",
-                            objectFit:"fill",
-                            transformOrigin:"top left",
-                            transform:"rotate(-90deg) translateX(-100%)",
-                            display:"block",
-                          }}
+                      {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>Scanning photos for ruler, species, location…</div></div>}
+                      <img ref={photoImgRef} src={photo} alt="catch" style={{ width:"100%", maxHeight:360, objectFit:"contain", display:"block" }} />
+                      <EmbeddedRulerOverlay orientation={rulerOrientation} totalInches={RULER_REF_INCHES} show={showEmbeddedRuler} />
+                      {!isPreviewOnlyPhoto ? (
+                        <FishMeasureGuides
+                          containerRef={photoAreaRef}
+                          imgRef={photoImgRef}
+                          orientation={rulerOrientation}
+                          mouthPct={mouthPct}
+                          tailPct={tailPct}
+                          onMouthChange={setMouthPct}
+                          onTailChange={setTailPct}
+                          refStartPct={refStartPct}
+                          refEndPct={refEndPct}
+                          onRefStartChange={showRefGuidesOnPhoto ? syncRefStartPct : null}
+                          onRefEndChange={showRefGuidesOnPhoto ? syncRefEndPct : null}
+                          showRefGuides={showRefGuidesOnPhoto}
+                          rulerSpan={usingPhotoRuler ? { start:photoRulerStart, end:photoRulerEnd } : null}
+                          colors={{ green:th.green, orange:th.orange, gold:th.gold }}
+                          photoKey={photo + "_" + activePhotoIdx + "_" + rulerOrientation + "_" + measurementOption}
                         />
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </div>
-                  <button onClick={rotatePhoto} style={{ width:"100%", marginTop:8, background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:14, fontWeight:600, letterSpacing:"0.02em" }}>↻ Rotate Photo</button>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:8 }}>
+                    <button type="button" onClick={function() { rotatePhoto(90); }} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:13, fontWeight:600 }}>↻ Rotate 90°</button>
+                    <button type="button" onClick={function() { rotatePhoto(180); }} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:13, fontWeight:600 }}>↕ Flip 180°</button>
+                  </div>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
-                      Move the markers so the fish starts at the closed mouth tip and ends at the farthest tail tip.
+                      Drag <span style={{ color:th.green, fontWeight:700 }}>MOUTH</span>, <span style={{ color:th.orange, fontWeight:700 }}>TAIL</span>{showRefGuidesOnPhoto ? (<> and gold <span style={{ color:th.gold, fontWeight:700 }}>R1/R2</span> reference guides</>) : null} on the photo.
                     </div>
                     <div style={{ display:"flex", gap:6, marginBottom:10 }}>
                       <button onClick={function() { setRulerOrientation("horizontal"); }} style={{ flex:1, background:rulerOrientation==="horizontal" ? th.green+"22" : "transparent", border:"1px solid "+(rulerOrientation==="horizontal" ? th.green : th.border), color:rulerOrientation==="horizontal" ? th.green : th.muted, borderRadius:7, padding:"7px 8px", cursor:"pointer", fontSize:12, fontWeight:rulerOrientation==="horizontal" ? 700 : 400 }}>↔ Horizontal</button>
@@ -2889,16 +3150,14 @@ function CatchTab({ profile, authMember, T }) {
                     <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Measurement method</div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
                       {[
-                        ["1_ruler","1. Westcott ruler (20 in)"],
-                        ["2_card","2. Credit card ref"],
-                        ["3_coin","3. Quarter ref"],
-                        ["4_custom","4. Custom ref size"],
-                        ["5_none","5. No reference (estimate)"],
-                        ["6_depth","6. Multi-photo depth assist"],
-                      ].filter(function(opt) {
-                        if (!profile || profile.level !== "Beginner" || showAdvancedMeasure) return true;
-                        return opt[0] === "1_ruler";
-                      }).map(function(opt) {
+                        ["1_ruler","1. Ruler in photo"],
+                        ["7_plano","2. Plano box (10 in)"],
+                        ["2_card","3. Credit card"],
+                        ["3_coin","4. Quarter"],
+                        ["4_custom","5. Custom size"],
+                        ["5_none","6. AI estimate only"],
+                        ["6_depth","7. Multi-photo depth"],
+                      ].map(function(opt) {
                         return (
                           <button
                             key={opt[0]}
@@ -2919,15 +3178,37 @@ function CatchTab({ profile, authMember, T }) {
                         );
                       })}
                     </div>
-                    {profile && profile.level === "Beginner" && !showAdvancedMeasure ? (
-                      <button type="button" onClick={function() { setShowAdvancedMeasure(true); }} style={{ width:"100%", background:"transparent", border:"1px dashed " + th.border, borderRadius:7, padding:"8px", cursor:"pointer", fontSize:12, color:th.muted, marginBottom:10 }}>Show more measure methods (2–6)</button>
-                    ) : null}
                     {measurementOption === "1_ruler" ? (
                       <div>
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4, lineHeight:1.45 }}>
-                          The Westcott 20-inch ruler sits beside your photo. Drag markers on the fish only — each inch on the photo {rulerOrientation === "vertical" ? "height" : "width"} equals one real inch.
+                          {usingPhotoRuler
+                            ? "Length is read from the real ruler in this photo — not the full photo width. Drag R1/R2 to the inch marks on the ruler."
+                            : lengthLockedToRuler
+                              ? "Use the 📏 ruler photo for length. Overlay scale is only when no ruler is in the batch."
+                              : "Westcott overlay on photo edge when no ruler is in the shot."}
                         </div>
-                        <div style={{ fontSize:12, color:th.green, marginBottom:8, fontWeight:700 }}>Reference scale: {RULER_REF_INCHES} inches (full {rulerOrientation === "vertical" ? "height" : "width"} of photo)</div>
+                        {usingPhotoRuler && measurePhoto ? (
+                          <div style={{ marginBottom:8 }}>
+                            <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Inches between R1 and R2 on ruler</div>
+                            <input
+                              type="number"
+                              min="1"
+                              max="24"
+                              step="0.5"
+                              value={measurePhoto.rulerInchesInView != null ? measurePhoto.rulerInchesInView : 20}
+                              onChange={function(e) { syncRulerInchesInView(e.target.value); }}
+                              style={Object.assign({}, inputStyle, { marginBottom:0 })}
+                            />
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize:12, color:th.green, marginBottom:8, fontWeight:700 }}>
+                          {usingPhotoRuler ? "Using ruler in photo" : "Reference overlay: " + RULER_REF_INCHES + " in on photo edge"}
+                        </div>
+                      </div>
+                    ) : null}
+                    {measurementOption === "7_plano" ? (
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
+                        Drag gold R1/R2 to the ends of the Plano box (10 inches long). Fish mouth/tail guides measure against that span.
                       </div>
                     ) : null}
                     {measurementOption === "4_custom" ? (
@@ -2936,42 +3217,44 @@ function CatchTab({ profile, authMember, T }) {
                         <input type="number" min="0.1" max="24" step="0.01" value={referenceInches} onChange={function(e) { setReferenceInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
                       </div>
                     ) : null}
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Mouth position (top=0%)" : "Mouth marker position"}</div>
-                    <input type="range" min="0" max="100" step="1" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Tail position (top=0%)" : "Tail marker position"}</div>
-                    <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Mouth guide (top=0%)" : "Mouth guide"} · fine-tune</div>
+                    <input type="range" min="0" max="100" step="1" value={mouthPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Tail guide (top=0%)" : "Tail guide"} · fine-tune</div>
+                    <input type="range" min="0" max="100" step="1" value={tailPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
                     {usesObjectReference ? (
                       <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:4 }}>
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference start marker</div>
-                        <input type="range" min="0" max="100" step="1" value={refStartPct} onChange={function(e) { setRefStartPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
+                        <input type="range" min="0" max="100" step="1" value={refStartPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { syncRefStartPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference end marker</div>
-                        <input type="range" min="0" max="100" step="1" value={refEndPct} onChange={function(e) { setRefEndPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10 }} />
+                        <input type="range" min="0" max="100" step="1" value={refEndPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { syncRefEndPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
                       </div>
                     ) : null}
-                    <input type="file" accept="image/*" ref={refFileRef} multiple onChange={handleReferencePhotos} style={{ display:"none" }} />
+                    {usingPhotoRuler && !usesObjectReference ? (
+                      <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:4 }}>
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Ruler start (R1) · fine-tune</div>
+                        <input type="range" min="0" max="100" step="1" value={refStartPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { syncRefStartPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
+                        <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Ruler end (R2) · fine-tune</div>
+                        <input type="range" min="0" max="100" step="1" value={refEndPct} disabled={isPreviewOnlyPhoto} onChange={function(e) { syncRefEndPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:10, opacity:isPreviewOnlyPhoto ? 0.45 : 1 }} />
+                      </div>
+                    ) : null}
+                    <input type="file" accept="image/*" ref={refFileRef} multiple onChange={handleAddFishPhotos} style={{ display:"none" }} />
                     {needsMorePhotos ? (
                       <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "55", borderRadius:8, padding:10, marginBottom:10 }}>
                         <div style={{ fontSize:12, color:th.white, lineHeight:1.45, marginBottom:7 }}>
-                          To improve accuracy, add at least one more photo with a known object (ruler, credit card, or quarter) next to the fish.
+                          Tip: add another photo with a ruler, card, or quarter beside the fish for a more accurate length.
                         </div>
                         <button onClick={function() { refFileRef.current.click(); }} style={{ background:th.orange, color:"#120900", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                          Add reference photo
+                          Add another photo
                         </button>
                       </div>
                     ) : null}
                     {needsDepthPhotos ? (
                       <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "55", borderRadius:8, padding:10, marginBottom:10, fontSize:12, color:th.white, lineHeight:1.45 }}>
-                        Option 6 works best with 2+ extra photos from slightly different angles. Add more reference photos to proceed confidently.
+                        Option 6 works best with 2+ photos from slightly different angles.
+                        <button type="button" onClick={function() { refFileRef.current.click(); }} style={{ display:"block", marginTop:8, background:th.blue, color:"#fff", border:"none", borderRadius:7, padding:"7px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Add photo</button>
                       </div>
                     ) : null}
-                    {referencePhotos.length > 0 ? (
-                      <div style={{ display:"flex", gap:6, overflowX:"auto", marginBottom:10 }}>
-                        {referencePhotos.map(function(src, idx) {
-                          return <img key={idx} src={src} alt={"reference_" + idx} style={{ width:72, height:72, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border }} />;
-                        })}
-                      </div>
-                    ) : null}
-                    <div style={{ fontSize:13, color:th.white, fontWeight:700, marginBottom:4 }}>Measured length: {measuredLengthLabel}</div>
+                    <div style={{ fontSize:13, color:th.white, fontWeight:700, marginBottom:4 }}>Measured length: {measuredLengthLabel}{fishSpanPct < 20 && usingPhotoRuler ? " — widen MOUTH/TAIL guides if this looks wrong" : ""}</div>
                     <div style={{ fontSize:11, color:th.muted, lineHeight:1.45 }}>This length will carry forward automatically — no need to enter it again on the next screen.</div>
                   </Card>
                 </div>
@@ -3052,9 +3335,15 @@ function CatchTab({ profile, authMember, T }) {
                     </div>
                   ) : null}
                   {form.date ? (
-                    <div style={{ marginBottom:4 }}>
-                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>Date · from photo metadata</div>
+                    <div style={{ marginBottom:form.catchTime ? 8 : 4 }}>
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>Date · from photo metadata (IPTC/EXIF)</div>
                       <div style={{ fontSize:14, color:th.white }}>{form.date}</div>
+                    </div>
+                  ) : null}
+                  {form.catchTime ? (
+                    <div style={{ marginBottom:4 }}>
+                      <div style={{ fontSize:11, color:th.muted, marginBottom:2 }}>Time · from photo metadata</div>
+                      <div style={{ fontSize:14, color:th.white }}>{form.catchTime}</div>
                     </div>
                   ) : null}
                 </Card>
@@ -3112,7 +3401,7 @@ function CatchTab({ profile, authMember, T }) {
               <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Review Your Catch</div>
               {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:180, objectFit:"cover" }} /> : null}
               <Card T={T}>
-                {[["Species",form.species],["Length",form.length],["Est. Weight",estWeightLabel],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
+                {[["Species",form.species],["Length",form.length],["Est. Weight",estWeightLabel],["Bait",form.bait],["Rod",form.rod],["Spot",form.spot],["Date",form.date + (form.catchTime ? " · " + form.catchTime : "")],["Notes",form.notes]].filter(function(r) { return r[1]; }).map(function(r, i) {
                   return (
                     <div key={i} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, paddingBottom:6, borderBottom:"1px solid " + th.border }}>
                       <span style={{ fontSize:12, color:th.muted }}>{r[0]}</span>
@@ -3133,6 +3422,7 @@ function CatchTab({ profile, authMember, T }) {
                   <button type="button" onClick={function() { setCatchVisibility("club"); }} style={{ flex:1, background:catchVisibility === "club" ? th.gold + "33" : "transparent", border:"1px solid " + (catchVisibility === "club" ? th.gold : th.border), borderRadius:8, color:catchVisibility === "club" ? th.gold : th.muted, padding:"8px", cursor:"pointer", fontSize:12, fontWeight:catchVisibility === "club" ? 700 : 400 }}>Share with club</button>
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
+                {authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.muted, marginTop:8 }}>Visible to signed-in roster members in the club feed.</div> : null}
               </Card>
               <button onClick={submitCatch} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginBottom:8 }}>{catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
@@ -3150,19 +3440,18 @@ function CatchTab({ profile, authMember, T }) {
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
                 <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
               </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies(""); setCatchVisibility("private"); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
+              <button onClick={function() { setStep(0); setLogMode(null); setClubPhase("hero"); setPhoto(null); setPhotoB64(null); setFishPhotos([]); setActivePhotoIdx(0); setPhotoCompressNote(""); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies(""); setCatchVisibility("private"); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
                 Log Another Catch
               </button>
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
 
 // ─── LEARN TAB ────────────────────────────────────────────────────────────────
-function LearnTab({ T }) {
+function LearnTab({ T, setTab }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   if (sel !== null) {
@@ -3189,6 +3478,14 @@ function LearnTab({ T }) {
   }
   return (
     <div>
+      <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:12 }}>
+        <SecLabel text="More guides" T={T} />
+        <div style={{ display:"grid", gap:8 }}>
+          {setTab ? <button type="button" onClick={function() { setTab("fish"); }} style={{ textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.white, cursor:"pointer", fontSize:13 }}>🐟 Species guide</button> : null}
+          {setTab ? <button type="button" onClick={function() { setTab("spots"); }} style={{ textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.white, cursor:"pointer", fontSize:13 }}>📍 Spots & maps</button> : null}
+          {setTab ? <button type="button" onClick={function() { setTab("catalogue"); }} style={{ textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, color:th.white, cursor:"pointer", fontSize:13 }}>📚 Tackle catalogue</button> : null}
+        </div>
+      </Card>
       <SecLabel text="Fishing School — All Levels" T={T} />
       {LESSONS.map(function(l, i) {
         return (
@@ -3516,7 +3813,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
 }
 
 // ─── SCOUT TAB ────────────────────────────────────────────────────────────────
-function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
+function ScoutTab({ T, profile, setProfile, goMyPrivateSpots, authMember }) {
   var th = THEMES[T];
   var fileRef = useRef();
   var [section, setSection] = useState("near");
@@ -3527,17 +3824,47 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [gpsLoading, setGpsLoading] = useState(true);
   var [userPos, setUserPos] = useState({ lat:41.84, lng:-87.83 });
   var [history, setHistory] = useState(loadScoutHistory);
+  var [wx, setWx] = useState(null);
+  var [advisory, setAdvisory] = useState(function() { return loadCachedScoutCard(); });
+  var [advisoryLoading, setAdvisoryLoading] = useState(false);
+  var [waterClarity, setWaterClarity] = useState(loadWaterClarity);
+  var [showWhy, setShowWhy] = useState(false);
   var season = getSeason(new Date().getMonth());
+
+  function refreshScoutNow(lat, lng, weather) {
+    setAdvisoryLoading(true);
+    runScoutNow(lat, lng, SCOUT_SPOTS, weather, waterClarity).then(function(card) {
+      card.weather = weather;
+      setAdvisory(card);
+      saveCachedScoutCard(card);
+    }).catch(function() {}).finally(function() { setAdvisoryLoading(false); });
+  }
 
   useEffect(function() {
     setGpsLoading(true);
-    if (!navigator.geolocation) { setGpsLoading(false); return; }
+    var lat = 41.84, lng = -87.83;
+    function afterPos(la, ln) {
+      setUserPos({ lat:la, lng:ln });
+      setGpsLoading(false);
+      loadWeather(la, ln).then(function(w) {
+        setWx(w);
+        refreshScoutNow(la, ln, w);
+      }).catch(function() {
+        refreshScoutNow(la, ln, null);
+      });
+    }
+    if (!navigator.geolocation) { afterPos(lat, lng); return; }
     navigator.geolocation.getCurrentPosition(
-      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); },
-      function() { setGpsLoading(false); },
+      function(pos) { afterPos(pos.coords.latitude, pos.coords.longitude); },
+      function() { afterPos(lat, lng); },
       { timeout:8000, enableHighAccuracy:true }
     );
   }, []);
+
+  useEffect(function() {
+    if (!wx) return;
+    refreshScoutNow(userPos.lat, userPos.lng, wx);
+  }, [waterClarity]);
 
   var nearSpots = SCOUT_SPOTS.map(function(s) {
     return Object.assign({}, s, { distMi: haversineMi(userPos.lat, userPos.lng, s.lat, s.lng) });
@@ -3582,15 +3909,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   }
 
   function readImageFileScout(file) {
-    return new Promise(function(resolve, reject) {
-      var reader = new FileReader();
-      reader.onload = function(ev) {
-        var full = ev.target.result;
-        resolve({ full:full, b64:(full && full.split(",")[1]) || "", type:file.type || "image/jpeg" });
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    return compressImageFile(file, { maxEdge:1280, quality:0.82 });
   }
 
   function saveScoutToPrivateSpots() {
@@ -3617,8 +3936,72 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
 
   var confColor = scoutResult && scoutResult.confidence >= 70 ? th.green : scoutResult && scoutResult.confidence >= 50 ? th.gold : th.red;
 
+  var verdictColor = advisory && advisory.verdict === "good_window" ? th.green : advisory && advisory.verdict === "wait" ? th.orange : th.gold;
+
   return (
     <div>
+      {!authMember ? (
+        <Card T={T} borderColor={th.orange + "44"} style={{ marginTop:12 }}>
+          <div style={{ fontSize:12, color:th.orange }}>Riverside Fishing Club members only — sign in under Profile to use Scout Now.</div>
+        </Card>
+      ) : null}
+
+      {authMember ? (
+        <div style={{ marginTop:12 }}>
+          <button
+            type="button"
+            onClick={function() { refreshScoutNow(userPos.lat, userPos.lng, wx); }}
+            style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:12, padding:"16px 0", fontSize:17, fontWeight:800, cursor:"pointer", marginBottom:12 }}
+          >
+            {advisoryLoading ? "Scouting…" : "Scout Now"}
+          </button>
+
+          {advisory ? (
+            <Card T={T} borderColor={verdictColor + "66"}>
+              <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Riverside Fishing Club · {advisory.spotName}{advisory.spotDistMi != null ? " · " + advisory.spotDistMi.toFixed(1) + " mi" : ""}</div>
+              <div style={{ fontSize:20, color:verdictColor, fontWeight:800, marginBottom:8 }}>{advisory.verdictLabel}</div>
+              {advisory.biteScore ? (
+                <div style={{ fontSize:12, color:th.white, marginBottom:8 }}>Bite score {advisory.biteScore.score}/100 · {advisory.weatherSummary || ""}</div>
+              ) : null}
+              <div style={{ fontSize:12, color:th.muted, marginBottom:10 }}>Water: {getClarityLabel(advisory.waterClarity)} · {advisory.timePhase}</div>
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>Water clarity (club report)</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {getClarityOptions().map(function(c) {
+                    var on = waterClarity === c;
+                    return (
+                      <button key={c} type="button" onClick={function() { setWaterClarity(saveWaterClarity(c)); }} style={{ background:on ? th.green + "33" : "transparent", border:"1px solid " + (on ? th.green : th.border), borderRadius:16, padding:"5px 10px", color:on ? th.green : th.muted, fontSize:11, cursor:"pointer", fontWeight:on ? 700 : 400 }}>
+                        {getClarityLabel(c)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {(advisory.species || []).length ? (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+                  {advisory.species.map(function(sp, i) { return <Pill key={i} label={sp} color={th.green} />; })}
+                </div>
+              ) : null}
+              {advisory.lure ? (
+                <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, marginBottom:10 }}>
+                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{advisory.lure.type} · {advisory.lure.weight}</div>
+                  <div style={{ fontSize:12, color:th.gold, marginTop:4 }}>{advisory.lure.color}</div>
+                  <div style={{ fontSize:12, color:th.muted, marginTop:6, lineHeight:1.45 }}>{advisory.retrieval}</div>
+                </div>
+              ) : null}
+              <div style={{ fontSize:12, color:th.white, lineHeight:1.5, marginBottom:8 }}>{advisory.tactical}</div>
+              {advisory.usgs && advisory.usgs.label ? <div style={{ fontSize:11, color:th.blue, marginBottom:8 }}>USGS flow: {advisory.usgs.label}</div> : null}
+              <button type="button" onClick={function() { setShowWhy(!showWhy); }} style={{ background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, padding:0, textDecoration:"underline" }}>{showWhy ? "Hide why" : "Why this works"}</button>
+              {showWhy && advisory.why ? <div style={{ fontSize:12, color:th.muted, marginTop:8, lineHeight:1.55 }}>{advisory.why}</div> : null}
+            </Card>
+          ) : advisoryLoading ? (
+            <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Reading the river…</div></Card>
+          ) : (
+            <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Tap Scout Now for advice.</div></Card>
+          )}
+        </div>
+      ) : null}
+
       <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
         <OBtn label="Near Me" onClick={function() { setSection("near"); }} color={section === "near" ? th.green : th.muted} />
         <OBtn label="Identify Spot" onClick={function() { setSection("identify"); }} color={section === "identify" ? th.green : th.muted} />
@@ -3706,17 +4089,15 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
 
 // ─── NAV + APP ────────────────────────────────────────────────────────────────
 var NAV = [
-  {id:"home",emoji:"🏠",label:"Home"},
-  {id:"fish",emoji:"🐟",label:"Species"},
-  {id:"spots",emoji:"📍",label:"Spots"},
-  {id:"catalogue",emoji:"📚",label:"Tackle"},
-  {id:"catch",emoji:"📸",label:"Catch"},
   {id:"scout",emoji:"🔍",label:"Scout"},
+  {id:"club",emoji:"🏆",label:"Club"},
+  {id:"log",emoji:"➕",label:"Log", center:true},
   {id:"learn",emoji:"📖",label:"Learn"},
+  {id:"me",emoji:"👤",label:"Profile"},
 ];
 
 export default function App() {
-  const [tab, setTab] = useState("home");
+  const [tab, setTab] = useState("scout");
   const [theme, setTheme] = useState("dark");
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
   const [authUser, setAuthUser] = useState(null);
@@ -3741,6 +4122,10 @@ export default function App() {
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
 
   useEffect(function() {
+    installOutboxSync();
+  }, []);
+
+  useEffect(function() {
     return subscribeAuthState(function(user, member, errMsg) {
       setAuthUser(user);
       setAuthMember(member);
@@ -3763,12 +4148,7 @@ export default function App() {
         }));
       });
     }).catch(function() {});
-    mergeLocalCatchesToCloud(memberId, JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")).catch(function() {});
-    loadCatchesFromCloud(memberId).then(function(cloudCatches) {
-      if (cloudCatches && cloudCatches.length) {
-        try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
-      }
-    }).catch(function() {});
+    syncCatchesForMember(memberId).catch(function() {});
   }, [authUser ? authUser.uid : null, authMember ? authMember.id : null]);
 
   useEffect(function() {
@@ -3859,25 +4239,24 @@ export default function App() {
           <span style={{ fontSize:22 }}>🎣</span>
           <span style={{ fontSize:15, fontWeight:700, color:th.white, letterSpacing:0.3 }}>RFC Fishing</span>
         </div>
-        <button onClick={function() { setTab("me"); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:"6px 8px", borderRadius:20 }}>
-          <span style={{ fontSize:22 }}>👤</span>
-        </button>
       </div>
       <div style={{ padding:"0 14px" }}>
+        {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} authMember={authMember} />}
+        {tab==="club"      && <ClubTab authMember={authMember} T={theme} />}
+        {tab==="log"       && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} />}
+        {tab==="learn"     && <LearnTab T={theme} setTab={setTab} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
         {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
-        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} />}
-        {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
-        {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
+          var isCenter = n.center;
           return (
-            <button key={n.id} onClick={function() { setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
-              <span style={{ fontSize:16 }}>{n.emoji}</span>
+            <button key={n.id} onClick={function() { setTab(n.id); }} style={{ flex:1, padding:isCenter ? "4px 0 6px" : "9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
+              <span style={{ fontSize:isCenter ? 22 : 16, background:isCenter ? th.green : "transparent", color:isCenter ? "#000" : "inherit", borderRadius:isCenter ? 20 : 0, width:isCenter ? 36 : "auto", height:isCenter ? 36 : "auto", display:"flex", alignItems:"center", justifyContent:"center" }}>{n.emoji}</span>
               <span style={{ fontSize:9, color:tab===n.id ? th.green : th.muted, fontFamily:"monospace", letterSpacing:0.2 }}>{n.label}</span>
             </button>
           );

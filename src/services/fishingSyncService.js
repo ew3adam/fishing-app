@@ -88,6 +88,21 @@ export async function loadCatchesFromCloud(memberId) {
   });
 }
 
+/** Sign-in sync: merge local catches up, then load cloud as source of truth. */
+export async function syncCatchesForMember(memberId) {
+  if (!memberId) return [];
+  var local = [];
+  try {
+    local = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]");
+  } catch (e) { local = []; }
+  await mergeLocalCatchesToCloud(memberId, local);
+  var cloud = await loadCatchesFromCloud(memberId);
+  if (cloud.length) {
+    try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloud)); } catch (e) {}
+  }
+  return cloud;
+}
+
 export async function saveCatchToCloud(memberId, catchEntry) {
   if (!memberId || !catchEntry) return;
   var id = String(catchEntry.id || Date.now());
