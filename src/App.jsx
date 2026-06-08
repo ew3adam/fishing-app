@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubFeedCatches } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud } from "./services/fishingSyncService.js";
+import ClubFeedList from "./components/ClubFeedList.jsx";
+import { buildSpotDisplayName, sanitizeSpotForForm } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
@@ -1076,8 +1078,9 @@ function Pill({ label, color }) {
 // ─── HOME TAB (BassForecast-style bite intel) ─────────────────────────────────
 var HOME_SPECIES_PICKS = ["All Species", "Bass (Largemouth)", "Crappie", "Channel Catfish", "Coho Salmon", "Walleye", "Yellow Perch"];
 
-function HomeTab({ profile, T, setTab }) {
+function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }) {
   const th = THEMES[T];
+  const section = homeSection || "forecast";
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1139,6 +1142,15 @@ function HomeTab({ profile, T, setTab }) {
 
   return (
     <div style={{ paddingBottom:8 }}>
+      <div style={{ display:"flex", gap:8, margin:"12px 0 10px" }}>
+        <OBtn label="Forecast" onClick={function() { setHomeSection && setHomeSection("forecast"); }} color={section === "forecast" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
+        <OBtn label="Club Feed" onClick={function() { setHomeSection && setHomeSection("feed"); }} color={section === "feed" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
+      </div>
+
+      {section === "feed" ? (
+        <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
+      ) : (
+      <>
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
         <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
@@ -1312,6 +1324,8 @@ function HomeTab({ profile, T, setTab }) {
           );
         })}
       </Card>
+      </>
+      )}
     </div>
   );
 }
@@ -2387,9 +2401,9 @@ function CatalogueTab({ T }) {
 }
 
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
-function CatchTab({ profile, authMember, T }) {
+function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
   const th = THEMES[T];
-  const [view, setView] = useState("feed");
+  const [showMyLogs, setShowMyLogs] = useState(false);
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
@@ -2425,19 +2439,11 @@ function CatchTab({ profile, authMember, T }) {
   const [showAdvancedMeasure, setShowAdvancedMeasure] = useState(false);
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
-  const [clubFeed, setClubFeed] = useState([]);
-  const [clubFeedLoading, setClubFeedLoading] = useState(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
-
-  useEffect(function() {
-    if (!authMember) return;
-    setClubFeedLoading(true);
-    loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() { setClubFeed([]); }).finally(function() { setClubFeedLoading(false); });
-  }, [authMember ? authMember.id : null]);
 
   function dismissCatchHint() {
     setShowCatchHint(false);
@@ -2472,9 +2478,10 @@ function CatchTab({ profile, authMember, T }) {
   function applyPhotoMetadata(exif) {
     if (!exif) return;
     var resolved = resolveSpotFromExif(exif);
-    if (resolved.spot) {
-      setF("spot", resolved.spot);
-      setSpotMetaSource(resolved.source);
+    var safe = sanitizeSpotForForm(resolved.spot, resolved.source);
+    if (safe.spot) {
+      setF("spot", safe.spot);
+      setSpotMetaSource(safe.source);
     }
     var dt = exif.DateTimeOriginal || exif.CreateDate;
     if (dt) setF("date", new Date(dt).toLocaleDateString());
@@ -2646,14 +2653,26 @@ function CatchTab({ profile, authMember, T }) {
 
   function submitCatch() {
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var entry = { id:Date.now(), user:(profile && profile.name) || "Angler", species:form.species, length:form.length, estWeight:estimateWeightLbs(form.species, form.length), bait:form.bait, rod:form.rod, spot:form.spot, notes:form.notes, date:form.date, photo:photo, visibility:vis };
+    var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
+    var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    var entry = {
+      id:Date.now(),
+      user:(profile && profile.name) || "Angler",
+      species:form.species,
+      length:form.length,
+      estWeight:estimateWeightLbs(form.species, form.length),
+      bait:form.bait,
+      rod:form.rod,
+      spot:form.spot,
+      spotDisplayName:spotDisplayName,
+      notes:form.notes,
+      date:form.date,
+      photo:photo,
+      visibility:vis,
+    };
     setCatches(function(c) { return [entry].concat(c); });
     if (authMember && authMember.id) {
-      saveCatchToCloud(authMember.id, entry).then(function() {
-        if (vis === "club") {
-          loadClubFeedCatches().then(function(rows) { setClubFeed(rows || []); }).catch(function() {});
-        }
-      }).catch(function() {});
+      saveCatchToCloud(authMember.id, entry).catch(function() {});
     }
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
@@ -2700,50 +2719,29 @@ function CatchTab({ profile, authMember, T }) {
 
   return (
     <div>
-      <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
-        <OBtn label="Community Feed" onClick={function() { setView("feed"); }} color={view==="feed" ? th.green : th.muted} />
-        <OBtn label="Log a Catch" onClick={function() { setView("log"); setStep(0); }} color={view==="log" ? th.green : th.muted} />
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", margin:"12px 0 8px", gap:8 }}>
+        <div style={{ fontSize:16, color:th.white, fontWeight:700 }}>Log a Catch</div>
+        {onOpenClubFeed ? (
+          <button type="button" onClick={onOpenClubFeed} style={{ background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, fontWeight:700, padding:0, textDecoration:"underline" }}>
+            View club feed →
+          </button>
+        ) : null}
       </div>
-
-      {view === "feed" && (
-        <div>
-          <SecLabel text="Club catch feed" T={T} />
-          {clubFeedLoading ? <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Loading club catches…</div> : null}
-          {!authMember ? <Card T={T}><div style={{ fontSize:12, color:th.muted }}>Sign in to see club member catches. Local catches below.</div></Card> : null}
-          {clubFeed.map(function(c, i) {
+      {catches.length ? (
+        <Card T={T} borderColor={th.blue + "33"} style={{ marginBottom:10 }}>
+          <button type="button" onClick={function() { setShowMyLogs(function(v) { return !v; }); }} style={{ width:"100%", background:"transparent", border:"none", color:th.white, cursor:"pointer", textAlign:"left", fontSize:13, fontWeight:700, padding:0 }}>
+            My catches ({catches.length}) {showMyLogs ? "▾" : "▸"}
+          </button>
+          {showMyLogs ? catches.slice(0, 8).map(function(c, i) {
             return (
-              <Card key={"club_" + i} T={T} borderColor={th.gold + "44"}>
-                <div style={{ fontSize:10, color:th.gold, marginBottom:4 }}>{c.memberName || "Member"} · shared with club</div>
-                {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:8, maxHeight:140, objectFit:"cover" }} /> : null}
-                <div style={{ fontWeight:700, color:th.white }}>{c.species}</div>
-                <div style={{ fontSize:12, color:th.muted }}>{c.length} · {c.bait} · {c.spot}</div>
-              </Card>
+              <div key={i} style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8 }}>
+                <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+              </div>
             );
-          })}
-          <SecLabel text="Your catches (this device)" T={T} />
-          {catches.map(function(c, i) {
-            return (
-              <Card key={i} T={T}>
-                {c.photo ? <img src={c.photo} alt="catch" style={{ width:"100%", borderRadius:8, marginBottom:10, maxHeight:160, objectFit:"cover" }} /> : null}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{c.species}</div>
-                    <div style={{ fontSize:12, color:th.green }}>{c.length}{c.estWeight ? " · ~" + c.estWeight : ""}</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:11, color:th.muted }}>{c.user}</div>
-                    <div style={{ fontSize:10, color:th.muted, fontFamily:"monospace" }}>{c.date}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{c.bait} · {c.spot}</div>
-                {c.notes ? <div style={{ fontSize:12, color:th.white, marginTop:4, fontStyle:"italic" }}>"{c.notes}"</div> : null}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {view === "log" && (
+          }) : null}
+        </Card>
+      ) : null}
         <div>
           {showCatchHint && step === 0 ? (
             <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
@@ -3145,6 +3143,11 @@ function CatchTab({ profile, authMember, T }) {
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:6 }}>Catch Posted!</div>
               {form.species ? <div style={{ fontSize:14, color:th.green, fontWeight:600, marginBottom:4 }}>{form.species} · {form.length}{estWeightLabel ? " · ~" + estWeightLabel : ""}</div> : null}
               <div style={{ fontSize:13, color:th.muted, marginBottom:20 }}>{catchVisibility === "club" ? "Your catch is on the club feed for signed-in members." : "Saved privately on this device and your account."}</div>
+              {catchVisibility === "club" && onOpenClubFeed ? (
+                <button type="button" onClick={onOpenClubFeed} style={{ width:"100%", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.gold, fontWeight:700, fontSize:13, marginBottom:12 }}>
+                  View on club feed →
+                </button>
+              ) : null}
               <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:10, padding:16, marginBottom:16, textAlign:"left" }}>
                 <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Share with Riverside Fishing Club?</div>
                 <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
@@ -3156,7 +3159,6 @@ function CatchTab({ profile, authMember, T }) {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
@@ -3717,6 +3719,7 @@ var NAV = [
 
 export default function App() {
   const [tab, setTab] = useState("home");
+  const [homeSection, setHomeSection] = useState("forecast");
   const [theme, setTheme] = useState("dark");
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
   const [authUser, setAuthUser] = useState(null);
@@ -3739,6 +3742,10 @@ export default function App() {
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
+  var openClubFeed = useCallback(function() {
+    setHomeSection("feed");
+    setTab("home");
+  }, []);
 
   useEffect(function() {
     return subscribeAuthState(function(user, member, errMsg) {
@@ -3864,11 +3871,11 @@ export default function App() {
         </button>
       </div>
       <div style={{ padding:"0 14px" }}>
-        {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} />}
+        {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
-        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} />}
+        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
@@ -3876,7 +3883,7 @@ export default function App() {
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
           return (
-            <button key={n.id} onClick={function() { setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
+            <button key={n.id} onClick={function() { if (n.id === "home") setHomeSection("forecast"); setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
               <span style={{ fontSize:16 }}>{n.emoji}</span>
               <span style={{ fontSize:9, color:tab===n.id ? th.green : th.muted, fontFamily:"monospace", letterSpacing:0.2 }}>{n.label}</span>
             </button>
