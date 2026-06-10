@@ -3,7 +3,7 @@
  * Path: members/{memberId}/fishingProfile/main
  *       members/{memberId}/fishingCatches/{catchId}
  */
-import { doc, getDoc, setDoc, collection, getDocs, writeBatch } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, writeBatch, updateDoc, increment } from "firebase/firestore";
 import { getFirebaseDb } from "../lib/firebase.js";
 import { listActiveMembers } from "./memberService.js";
 
@@ -93,6 +93,15 @@ export async function saveCatchToCloud(memberId, catchEntry) {
   var id = String(catchEntry.id || Date.now());
   var ref = doc(catchesCol(memberId), id);
   await setDoc(ref, Object.assign({}, catchEntry, { syncedAt: new Date().toISOString() }), { merge: true });
+}
+
+/** Increment or decrement likeCount on a catch doc (non-fatal — silently swallowed if rules block it). */
+export async function updateCatchLike(catchOwnerId, catchId, delta) {
+  if (!catchOwnerId || !catchId || delta === 0) return;
+  try {
+    var ref = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
+    await updateDoc(ref, { likeCount: increment(delta) });
+  } catch (e) { /* non-fatal — Firestore rule may block; local like state still works */ }
 }
 
 /** Club-wide feed — catches with visibility club or public_feed from all active members. */

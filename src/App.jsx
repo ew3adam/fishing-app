@@ -1139,6 +1139,12 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
   var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
+  var hour = new Date().getHours();
+  var timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  var nextWindow = solunar && solunar[0];
+  var windowLine = nextWindow
+    ? (nearSpot ? "Best window at " + nearSpot.name + " — " + nextWindow.start : "Best feeding window — " + nextWindow.start)
+    : null;
 
   return (
     <div style={{ paddingBottom:8 }}>
@@ -1151,6 +1157,15 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
       ) : (
       <>
+      {displayName !== "Angler" && !loading && (
+        <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:"12px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:12, animation:"fadeInUp 0.25s ease-out both" }}>
+          <div style={{ fontSize:26, lineHeight:1 }}>{hour < 12 ? "🌅" : hour < 17 ? "☀️" : "🌙"}</div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:15, color:th.white, fontWeight:700, lineHeight:1.3 }}>Good {timeLabel}, {displayName}</div>
+            {windowLine ? <div style={{ fontSize:12, color:th.green, marginTop:2, lineHeight:1.4 }}>{windowLine}</div> : null}
+          </div>
+        </div>
+      )}
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
         <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
@@ -2400,6 +2415,65 @@ function CatalogueTab({ T }) {
   );
 }
 
+// ─── TROPHY SCREEN ────────────────────────────────────────────────────────────
+function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches, onOpenClubFeed, rfcLink, onReset }) {
+  const th = THEMES[T];
+  var isPersonalBest = false;
+  if (form.species && form.length) {
+    var myInches = parseFloat(form.length);
+    if (!isNaN(myInches)) {
+      var prevBest = 0;
+      catches.forEach(function(c) {
+        if (c.species === form.species) {
+          var n = parseFloat(c.length);
+          if (!isNaN(n) && n > prevBest) prevBest = n;
+        }
+      });
+      isPersonalBest = myInches > prevBest && prevBest > 0;
+    }
+  }
+  var confettiColors = ["#6fcf6f","#d4a843","#5a9fd4","#e05050","#4ab8a0","#e09030"];
+  var particles = Array.from({ length: 18 }, function(_, i) {
+    return { left: (8 + i * 5) % 92, delay: (i * 0.08).toFixed(2), color: confettiColors[i % confettiColors.length], size: 5 + (i % 4) * 2 };
+  });
+  var speciesEmoji = (SPECIES.find(function(s) { return s.name === form.species; }) || {}).emoji || "🐟";
+  return (
+    <div style={{ textAlign:"center", padding:"16px 0", animation:"scaleIn 0.3s ease-out both", position:"relative", overflow:"hidden" }}>
+      <div style={{ position:"absolute", top:0, left:0, width:"100%", pointerEvents:"none" }} aria-hidden="true">
+        {particles.map(function(p, i) {
+          return (
+            <div key={i} style={{ position:"absolute", left:p.left + "%", top:0, width:p.size, height:p.size, borderRadius:i % 3 === 0 ? "50%" : 2, background:p.color, animation:"confettiFall 1.4s ease-in " + p.delay + "s both" }} />
+          );
+        })}
+      </div>
+      <div style={{ fontSize:72, marginBottom:8, display:"inline-block", animation:"fishBounce 0.6s ease-out both 0.1s" }}>{speciesEmoji}</div>
+      {isPersonalBest && (
+        <div style={{ display:"inline-block", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:700, color:th.gold, marginBottom:8, letterSpacing:0.5, marginLeft:8 }}>★ PERSONAL BEST</div>
+      )}
+      <div style={{ fontSize:22, color:th.white, fontWeight:800, marginBottom:4, lineHeight:1.2 }}>{form.species || "Fish logged!"}</div>
+      <div style={{ fontSize:16, color:th.green, fontWeight:700, marginBottom:2 }}>
+        {[form.length, estWeightLabel ? "~" + estWeightLabel : null].filter(Boolean).join(" · ")}
+      </div>
+      {form.spot ? <div style={{ fontSize:12, color:th.muted, marginBottom:16 }}>📍 {form.spot}</div> : <div style={{ marginBottom:16 }} />}
+      {photo ? <img src={photo} alt="catch" style={{ width:"100%", borderRadius:12, marginBottom:16, maxHeight:220, objectFit:"cover", border:"2px solid " + th.green + "44" }} /> : null}
+      {catchVisibility === "club" && onOpenClubFeed ? (
+        <button type="button" onClick={onOpenClubFeed} style={{ width:"100%", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:10, padding:"11px 0", cursor:"pointer", color:th.gold, fontWeight:700, fontSize:14, marginBottom:10 }}>
+          See it on the club feed →
+        </button>
+      ) : null}
+      {rfcLink ? (
+        <div style={{ background:th.green + "14", border:"1px solid " + th.green + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
+          <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:4 }}>Email RFC members?</div>
+          <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"10px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:13 }}>Open Email to RFC</a>
+        </div>
+      ) : null}
+      <button onClick={onReset} style={{ background:"transparent", border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 24px", cursor:"pointer", fontSize:13 }}>
+        Log another catch
+      </button>
+    </div>
+  );
+}
+
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
 function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
   const th = THEMES[T];
@@ -2412,10 +2486,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
   const draggingMarker = useRef(null);
   const [catches, setCatches] = useState(function() {
     try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
-    return [
-      { id:1, user:"Mike R.", species:"Largemouth Bass", length:"14 inches", bait:"Texas Rig green pumpkin", spot:"Thatcher Woods", date:"Apr 24", notes:"Caught at sunrise near the fallen oak" },
-      { id:2, user:"Sandra L.", species:"Rainbow Trout", length:"11 inches", bait:"PowerBait salmon egg", spot:"Sag Quarry East", date:"Apr 22", notes:"Right after stocking near aerator" },
-    ];
+    return [];
   });
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
@@ -2727,7 +2798,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
           </button>
         ) : null}
       </div>
-      {catches.length ? (
+      {catches.length > 0 ? (
         <Card T={T} borderColor={th.blue + "33"} style={{ marginBottom:10 }}>
           <button type="button" onClick={function() { setShowMyLogs(function(v) { return !v; }); }} style={{ width:"100%", background:"transparent", border:"none", color:th.white, cursor:"pointer", textAlign:"left", fontSize:13, fontWeight:700, padding:0 }}>
             My catches ({catches.length}) {showMyLogs ? "▾" : "▸"}
@@ -2741,7 +2812,15 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
             );
           }) : null}
         </Card>
-      ) : null}
+      ) : (
+        <div style={{ textAlign:"center", padding:"28px 0 16px", animation:"fadeInUp 0.25s ease-out both" }}>
+          <div style={{ fontSize:44, marginBottom:10 }}>🎣</div>
+          <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>No catches yet</div>
+          <div style={{ fontSize:13, color:th.muted, lineHeight:1.55, marginBottom:0 }}>
+            Add a photo for AI species ID and length measurement.
+          </div>
+        </div>
+      )}
         <div>
           {showCatchHint && step === 0 ? (
             <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
@@ -3138,25 +3217,22 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
           )}
 
           {step === 6 && (
-            <div style={{ textAlign:"center", padding:"20px 0" }}>
-              <div style={{ fontSize:48, marginBottom:12 }}>🎉</div>
-              <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:6 }}>Catch Posted!</div>
-              {form.species ? <div style={{ fontSize:14, color:th.green, fontWeight:600, marginBottom:4 }}>{form.species} · {form.length}{estWeightLabel ? " · ~" + estWeightLabel : ""}</div> : null}
-              <div style={{ fontSize:13, color:th.muted, marginBottom:20 }}>{catchVisibility === "club" ? "Your catch is on the club feed for signed-in members." : "Saved privately on this device and your account."}</div>
-              {catchVisibility === "club" && onOpenClubFeed ? (
-                <button type="button" onClick={onOpenClubFeed} style={{ width:"100%", background:th.gold + "22", border:"1px solid " + th.gold, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.gold, fontWeight:700, fontSize:13, marginBottom:12 }}>
-                  View on club feed →
-                </button>
-              ) : null}
-              <div style={{ background:th.green + "18", border:"1px solid " + th.green + "44", borderRadius:10, padding:16, marginBottom:16, textAlign:"left" }}>
-                <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:6 }}>Share with Riverside Fishing Club?</div>
-                <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Opens your email app pre-filled and ready to send.</div>
-                <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"11px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:14 }}>Open Email to RFC</a>
-              </div>
-              <button onClick={function() { setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies(""); setCatchVisibility("private"); setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() }); }} style={{ background:"transparent", border:"1px solid " + th.green, color:th.green, borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:13 }}>
-                Log Another Catch
-              </button>
-            </div>
+            <TrophyScreen
+              T={T}
+              form={form}
+              photo={photo}
+              estWeightLabel={estWeightLabel}
+              catchVisibility={catchVisibility}
+              catches={catches}
+              onOpenClubFeed={onOpenClubFeed}
+              rfcLink={rfcLink}
+              onReset={function() {
+                setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null);
+                setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies("");
+                setCatchVisibility("private");
+                setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
+              }}
+            />
           )}
         </div>
     </div>
@@ -3860,7 +3936,7 @@ export default function App() {
   }, [profile, authMember ? authMember.id : null]);
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", fontFamily:"system-ui,-apple-system,sans-serif", color:th.white, paddingBottom:80, paddingTop:48 }}>
+    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:22 }}>🎣</span>
@@ -3870,7 +3946,7 @@ export default function App() {
           <span style={{ fontSize:22 }}>👤</span>
         </button>
       </div>
-      <div style={{ padding:"0 14px" }}>
+      <div key={tab} className="tab-content" style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
