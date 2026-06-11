@@ -1,16 +1,14 @@
 ---
-lastSessionAt: "2026-06-11T18:30:00-05:00"
+lastSessionAt: "2026-06-11T19:00:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-- Platform PRD, workspace file, PII scanner (passes `npm run scan:pii`).
-- Session rules + this log — short recap on return; say **save state** to update.
-- App on GitHub Pages. Sign-in only (password set in Firebase Console, not in app).
-- Session rules: **save state** = update log + scan + commit + push.
-- Pushed to GitHub (`4ff6853`). PII scan clean.
+- All synced to GitHub (`a714326`). Working tree clean.
+- PII scan + pre-commit active. **save state** = log + scan + commit + push.
+- App on GitHub Pages. Sign-in only (Firebase Auth account required first).
 
 ## Next
 
