@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { loadClubFeedCatches, updateCatchLike } from "../services/fishingSyncService.js";
+import { resolveCatchPhotoUrl } from "../services/catchPhotoStorage.js";
 import { formatFeedSpotName } from "../utils/feedSpotPrivacy.js";
 
 var THEMES = {
@@ -26,9 +27,11 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
   var [pullY, setPullY] = useState(0);
   var [likeAnim, setLikeAnim] = useState({});
   var touchStartY = useRef(0);
+  // Local: which posts you liked. Server: likeCount on catch doc (synced when rules allow).
   var [likes, setLikes] = useState(function() {
     try { return JSON.parse(localStorage.getItem("rfc_feed_likes_v1") || "{}"); } catch (e) { return {}; }
   });
+  var [likeError, setLikeError] = useState("");
 
   function doLoad() {
     return loadClubFeedCatches()
@@ -76,7 +79,23 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
       setLikeAnim(function(prev) { var n = Object.assign({}, prev); delete n[postId]; return n; });
     }, 350);
 
-    updateCatchLike(post.memberId, post.id, wasLiked ? -1 : 1);
+    setLikeError("");
+    updateCatchLike(post.memberId, post.id, wasLiked ? -1 : 1).catch(function() {
+      setLikeError("Like saved on this device only — deploy firebase rules for club-wide counts.");
+      var revert = Object.assign({}, nextLikes);
+      if (wasLiked) revert[postId] = true;
+      else delete revert[postId];
+      setLikes(revert);
+      try { localStorage.setItem("rfc_feed_likes_v1", JSON.stringify(revert)); } catch (e) {}
+      setPosts(function(prev) {
+        return prev.map(function(p) {
+          var pid = String(p.id || p.memberId + "_" + p.date);
+          if (pid !== postId) return p;
+          var delta = wasLiked ? 1 : -1;
+          return Object.assign({}, p, { likeCount: Math.max(0, (p.likeCount || 0) + delta) });
+        });
+      });
+    });
 
     setPosts(function(prev) {
       return prev.map(function(p) {
@@ -126,6 +145,10 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
         </div>
       )}
 
+      {likeError ? (
+        <div style={{ fontSize:11, color:"#e09030", marginBottom:10, lineHeight:1.45 }}>{likeError}</div>
+      ) : null}
+
       {posts.map(function(c) {
         var postId = String(c.id || c.memberId + "_" + c.date);
         var liked = !!likes[postId];
@@ -146,8 +169,8 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
                 <div style={{ fontSize:11, color:th.muted }}>{c.date || "Recent"}</div>
               </div>
             </div>
-            {c.photo ? (
-              <img src={c.photo} alt={c.species || "catch"} style={{ width:"100%", maxHeight:420, objectFit:"cover", display:"block", background:"#000" }} />
+            {resolveCatchPhotoUrl(c) ? (
+              <img src={resolveCatchPhotoUrl(c)} alt={c.species || "catch"} style={{ width:"100%", maxHeight:420, objectFit:"cover", display:"block", background:"#000" }} />
             ) : null}
             <div style={{ padding:"10px 12px 12px" }}>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>

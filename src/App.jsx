@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots } from "./services/fishingSyncService.js";
+import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
+import SaveToast from "./components/SaveToast.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
@@ -1475,9 +1477,11 @@ function SpeciesTab({ T, profile, setTab }) {
 }
 
 // ─── SPOTS TAB ────────────────────────────────────────────────────────────────
-function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster }) {
+function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster, authMember }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
+  const [clubSharedSpots, setClubSharedSpots] = useState([]);
+  const [clubSpotsLoading, setClubSpotsLoading] = useState(false);
   const [selectedLake, setSelectedLake] = useState(null);
   const [lakeTab, setLakeTab] = useState("overview");
   const [privView, setPrivView] = useState("main");
@@ -1498,6 +1502,22 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pickBackTo, setPickBackTo] = useState("my");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
+
+  useEffect(function() {
+    if (privView !== "club") return;
+    if (!authMember) {
+      setClubSharedSpots([]);
+      return;
+    }
+    setClubSpotsLoading(true);
+    loadClubSharedSpots().then(function(rows) {
+      setClubSharedSpots(rows || []);
+    }).catch(function() {
+      setClubSharedSpots([]);
+    }).finally(function() {
+      setClubSpotsLoading(false);
+    });
+  }, [privView, authMember ? authMember.id : null]);
 
   useEffect(function() {
     if (spotsOpenSection === "my_spots") {
@@ -2060,36 +2080,28 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   }
 
   if (privView === "club") {
-    var myShared = mySpots.filter(function(s) { return s.shareClub; });
-    var credit = memberCreditFromProfile(profile);
     return (
       <div>
         <OBtn label="← Back to spots" onClick={function() { setPrivView("main"); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:8 }}>Club shared map</div>
-        <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Sample pins + your shared saves.</div>
-        {MOCK_CLUB_SHARED_SPOTS.map(function(s) {
-          var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=14&size=400x160&markers=" + s.lat + "," + s.lng + ",blue-pushpin";
-          return (
-            <Card key={s.id} T={T}>
-              <div style={{ fontSize:10, color:th.gold, marginBottom:4 }}>Spotted by {s.credit}</div>
-              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
-              <img src={im} alt="" style={{ width:"100%", borderRadius:8 }} />
-              <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
-            </Card>
-          );
-        })}
-        {myShared.map(function(s) {
+        <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Pins shared with the club by all members.</div>
+        {!authMember ? (
+          <Card T={T}><div style={{ fontSize:13, color:th.muted, lineHeight:1.5 }}>Sign in to see spots other members shared with the club.</div></Card>
+        ) : clubSpotsLoading ? (
+          <div style={{ fontSize:13, color:th.muted, padding:"16px 0" }}>Loading club spots…</div>
+        ) : clubSharedSpots.length === 0 ? (
+          <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No shared pins yet. Save a spot and choose Share with club.</div></Card>
+        ) : clubSharedSpots.map(function(s) {
           var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
-            <Card key={s.id} T={T} borderColor={th.green + "44"}>
-              <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {credit}</div>
+            <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
+              <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
               <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
               <img src={im} alt="" style={{ width:"100%", borderRadius:8 }} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
           );
         })}
-        {myShared.length === 0 && MOCK_CLUB_SHARED_SPOTS.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No shared pins yet.</div></Card> : null}
       </div>
     );
   }
@@ -2475,7 +2487,7 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
 }
 
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
-function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
+function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const th = THEMES[T];
   const [showMyLogs, setShowMyLogs] = useState(false);
   const fileRef = useRef();
@@ -2510,6 +2522,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
   const [showAdvancedMeasure, setShowAdvancedMeasure] = useState(false);
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
+  const [cloudSaving, setCloudSaving] = useState(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
@@ -2740,15 +2753,38 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
       date:form.date,
       photo:photo,
       visibility:vis,
+      likeCount:0,
     };
     setCatches(function(c) { return [entry].concat(c); });
-    if (authMember && authMember.id) {
-      saveCatchToCloud(authMember.id, entry).catch(function() {});
-    }
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
-    setStep(6);
+    function finishStep(msg, type) {
+      if (onSaveToast && msg) onSaveToast(msg, type);
+      setStep(6);
+    }
+    if (authMember && authMember.id) {
+      setCloudSaving(true);
+      saveCatchToCloud(authMember.id, entry).then(function(result) {
+        if (result && result.photoUrl) {
+          setCatches(function(list) {
+            return list.map(function(c) {
+              if (String(c.id) === String(entry.id)) {
+                return Object.assign({}, c, { photoUrl: result.photoUrl });
+              }
+              return c;
+            });
+          });
+        }
+        finishStep(vis === "club" ? "Saved to cloud and shared with club." : "Saved to cloud.", "success");
+      }).catch(function(err) {
+        finishStep("Saved on this device — cloud sync failed. " + (err && err.message ? err.message : ""), "error");
+      }).finally(function() {
+        setCloudSaving(false);
+      });
+    } else {
+      finishStep("Saved on this device only. Sign in to back up to RFC cloud.", "info");
+    }
   }
 
   var gear = (profile && profile.gear) || [];
@@ -3211,7 +3247,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed }) {
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
               </Card>
-              <button onClick={submitCatch} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginBottom:8 }}>{catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"}</button>
+              <button onClick={submitCatch} disabled={cloudSaving} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:cloudSaving ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:cloudSaving ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)")}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
@@ -3297,11 +3333,16 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   const [signInPassword, setSignInPassword] = useState("");
   const [signInBusy, setSignInBusy] = useState(false);
   const [signInLocalError, setSignInLocalError] = useState("");
+  const [rosterHealth, setRosterHealth] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
 
   useEffect(function() {
     setForm(normalizeProfile(profile));
   }, [profile]);
+
+  useEffect(function() {
+    checkRosterHealth().then(setRosterHealth);
+  }, [authUser ? authUser.uid : null]);
 
   useEffect(function() {
     if (authMember && authMember.email) setSignInEmail(authMember.email);
@@ -3405,6 +3446,14 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
           </div>
         ) : (
           <div>
+            {rosterHealth ? (
+              <div style={{ fontSize:11, color:rosterHealth.ok ? th.green : th.orange, marginBottom:10, lineHeight:1.5 }}>
+                {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
+                {rosterHealth.error ? " (" + rosterHealth.error + ")" : ""}
+              </div>
+            ) : (
+              <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Checking roster connection…</div>
+            )}
             <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Only emails on the club roster can sign in. Data on this phone alone does not appear in a desktop browser until you sign in.</div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
@@ -3813,8 +3862,16 @@ export default function App() {
     if (!n.memberId) n.memberId = "mem_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
     return n;
   });
+  const [toast, setToast] = useState(null);
   var th = THEMES[theme];
   var cloudSaveTimer = useRef(null);
+  var toastTimer = useRef(null);
+
+  var showToast = useCallback(function(message, type) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message: message, type: type || "success" });
+    toastTimer.current = setTimeout(function() { setToast(null); }, 4500);
+  }, []);
 
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
@@ -3928,7 +3985,13 @@ export default function App() {
     if (!authMember || !authMember.id) return;
     if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(function() {
-      syncLocalProfileToCloud(authMember.id, profile).catch(function() {});
+      syncLocalProfileToCloud(authMember.id, profile).then(function() {
+        setProfile(function(p) {
+          return Object.assign({}, p, { cloudSyncedAt: new Date().toISOString() });
+        });
+      }).catch(function(err) {
+        showToast("Spots & profile could not sync: " + (err && err.message ? err.message : "unknown error"), "error");
+      });
     }, 1500);
     return function() {
       if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
@@ -3937,6 +4000,7 @@ export default function App() {
 
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
+      <SaveToast toast={toast} />
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:22 }}>🎣</span>
@@ -3949,9 +4013,9 @@ export default function App() {
       <div key={tab} className="tab-content" style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
-        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} />}
+        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} authMember={authMember} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
-        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} />}
+        {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
         {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}

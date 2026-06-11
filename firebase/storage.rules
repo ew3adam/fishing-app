@@ -1,0 +1,22 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCatchOwner(memberId) {
+      return isSignedIn()
+        && firestore.get(/databases/(default)/documents/members/$(memberId)).data.authUid == request.auth.uid;
+    }
+
+    // Catch photos: members/{memberId}/catches/{catchId}/photo.jpg
+    match /members/{memberId}/catches/{catchId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isCatchOwner(memberId)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

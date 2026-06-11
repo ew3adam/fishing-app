@@ -3,9 +3,10 @@
  * Path: members/{memberId}/fishingProfile/main
  *       members/{memberId}/fishingCatches/{catchId}
  */
-import { doc, getDoc, setDoc, collection, getDocs, writeBatch, updateDoc, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment } from "firebase/firestore";
 import { getFirebaseDb } from "../lib/firebase.js";
 import { listActiveMembers } from "./memberService.js";
+import { uploadCatchPhoto, stripPhotoForFirestore, isDataUrlImage } from "./catchPhotoStorage.js";
 
 function profileRef(memberId) {
   return doc(getFirebaseDb(), "members", memberId, "fishingProfile", "main");
@@ -15,7 +16,7 @@ function catchesCol(memberId) {
   return collection(getFirebaseDb(), "members", memberId, "fishingCatches");
 }
 
-/** Fields synced to cloud (excludes huge blobs if needed later). */
+/** Fields synced to cloud (excludes huge blobs). */
 function pickSyncProfile(profile) {
   var p = profile || {};
   return {
@@ -37,7 +38,6 @@ export async function loadFishingProfileFromCloud(memberId, localProfile) {
   }
   var cloud = snap.data() || {};
   var local = localProfile || {};
-  // Cloud wins for synced fields when present; keep local name/email from member record
   var merged = Object.assign({}, local, {
     level: cloud.level || local.level,
     favSpecies: cloud.favSpecies || local.favSpecies,
@@ -56,24 +56,35 @@ export async function saveFishingProfileToCloud(memberId, profile) {
   await setDoc(profileRef(memberId), pickSyncProfile(profile), { merge: true });
 }
 
+/** Upload photo if needed, then write catch doc without base64. */
+async function prepareCatchDoc(memberId, catchEntry) {
+  var id = String(catchEntry.id || Date.now());
+  var photoUrl = catchEntry.photoUrl || null;
+  if (!photoUrl && isDataUrlImage(catchEntry.photo)) {
+    photoUrl = await uploadCatchPhoto(memberId, id, catchEntry.photo);
+  }
+  var docData = stripPhotoForFirestore(catchEntry);
+  if (photoUrl) {
+    docData.photoUrl = photoUrl;
+  }
+  if (docData.likeCount == null) {
+    docData.likeCount = 0;
+  }
+  return { id: id, data: docData, photoUrl: photoUrl };
+}
+
 /** One-time merge: upload local catches not yet in cloud. */
 export async function mergeLocalCatchesToCloud(memberId, localCatches) {
   if (!memberId || !Array.isArray(localCatches) || !localCatches.length) return;
-  var col = catchesCol(memberId);
-  var existing = await getDocs(col);
+  var existing = await getDocs(catchesCol(memberId));
   var existingIds = {};
   existing.docs.forEach(function(d) { existingIds[d.id] = true; });
-  var batch = writeBatch(getFirebaseDb());
-  var ops = 0;
-  localCatches.forEach(function(c) {
+  var i;
+  for (i = 0; i < localCatches.length; i++) {
+    var c = localCatches[i];
     var id = String(c.id || Date.now());
-    if (existingIds[id]) return;
-    var ref = doc(col, id);
-    batch.set(ref, Object.assign({}, c, { syncedAt: new Date().toISOString() }), { merge: true });
-    ops += 1;
-  });
-  if (ops > 0) {
-    await batch.commit();
+    if (existingIds[id]) continue;
+    await saveCatchToCloud(memberId, c);
   }
 }
 
@@ -88,20 +99,20 @@ export async function loadCatchesFromCloud(memberId) {
   });
 }
 
+/** Save catch — photo to Storage, metadata to Firestore. */
 export async function saveCatchToCloud(memberId, catchEntry) {
-  if (!memberId || !catchEntry) return;
-  var id = String(catchEntry.id || Date.now());
-  var ref = doc(catchesCol(memberId), id);
-  await setDoc(ref, Object.assign({}, catchEntry, { syncedAt: new Date().toISOString() }), { merge: true });
+  if (!memberId || !catchEntry) return null;
+  var prepared = await prepareCatchDoc(memberId, catchEntry);
+  var ref = doc(catchesCol(memberId), prepared.id);
+  await setDoc(ref, Object.assign({}, prepared.data, { syncedAt: new Date().toISOString() }), { merge: true });
+  return { id: prepared.id, photoUrl: prepared.photoUrl };
 }
 
-/** Increment or decrement likeCount on a catch doc (non-fatal — silently swallowed if rules block it). */
+/** Increment or decrement likeCount on a club-visible catch. */
 export async function updateCatchLike(catchOwnerId, catchId, delta) {
   if (!catchOwnerId || !catchId || delta === 0) return;
-  try {
-    var ref = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
-    await updateDoc(ref, { likeCount: increment(delta) });
-  } catch (e) { /* non-fatal — Firestore rule may block; local like state still works */ }
+  var ref = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
+  await updateDoc(ref, { likeCount: increment(delta) });
 }
 
 /** Club-wide feed — catches with visibility club or public_feed from all active members. */
@@ -127,5 +138,30 @@ export async function loadClubFeedCatches() {
   }
   return feed.sort(function(a, b) {
     return String(b.date || b.id || "").localeCompare(String(a.date || a.id || ""));
+  });
+}
+
+/** All members' spots flagged shareClub — for club map. */
+export async function loadClubSharedSpots() {
+  var members = await listActiveMembers(120);
+  var spots = [];
+  var i;
+  for (i = 0; i < members.length; i++) {
+    var m = members[i];
+    try {
+      var snap = await getDoc(profileRef(m.id));
+      if (!snap.exists()) continue;
+      var profile = snap.data() || {};
+      (profile.privateSpots || []).forEach(function(s) {
+        if (!s || !s.shareClub) return;
+        spots.push(Object.assign({}, s, {
+          memberId: m.id,
+          credit: m.displayName || m.id,
+        }));
+      });
+    } catch (e) { /* skip if rules block */ }
+  }
+  return spots.sort(function(a, b) {
+    return String(a.name || "").localeCompare(String(b.name || ""));
   });
 }

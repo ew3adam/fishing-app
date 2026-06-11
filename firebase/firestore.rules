@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function memberData(memberId) {
+      return get(/databases/$(database)/documents/members/$(memberId)).data;
+    }
+
+    function isOwner(memberId) {
+      return isSignedIn() && memberData(memberId).authUid == request.auth.uid;
+    }
+
+    function isClubVisibleCatch() {
+      return resource.data.visibility == 'club' || resource.data.visibility == 'public_feed';
+    }
+
+    // CRM roster — active members readable when signed in
+    match /members/{memberId} {
+      allow read: if isSignedIn() && resource.data.isActive == true;
+      allow update: if isSignedIn()
+        && resource.data.authUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['authUid', 'lastFishingAppLoginAt']);
+    }
+
+    // Fishing profile (private spots, gear, prefs)
+    match /members/{memberId}/fishingProfile/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(memberId);
+    }
+
+    // Catch log — owner writes; club catches readable by all signed-in members
+    match /members/{memberId}/fishingCatches/{catchId} {
+      allow read: if isSignedIn() && (isOwner(memberId) || isClubVisibleCatch());
+      allow create, delete: if isOwner(memberId);
+      allow update: if isOwner(memberId)
+        || (isSignedIn() && isClubVisibleCatch()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']));
+    }
+  }
+}
