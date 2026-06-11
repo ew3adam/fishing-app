@@ -8,6 +8,7 @@ import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
+import SpotMapThumb from "./components/SpotMapThumb.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
@@ -1990,14 +1991,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     var rosterF = (clubRoster || []).filter(function(m) {
       return !memberSearch || m.name.toLowerCase().indexOf(memberSearch.toLowerCase()) >= 0;
     });
-    var mapImg = "https://staticmap.openstreetmap.de/staticmap.php?center=" + selectedSpot.lat + "," + selectedSpot.lng + "&zoom=15&size=400x200&markers=" + selectedSpot.lat + "," + selectedSpot.lng + ",red-pushpin";
     var shareLabel = selectedSpot.shareClub ? "Shared with Club" : (selectedSpot.sharedWith && selectedSpot.sharedWith.length ? "Shared with " + selectedSpot.sharedWith.map(function(m) { return m.name; }).join(", ") : "Private");
     return (
       <div>
         <OBtn label="Back" onClick={function() { setPrivView("my"); setPrivSpotId(null); }} color={th.green} style={{ margin:"12px 0 14px" }} />
         <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>{selectedSpot.name}</div>
         <div style={{ fontSize:11, color:th.gold, marginBottom:12 }}>{shareLabel}</div>
-        <img src={mapImg} alt="" style={{ width:"100%", borderRadius:10, border:"1px solid " + th.border, marginBottom:12 }} />
+        <div style={{ marginBottom:12 }}><SpotMapThumb lat={selectedSpot.lat} lng={selectedSpot.lng} height={200} zoom={15} /></div>
         <div style={{ display:"flex", gap:8, marginBottom:12 }}>
           <a href={mapsUrl(selectedSpot.lat, selectedSpot.lng).google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.blue, fontSize:12, fontWeight:700 }}>Google Maps</a>
           <a href={mapsUrl(selectedSpot.lat, selectedSpot.lng).apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:10, textDecoration:"none", color:th.green, fontSize:12, fontWeight:700 }}>Apple Maps</a>
@@ -2066,11 +2066,10 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         <div style={{ fontSize:19, color:th.white, fontWeight:800, marginBottom:10 }}>Pictures of each save</div>
         {mySpots.length === 0 ? <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No private spots saved yet.</div></Card> : null}
         {mySpots.map(function(s) {
-          var img = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
             <Card key={s.id} T={T}>
               <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
-              <img src={img} alt="" style={{ width:"100%", borderRadius:8, border:"1px solid " + th.border }} />
+              <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <OBtn label="Directions" onClick={function() { window.open(mapsUrl(s.lat, s.lng).apple, "_blank"); }} color={th.green} style={{ marginTop:8, fontSize:11 }} />
             </Card>
           );
@@ -2092,12 +2091,11 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         ) : clubSharedSpots.length === 0 ? (
           <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No shared pins yet. Save a spot and choose Share with club.</div></Card>
         ) : clubSharedSpots.map(function(s) {
-          var im = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x160&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
             <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
               <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
               <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
-              <img src={im} alt="" style={{ width:"100%", borderRadius:8 }} />
+              <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
           );
@@ -2119,7 +2117,6 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
         </div>
         {mySpots.length === 0 ? <div style={{ fontSize:13, color:th.muted, marginBottom:12 }}>No saved spots yet.</div> : null}
         {mySpots.map(function(s) {
-          var thumb = "https://staticmap.openstreetmap.de/staticmap.php?center=" + s.lat + "," + s.lng + "&zoom=15&size=400x100&markers=" + s.lat + "," + s.lng + ",green-pushpin";
           return (
             <button
               key={s.id}
@@ -2131,7 +2128,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               }}
               style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.border, borderRadius:10, overflow:"hidden", marginBottom:8, cursor:"pointer", color:th.white, padding:0 }}
             >
-              <img src={thumb} alt="" style={{ width:"100%", height:72, objectFit:"cover", display:"block" }} />
+              <SpotMapThumb lat={s.lat} lng={s.lng} height={72} zoom={14} />
               <div style={{ padding:"8px 10px" }}>
                 <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
                 <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{s.shareClub ? "Shared with club" : "Private"}</div>

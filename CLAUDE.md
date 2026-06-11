@@ -18,6 +18,7 @@ At the start of every session:
 ## Key Files
 | File | Purpose |
 |------|---------|
+| `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
 | `src/App.jsx` | Main app (~260KB, single large component) — all tabs, state, and UI logic |
 | `src/lib/firebase.js` | Firebase init (supports env-var overrides via `VITE_FIREBASE_*`) |
 | `src/services/fishingSyncService.js` | Firestore sync for catches and fishing profiles |
