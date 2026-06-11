@@ -6,7 +6,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "scan:pii": "node scripts/scan-pii.js --all",
+    "scan:pii:staged": "node scripts/scan-pii.js --staged",
+    "prepare": "node scripts/setup-git-hooks.js",
+    "deploy": "node scripts/scan-pii.js --paths src,public,data && npm run build && gh-pages -d dist"
   },
   "dependencies": {
     "exifr": "^7.1.3",

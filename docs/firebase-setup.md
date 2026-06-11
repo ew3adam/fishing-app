@@ -9,7 +9,7 @@ Firebase Console → Authentication → Sign-in method:
 - **Email/Password** — enable (required now)
 - Google, Facebook, Phone — enable later when API IDs are in `.env.local`
 
-Create Adam’s account in Console (email `photobra@gmail.com`) — password **not** in this repo.
+Create the admin test account in Console (email `admin@example.com` in docs only — use real roster email in Firebase Console) — password **not** in this repo.
 
 ## 2. Member roster
 

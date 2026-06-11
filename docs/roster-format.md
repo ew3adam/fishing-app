@@ -10,7 +10,7 @@ Roster members must exist in Firebase project **rfc-management** (`members` coll
 | `firstName` | Required; trimmed |
 | `lastName` | Required; trimmed |
 | `email` | Required; lowercase; valid format; **no duplicates** |
-| `phone` | Digits only in file (`6304601140`); display as `(630) 460-1140` |
+| `phone` | Digits only in file (`5555550100`); display as `(555) 555-0100` |
 | `active` | `true` or `false` — inactive cannot sign in |
 | `role` | `member` or `admin` |
 
@@ -18,7 +18,7 @@ Roster members must exist in Firebase project **rfc-management** (`members` coll
 
 ```csv
 memberId,firstName,lastName,email,phone,active,role
-adam_bielawski,Adam,Bielawski,photobra@gmail.com,6304601140,true,admin
+adam_bielawski,Adam,Bielawski,admin@example.com,5555550100,true,admin
 ```
 
 ## JSON array

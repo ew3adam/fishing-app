@@ -5,11 +5,14 @@ dist/
 # OS / editor
 .DS_Store
 
-# Cursor / Claude — local AI rules & IDE state (keep off public repos)
-.cursor/
+# Cursor / Claude — local IDE state (rules in .cursor/rules/ are committed)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 .claude/
 
 # Secrets & local env (never commit real keys)
 .env
 .env.*
 !.env.example
+src/config/authProviders.local.js

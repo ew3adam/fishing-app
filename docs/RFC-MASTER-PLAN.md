@@ -20,7 +20,7 @@
 - **User database + modern sign-in:** Firebase Auth with user ID, email/password, Google (Gmail), phone SMS, Facebook (and Apple optional on iPhone).
 - **Roster gate (locked):** Only people on the **uploaded member list** may sign in and use the app. Everyone else is **blocked** (no guest mode for now).
 - **Firebase project (shared):** `rfc-management` — same as [`Desktop/RFC/Firebase`](../Firebase). Member doc ID `adam_bielawski` (not RFC-001).
-- **First seed member:** Adam Bielawski — `photobra@gmail.com`, phone `(630) 460-1140`. Password set in Firebase Auth only (never stored in repo or docs).
+- **First seed member:** Example admin row — `admin@example.com`, phone `(555) 555-0100`. Password set in Firebase Auth only (never stored in repo or docs).
 
 ---
 
@@ -89,7 +89,7 @@ Firebase is already in your roadmap; it supports the sign-in methods you asked f
 | `firstName` | Required; trimmed; title case on display |
 | `lastName` | Required; trimmed; title case on display |
 | `email` | Required; **lowercase** after trim; valid format; **unique** across roster |
-| `phone` | Digits only in storage (`6304601140`); display as `(630) 460-1140` |
+| `phone` | Digits only in storage (`5555550100`); display as `(555) 555-0100` |
 | `active` | `true` / `false` — inactive cannot sign in |
 | `role` | `member` \| `admin` (admin can refresh roster later) |
 | `createdAt` | ISO timestamp |
@@ -103,7 +103,7 @@ Firebase is already in your roadmap; it supports the sign-in methods you asked f
 
 | memberId | firstName | lastName | email | phone | active | role |
 |----------|-----------|----------|-------|-------|--------|------|
-| RFC-001 | Adam | Bielawski | photobra@gmail.com | 6304601140 | true | admin |
+| RFC-001 | Adam | Bielawski | admin@example.com | 5555550100 | true | admin |
 
 Password for Adam: create **once** in Firebase Console or Admin SDK at Phase 3 setup — **never commit password to GitHub, docs, or seed JSON.** Minimum length **10 characters** (your chosen password meets this). **Do not use MD5** for passwords — Firebase Auth uses **scrypt** (industry standard; stronger than MD5).
 

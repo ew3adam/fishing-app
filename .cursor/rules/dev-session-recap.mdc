@@ -1,0 +1,18 @@
+---
+description: Save-state — update log, scan PII, commit and push (fishing-app)
+alwaysApply: true
+---
+
+# Session recap (fishing-app)
+
+When Adam says **save state** (any casing):
+
+1. Update [`docs/dev-session-log.md`](docs/dev-session-log.md) — `lastSessionAt`, short **Where we left off** + **Next**.
+2. If Firebase folder is in workspace, update its [`docs/dev-session-log.md`](../../Firebase/docs/dev-session-log.md) too.
+3. Run `npm run scan:pii` — must pass before commit.
+4. **Git:** `git status` → `git add` (no `.env`, secrets) → `git commit` → `git push origin main`.
+5. Reply with one-line confirm per repo (commit hash + pushed).
+
+Never commit: `.env.local`, `service-account.json`, real member CSVs, PII in docs.
+
+Dual-repo: run steps 3–5 in **both** repos when both have changes.

@@ -19,6 +19,7 @@ At the start of every session:
 | File | Purpose |
 |------|---------|
 | `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
+| `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
 | `src/App.jsx` | Main app (~260KB, single large component) — all tabs, state, and UI logic |
 | `src/lib/firebase.js` | Firebase init (supports env-var overrides via `VITE_FIREBASE_*`) |
 | `src/services/fishingSyncService.js` | Firestore sync for catches and fishing profiles |
@@ -46,6 +47,7 @@ npm run deploy   # build + push to gh-pages
 
 ## Important Constraints
 - **No test suite** — manually test in browser before marking anything done.
+- **PII scan** — `npm run scan:pii` audits the repo; pre-commit hook blocks staged emails/phones/passwords. Deploy runs scan on `src`, `public`, `data` first.
 - `App.jsx` is intentionally monolithic; don't split it unless the user asks.
 - Firebase config has hardcoded fallback values (public web config); env vars override them.
 - `authProviders.js` is gitignored — use `authProviders.example.js` as the template.

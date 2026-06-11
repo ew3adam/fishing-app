@@ -4,8 +4,8 @@
     "legacyMemberId": "RFC-001",
     "firstName": "Adam",
     "lastName": "Bielawski",
-    "email": "photobra@gmail.com",
-    "phone": "6304601140",
+    "email": "admin@example.com",
+    "phone": "5555550100",
     "active": true,
     "role": "admin"
   }

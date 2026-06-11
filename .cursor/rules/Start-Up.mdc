@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+
+When working on RFC Fishing App, ALWAYS:
+1. Check .cursorrules file first
+2. Run start.sh or simulate its checks
+3. Output the one-line status with URL
+4. Suggest next logical step based on recent commits
+5. check Manually @ mention your rule file: @git-sync

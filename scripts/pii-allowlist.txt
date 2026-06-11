@@ -1,0 +1,5 @@
+# One path or glob per line. Lines starting with # are comments.
+# Files listed here are skipped by scan-pii.js (use sparingly).
+
+.env.example
+src/config/authProviders.example.js

@@ -1,0 +1,34 @@
+---
+description: Short session start — where we left off + what's next (RFC fishing-app)
+alwaysApply: true
+---
+
+# RFC session start (fishing-app)
+
+Adam works infrequently. Keep recaps **short** (max 4 bullets each).
+
+## First message of a new chat
+
+1. Read [`docs/dev-session-log.md`](docs/dev-session-log.md) and [`../../Firebase/docs/dev-session-log.md`](../../Firebase/docs/dev-session-log.md) if Firebase folder is in workspace.
+2. Reply with:
+
+```text
+Hello Adam — RFC
+
+Left off:
+• [from dev-session-log — max 4 short bullets]
+
+Next:
+• [max 3 short bullets]
+
+Say save state when done.
+```
+
+3. Use **cmd** only (not PowerShell) if giving shell steps.
+4. Do not ask "want a recap?" — just give the block.
+5. **save state** → update logs + `npm run scan:pii` + git commit + push (both repos if needed).
+
+## Key docs
+
+- Platform: [`docs/RFC-PLATFORM-PRD.md`](docs/RFC-PLATFORM-PRD.md)
+- Build order: [`docs/RFC-MASTER-PLAN.md`](docs/RFC-MASTER-PLAN.md)
