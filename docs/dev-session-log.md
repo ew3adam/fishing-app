@@ -1,12 +1,16 @@
 ---
-lastSessionAt: "2026-06-11T19:00:00-05:00"
+lastSessionAt: "2026-06-22T00:00:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-- All synced to GitHub (`a714326`). Working tree clean.
+- Synced to GitHub (`69c881f`) at session start; this save-state commits a
+  routine `package-lock.json` refresh (stale `peer` flags dropped, no dep
+  version changes) and a new Cursor rules file
+  (`.cursor/rules/brief-directions.mdc` — collaboration/editing norms for
+  Cursor, not app code).
 - PII scan + pre-commit active. **save state** = log + scan + commit + push.
 - App on GitHub Pages. Sign-in only (Firebase Auth account required first).
 
