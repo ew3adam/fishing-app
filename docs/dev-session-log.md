@@ -17,6 +17,8 @@ lastSessionAt: "2026-06-22T00:00:00-05:00"
 ## Next
 
 - Optional: roster-gated “set your password” signup in app.
+- Future: once app is stable/working, sync member base + login info with
+  Firebase (full active roster + Auth accounts), not just current sign-in.
 
 ## Save state
 
