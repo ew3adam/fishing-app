@@ -3333,6 +3333,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   const [signInMode, setSignInMode] = useState("signin");
   const [signUpConfirm, setSignUpConfirm] = useState("");
   const [resetSent, setResetSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [rosterHealth, setRosterHealth] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
 
@@ -3370,6 +3371,8 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   function removeGear(i) { setF("gear", form.gear.filter(function(_, idx) { return idx !== i; })); }
 
   var iStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
+  var pwInputStyle = Object.assign({}, iStyle, { marginBottom:0, paddingRight:44 });
+  var eyeBtnStyle = { position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", color:th.muted, fontSize:12, padding:"0 2px", lineHeight:1 };
 
   if (view === "gear") {
     return (
@@ -3412,11 +3415,31 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
     );
   }
 
+  function translateAuthError(err) {
+    var code = err && err.code ? err.code : "";
+    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
+      return "Email or password is incorrect.";
+    }
+    if (code === "auth/too-many-requests") {
+      return "Too many failed attempts — wait a few minutes or use Forgot password.";
+    }
+    if (code === "auth/user-disabled") {
+      return "This account has been disabled. Contact the club admin.";
+    }
+    if (code === "auth/network-request-failed") {
+      return "Network error — check your connection and try again.";
+    }
+    if (code === "auth/weak-password") {
+      return "Password must be at least 10 characters.";
+    }
+    return (err && err.message) ? err.message : "Something went wrong — try again.";
+  }
+
   function handleSignInClick() {
     setSignInLocalError("");
     setSignInBusy(true);
     onSignIn(signInEmail, signInPassword).catch(function(err) {
-      setSignInLocalError(err && err.message ? err.message : "Sign-in failed.");
+      setSignInLocalError(translateAuthError(err));
     }).finally(function() {
       setSignInBusy(false);
     });
@@ -3430,7 +3453,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
     }
     setSignInBusy(true);
     onSignUp(signInEmail, signInPassword).catch(function(err) {
-      setSignInLocalError(err && err.message ? err.message : "Account creation failed.");
+      setSignInLocalError(translateAuthError(err));
     }).finally(function() {
       setSignInBusy(false);
     });
@@ -3446,7 +3469,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
     onPasswordReset(signInEmail).then(function() {
       setResetSent(true);
     }).catch(function(err) {
-      setSignInLocalError(err && err.message ? err.message : "Could not send reset email.");
+      setSignInLocalError(translateAuthError(err));
     }).finally(function() {
       setSignInBusy(false);
     });
@@ -3480,9 +3503,15 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Choose a password (min 10 characters)</div>
-            <input type="password" value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={iStyle} autoComplete="new-password" />
+            <div style={{ position:"relative", marginBottom:10 }}>
+              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="new-password" />
+              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
+            </div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm password</div>
-            <input type="password" value={signUpConfirm} onChange={function(e) { setSignUpConfirm(e.target.value); }} placeholder="Confirm password" style={iStyle} autoComplete="new-password" />
+            <div style={{ position:"relative", marginBottom:10 }}>
+              <input type={showPassword ? "text" : "password"} value={signUpConfirm} onChange={function(e) { setSignUpConfirm(e.target.value); }} placeholder="Confirm password" style={pwInputStyle} autoComplete="new-password" />
+              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
+            </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
             <button type="button" onClick={handleSignUpClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
               {signInBusy ? "Creating account…" : "Create my account"}
@@ -3495,19 +3524,19 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
           </div>
         ) : (
           <div>
-            {rosterHealth ? (
+            {rosterHealth && rosterHealth.message ? (
               <div style={{ fontSize:11, color:rosterHealth.ok ? th.green : th.orange, marginBottom:10, lineHeight:1.5 }}>
                 {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
-                {rosterHealth.error ? " (" + rosterHealth.error + ")" : ""}
               </div>
-            ) : (
-              <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Checking roster connection…</div>
-            )}
+            ) : null}
             <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Only emails on the club roster can sign in. Data on this phone alone does not appear in a desktop browser until you sign in.</div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password (min 10 characters)</div>
-            <input type="password" value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={iStyle} autoComplete="current-password" />
+            <div style={{ position:"relative", marginBottom:10 }}>
+              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
+              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
+            </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
             {resetSent ? (
               <div style={{ fontSize:12, color:th.green, marginBottom:8, lineHeight:1.5 }}>Reset email sent — check your inbox and follow the link, then come back to sign in.</div>
