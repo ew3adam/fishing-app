@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, signUpMemberEmail, sendMemberPasswordReset, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots } from "./services/fishingSyncService.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
@@ -458,13 +458,13 @@ var PROFILE_STORAGE_KEY = "rfc_fishing_profile_v2";
 var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
 
 /** Build spot-sharing picker from cloud members or local imported roster. */
-function sharingRosterFromSources(cloudMembers, localRoster) {
+function sharingRosterFromSources(cloudMembers, localRoster, selfId) {
   if (cloudMembers && cloudMembers.length) {
-    return cloudMembers.filter(function(m) { return m.isActive !== false; }).map(function(m) {
+    return cloudMembers.filter(function(m) { return m.isActive !== false && m.id !== selfId; }).map(function(m) {
       return { id: m.id, name: m.displayName || m.id };
     });
   }
-  return rosterForSharingPicker(localRoster);
+  return rosterForSharingPicker(localRoster).filter(function(m) { return m.id !== selfId; });
 }
 
 var MOCK_CLUB_SHARED_SPOTS = [
@@ -610,6 +610,17 @@ function patchPrivateSpot(setProfile, id, patch) {
   });
 }
 
+function setPinHomeSpot(setProfile, id, pin) {
+  setProfile(function(p) {
+    var base = normalizeProfile(p);
+    var now = new Date().toISOString();
+    var list = (base.privateSpots || []).map(function(s) {
+      return Object.assign({}, s, { pinHome: pin ? s.id === id : (s.id === id ? false : s.pinHome), updated_at: s.id === id ? now : s.updated_at });
+    });
+    return Object.assign({}, base, { privateSpots:list });
+  });
+}
+
 function deletePrivateSpotById(setProfile, id) {
   setProfile(function(p) {
     var base = normalizeProfile(p);
@@ -638,6 +649,7 @@ function savePrivateSpotFull(setProfile, draft, editId) {
     is_shared:!!(draft.shareClub || (draft.sharedWith && draft.sharedWith.length)),
     shareClub:!!draft.shareClub,
     sharedWith:Array.isArray(draft.sharedWith) ? draft.sharedWith : [],
+    pinHome:!!draft.pinHome,
     created_at:nowIso,
     updated_at:nowIso,
   };
@@ -653,7 +665,9 @@ function savePrivateSpotFull(setProfile, draft, editId) {
       spot.member_id = base.memberId;
       spot.is_shared = !!(spot.shareClub || (spot.sharedWith && spot.sharedWith.length > 0));
     }
-    var list = (base.privateSpots || []).filter(function(s) { return s.id !== id; });
+    var list = (base.privateSpots || []).filter(function(s) { return s.id !== id; }).map(function(s) {
+      return spot.pinHome ? Object.assign({}, s, { pinHome:false }) : s;
+    });
     list.unshift(spot);
     return Object.assign({}, base, { privateSpots:list });
   });
@@ -1093,12 +1107,14 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
     try { return localStorage.getItem(HOME_TARGET_SPECIES_KEY) || "All Species"; } catch (e) { return "All Species"; }
   });
   const [nearestWater, setNearestWater] = useState(null);
+  const [userGps, setUserGps] = useState(null);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
     function doLoad(la, ln) {
+      setUserGps({ lat:la, lng:ln });
       loadWeather(la, ln).then(function(w) {
         setWx(w);
         setNearestWater(findNearestHomeWater(la, ln));
@@ -1137,7 +1153,33 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var displayName = (profile && profile.name) ? profile.name.split(" ")[0] : "Angler";
   var nearSpot = nearestWater && nearestWater.spot;
   var nearDist = nearestWater ? nearestWater.dist.toFixed(1) : null;
+  var myPrivateSpots = (profile && profile.privateSpots) || [];
+  var pinnedSpot = myPrivateSpots.find(function(s) { return s.pinHome; }) || null;
+  var nearestPrivate = null;
+  if (userGps && myPrivateSpots.length > 0) {
+    myPrivateSpots.forEach(function(s) {
+      if (!isFinite(s.lat) || !isFinite(s.lng)) return;
+      var d = haversineMi(userGps.lat, userGps.lng, s.lat, s.lng);
+      if (!nearestPrivate || d < nearestPrivate.dist) nearestPrivate = { spot:s, dist:d };
+    });
+  }
+  var nearestPrivateSorted = userGps ? myPrivateSpots.filter(function(s) { return isFinite(s.lat) && isFinite(s.lng); }).map(function(s) {
+    return { spot:s, dist:haversineMi(userGps.lat, userGps.lng, s.lat, s.lng) };
+  }).sort(function(a, b) { return a.dist - b.dist; }) : [];
   var topSpeciesToday = nearSpot && nearSpot.species ? nearSpot.species.slice(0, 3).join(", ") : "Bass, Crappie, Catfish";
+  var pinnedSpotDist = null;
+  if (pinnedSpot && userGps && isFinite(pinnedSpot.lat) && isFinite(pinnedSpot.lng)) {
+    pinnedSpotDist = haversineMi(userGps.lat, userGps.lng, pinnedSpot.lat, pinnedSpot.lng).toFixed(1);
+  }
+  var featuredSpotName = pinnedSpot ? pinnedSpot.name : (nearSpot ? nearSpot.name : null);
+  var featuredDist = pinnedSpot ? pinnedSpotDist : nearDist;
+  var featuredSpeciesList = pinnedSpot && pinnedSpot.species_present && pinnedSpot.species_present.length
+    ? pinnedSpot.species_present.slice(0, 3).join(", ")
+    : topSpeciesToday;
+  var featuredPrimarySpecies = pinnedSpot && pinnedSpot.species_present && pinnedSpot.species_present.length
+    ? pinnedSpot.species_present[0]
+    : targetSpecies;
+  var featuredBaits = speciesBaitTips(featuredPrimarySpecies, season);
   var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
@@ -1146,7 +1188,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   var nextWindow = solunar && solunar[0];
   var windowLine = nextWindow
-    ? (nearSpot ? "Best window at " + nearSpot.name + " — " + nextWindow.start : "Best feeding window — " + nextWindow.start)
+    ? (featuredSpotName ? "Best window at " + featuredSpotName + " — " + nextWindow.start : "Best feeding window — " + nextWindow.start)
     : null;
 
   return (
@@ -1174,19 +1216,22 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
         {loading ? (
           <div style={{ fontSize:13, color:th.muted, padding:"12px 0" }}>Locating nearest water…</div>
-        ) : nearSpot ? (
+        ) : (pinnedSpot || nearSpot) ? (
           <div>
-            <div style={{ fontSize:15, color:th.green, fontWeight:700 }}>{nearSpot.name} · {nearDist} mi</div>
-            <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Active: {topSpeciesToday}</div>
+            {pinnedSpot ? <div style={{ fontSize:10, color:th.blue, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>📍 Your pinned spot</div> : null}
+            <div style={{ fontSize:15, color:th.green, fontWeight:700 }}>{featuredSpotName}{featuredDist ? " · " + featuredDist + " mi" : ""}</div>
+            {featuredSpeciesList ? <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Active: {featuredSpeciesList}</div> : null}
             <div style={{ fontSize:13, color:th.white, marginTop:8, lineHeight:1.45 }}>
-              <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {baits[0] ? baits[0].name : "Live minnow"} — {baits[0] ? baits[0].why : "versatile starter bait"}
+              <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {featuredBaits[0] ? featuredBaits[0].name : "Live minnow"} — {featuredBaits[0] ? featuredBaits[0].why : "versatile starter bait"}
             </div>
+            {pinnedSpot && pinnedSpot.notes ? <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45, fontStyle:"italic" }}>{pinnedSpot.notes.slice(0, 120)}{pinnedSpot.notes.length > 120 ? "…" : ""}</div> : null}
             <div style={{ marginTop:8, display:"inline-block", background:bfrTierColor(biteScore) + "22", border:"1px solid " + bfrTierColor(biteScore), borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:bfrTierColor(biteScore) }}>
               Bite score {biteScore}/100
             </div>
           </div>
         ) : null}
       </div>
+
 
       <div style={{ marginBottom:10 }}>
         <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>Fishing for today</div>
@@ -1314,6 +1359,35 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           <div style={{ fontSize:15, color:th.white, fontWeight:700 }}>{nearSpot.name}</div>
           <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>{nearDist} mi · {nearSpot.waterType}</div>
           <div style={{ fontSize:11, color:th.white, marginTop:6 }}>{nearSpot.tip}</div>
+        </Card>
+      ) : null}
+
+      {myPrivateSpots.length > 0 && !loading ? (
+        <Card T={T} borderColor={th.green + "66"}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+            <SecLabel text={"Your spots (" + myPrivateSpots.length + ")"} T={T} />
+            {setTab ? <button type="button" onClick={function() { setTab("spots"); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>View all →</button> : null}
+          </div>
+          {nearestPrivateSorted.slice(0, 3).map(function(item) {
+            var s = item.spot;
+            var sp = s.species_present && s.species_present.length ? s.species_present[0] : null;
+            var bait = sp ? speciesBaitTips(sp, season)[0] : null;
+            return (
+              <div key={s.id} style={{ marginBottom:10, paddingBottom:10, borderBottom:"1px solid " + th.border }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>📍 {s.name}</div>
+                  <div style={{ fontSize:11, color:th.green, fontWeight:700, flexShrink:0, marginLeft:8 }}>{item.dist.toFixed(1)} mi</div>
+                </div>
+                {s.species_present && s.species_present.length > 0 ? (
+                  <div style={{ fontSize:11, color:th.muted, marginTop:3 }}>{s.species_present.slice(0, 3).join(" · ")}</div>
+                ) : null}
+                {bait ? (
+                  <div style={{ fontSize:11, color:th.gold, marginTop:4 }}>Try: {bait.name} — {bait.why}</div>
+                ) : null}
+              </div>
+            );
+          })}
+          {setTab ? <button type="button" onClick={function() { setTab("spots"); }} style={{ width:"100%", background:th.green + "22", border:"1px solid " + th.green + "55", borderRadius:8, padding:"8px 0", cursor:"pointer", fontSize:12, color:th.green, fontWeight:700 }}>Go to My Spots</button> : null}
         </Card>
       ) : null}
 
@@ -1478,7 +1552,7 @@ function SpeciesTab({ T, profile, setTab }) {
 }
 
 // ─── SPOTS TAB ────────────────────────────────────────────────────────────────
-function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster, authMember }) {
+function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSection, clubRoster, authMember, onMarkClubSpotsSeen }) {
   const th = THEMES[T];
   const [view, setView] = useState("local");
   const [clubSharedSpots, setClubSharedSpots] = useState([]);
@@ -1500,12 +1574,14 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pickPin, setPickPin] = useState(null);
   const [pickName, setPickName] = useState("");
   const [pickShare, setPickShare] = useState(false);
+  const [pickPinHome, setPickPinHome] = useState(false);
   const [pickBackTo, setPickBackTo] = useState("my");
   const favSpots = (profile && profile.favSpots) || [];
   const mySpots = (profile && profile.privateSpots) || [];
 
   useEffect(function() {
     if (privView !== "club") return;
+    if (typeof onMarkClubSpotsSeen === "function") onMarkClubSpotsSeen();
     if (!authMember) {
       setClubSharedSpots([]);
       return;
@@ -1581,6 +1657,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
       access_info:"",
       shareClub:!!pickShare,
       sharedWith:[],
+      pinHome:!!pickPinHome,
     };
     var res = savePrivateSpotFull(setProfile, draft, null);
     if (res.error) {
@@ -1593,6 +1670,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setPickPin(null);
     setPickName("");
     setPickShare(false);
+    setPickPinHome(false);
     setPrivView("my");
   }
 
@@ -1815,6 +1893,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               <button type="button" onClick={function() { setPickShare(false); }} style={{ flex:1, background:!pickShare ? th.green + "33" : "transparent", border:"1px solid " + (!pickShare ? th.green : th.border), borderRadius:8, color:!pickShare ? th.green : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:!pickShare ? 700 : 400 }}>Private</button>
               <button type="button" onClick={function() { setPickShare(true); }} style={{ flex:1, background:pickShare ? th.gold + "33" : "transparent", border:"1px solid " + (pickShare ? th.gold : th.border), borderRadius:8, color:pickShare ? th.gold : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:pickShare ? 700 : 400 }}>Share with club</button>
             </div>
+            <label style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, cursor:"pointer", background:pickPinHome ? th.blue + "18" : "transparent", border:"1px solid " + (pickPinHome ? th.blue : th.border), borderRadius:8, padding:"10px 12px" }}>
+              <input type="checkbox" checked={!!pickPinHome} onChange={function(e) { setPickPinHome(e.target.checked); }} />
+              <div>
+                <div style={{ fontSize:12, color:pickPinHome ? th.blue : th.white, fontWeight:700 }}>Show on home page</div>
+                <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>Appears under RFC Bite Forecast with fishing tips</div>
+              </div>
+            </label>
             {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:8 }}>{saveErr}</div> : null}
             <button type="button" onClick={saveFromPickMap} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"14px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}>
               Save my spot
@@ -2026,6 +2111,13 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             <input type="checkbox" checked={!!selectedSpot.shareClub} onChange={toggleShareClub} />
             <span style={{ fontSize:13, color:th.white }}>Share with Club (club map)</span>
           </label>
+          <label style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, cursor:"pointer", background:selectedSpot.pinHome ? th.blue + "18" : "transparent", border:"1px solid " + (selectedSpot.pinHome ? th.blue : th.border), borderRadius:8, padding:"8px 10px" }}>
+            <input type="checkbox" checked={!!selectedSpot.pinHome} onChange={function(e) { setPinHomeSpot(setProfile, selectedSpot.id, e.target.checked); }} />
+            <div>
+              <div style={{ fontSize:13, color:selectedSpot.pinHome ? th.blue : th.white, fontWeight:selectedSpot.pinHome ? 700 : 400 }}>Show on home page</div>
+              <div style={{ fontSize:10, color:th.muted }}>Pins this spot under RFC Bite Forecast — only one at a time</div>
+            </div>
+          </label>
           <div style={{ fontSize:11, color:th.muted, marginBottom:8 }}>Share with specific members</div>
           <input value={memberSearch} onChange={function(e) { setMemberSearch(e.target.value); }} placeholder="Search roster…" style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12, boxSizing:"border-box", marginBottom:8 }} />
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
@@ -2176,6 +2268,26 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   return (
     <div>
       <GuideMyToggle modeGuide={true} />
+      {mySpots.length > 0 ? (
+        <div style={{ marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+            <div style={{ fontSize:13, color:th.green, fontWeight:700 }}>My saved spots ({mySpots.length})</div>
+            <button type="button" onClick={function() { setPrivView("my"); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>View all →</button>
+          </div>
+          {mySpots.slice(0, 3).map(function(s) {
+            return (
+              <button key={s.id} type="button" onClick={function() { setPrivSpotId(s.id); setMemberSearch(""); setPrivView("detail"); }} style={{ width:"100%", textAlign:"left", background:th.card, border:"1px solid " + th.green + "55", borderRadius:10, padding:"10px 12px", marginBottom:6, cursor:"pointer", color:th.white }}>
+                <div style={{ fontWeight:700, fontSize:13 }}>📍 {s.name}</div>
+                <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>
+                  {s.species_present && s.species_present.length ? s.species_present.slice(0, 3).join(", ") : "Tap to view"}
+                  {s.shareClub ? " · Shared with club" : ""}
+                </div>
+              </button>
+            );
+          })}
+          {mySpots.length > 3 ? <button type="button" onClick={function() { setPrivView("my"); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0, marginTop:2 }}>+{mySpots.length - 3} more →</button> : null}
+        </div>
+      ) : null}
       {geoErr ? <div style={{ fontSize:12, color:th.orange, marginBottom:10 }}>{geoErr}</div> : null}
 
       <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
@@ -3321,7 +3433,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSignUp, onPasswordReset, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -3330,10 +3442,9 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   const [signInPassword, setSignInPassword] = useState("");
   const [signInBusy, setSignInBusy] = useState(false);
   const [signInLocalError, setSignInLocalError] = useState("");
-  const [signInMode, setSignInMode] = useState("signin");
-  const [signUpConfirm, setSignUpConfirm] = useState("");
-  const [resetSent, setResetSent] = useState(false);
+  const [signInMode, setSignInMode] = useState("link");
   const [showPassword, setShowPassword] = useState(false);
+  const [linkSentEmail, setLinkSentEmail] = useState("");
   const [rosterHealth, setRosterHealth] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
 
@@ -3348,6 +3459,20 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   useEffect(function() {
     if (authMember && authMember.email) setSignInEmail(authMember.email);
   }, [authMember]);
+
+  useEffect(function() {
+    if (!pendingLinkHref || authUser) return;
+    setSignInMode("link-completing");
+    setSignInBusy(true);
+    onCompleteLink("", pendingLinkHref).catch(function(err) {
+      if (err && err.needsEmail) {
+        setSignInMode("link-confirm");
+      } else {
+        setSignInLocalError(translateAuthError(err));
+        setSignInMode("link");
+      }
+    }).finally(function() { setSignInBusy(false); });
+  }, [pendingLinkHref]);
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function setG(k, v) { setNewGear(function(g) { return Object.assign({}, g, { [k]: v }); }); }
@@ -3435,44 +3560,33 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
     return (err && err.message) ? err.message : "Something went wrong. Try again.";
   }
 
-  function handleSignInClick() {
+  function handleSendLinkClick() {
+    setSignInLocalError("");
+    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
+    setSignInBusy(true);
+    onSendLink(signInEmail).then(function() {
+      setLinkSentEmail(signInEmail);
+      setSignInMode("link-sent");
+    }).catch(function(err) {
+      setSignInLocalError(translateAuthError(err));
+    }).finally(function() { setSignInBusy(false); });
+  }
+
+  function handleCompleteLinkClick() {
+    setSignInLocalError("");
+    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
+    setSignInBusy(true);
+    onCompleteLink(signInEmail, pendingLinkHref).catch(function(err) {
+      setSignInLocalError(translateAuthError(err));
+    }).finally(function() { setSignInBusy(false); });
+  }
+
+  function handlePasswordSignInClick() {
     setSignInLocalError("");
     setSignInBusy(true);
     onSignIn(signInEmail, signInPassword).catch(function(err) {
       setSignInLocalError(translateAuthError(err));
-    }).finally(function() {
-      setSignInBusy(false);
-    });
-  }
-
-  function handleSignUpClick() {
-    setSignInLocalError("");
-    if (!signInPassword || signInPassword !== signUpConfirm) {
-      setSignInLocalError("The two passwords you typed are different. Make sure they match exactly.");
-      return;
-    }
-    setSignInBusy(true);
-    onSignUp(signInEmail, signInPassword).catch(function(err) {
-      setSignInLocalError(translateAuthError(err));
-    }).finally(function() {
-      setSignInBusy(false);
-    });
-  }
-
-  function handleForgotClick() {
-    setSignInLocalError("");
-    if (!signInEmail) {
-      setSignInLocalError("Type your email address in the box above first.");
-      return;
-    }
-    setSignInBusy(true);
-    onPasswordReset(signInEmail).then(function() {
-      setResetSent(true);
-    }).catch(function(err) {
-      setSignInLocalError(translateAuthError(err));
-    }).finally(function() {
-      setSignInBusy(false);
-    });
+    }).finally(function() { setSignInBusy(false); });
   }
 
   var displayName = authMember ? authMember.displayName : (form.name || "Your Profile");
@@ -3487,7 +3601,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
       </div>
 
       <Card T={T} borderColor={authUser ? th.green + "55" : th.orange + "55"}>
-        <SecLabel text={authUser ? "You're signed in!" : signInMode === "signup" ? "First time here? Create your account" : "Sign in to RFC Fishing"} T={T} />
+        <SecLabel text={authUser ? "You're signed in!" : signInMode === "link-sent" ? "Check your email!" : signInMode === "link-confirm" ? "One more step" : signInMode === "password" ? "Sign in with password" : "Sign in to RFC Fishing"} T={T} />
         {authLoading ? (
           <div style={{ fontSize:13, color:th.muted }}>Checking sign-in…</div>
         ) : authUser && authMember ? (
@@ -3497,28 +3611,49 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
             {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
             <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted }}>Sign out</button>
           </div>
-        ) : signInMode === "signup" ? (
+        ) : signInMode === "link-completing" ? (
+          <div style={{ fontSize:13, color:th.muted, paddingBottom:8 }}>Signing you in…</div>
+        ) : signInMode === "link-sent" ? (
           <div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>You only do this once. Pick a password for your club email address. Next time you'll just sign in normally.</div>
+            <div style={{ fontSize:13, color:th.white, marginBottom:10, lineHeight:1.6 }}>
+              We sent a link to <strong>{linkSentEmail}</strong>.<br />Open your email, tap the link, and you'll be signed in automatically.
+            </div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:14, lineHeight:1.5 }}>
+              Don't see it? Check your spam folder. The link is good for 1 hour.
+            </div>
+            <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setLinkSentEmail(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
+              Start over
+            </button>
+          </div>
+        ) : signInMode === "link-confirm" ? (
+          <div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:12, lineHeight:1.5 }}>
+              Looks like you opened the link on a different device. Just type your club email below and we'll finish signing you in.
+            </div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Your club email</div>
+            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+            <button type="button" onClick={handleCompleteLinkClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
+              {signInBusy ? "Signing in…" : "Sign me in"}
+            </button>
+          </div>
+        ) : signInMode === "password" ? (
+          <div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Type the email address you gave the club and your password.</div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Pick a password (at least 10 characters)</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password</div>
             <div style={{ position:"relative", marginBottom:10 }}>
-              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="new-password" />
-              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
-            </div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm password</div>
-            <div style={{ position:"relative", marginBottom:10 }}>
-              <input type={showPassword ? "text" : "password"} value={signUpConfirm} onChange={function(e) { setSignUpConfirm(e.target.value); }} placeholder="Confirm password" style={pwInputStyle} autoComplete="new-password" />
+              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
               <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
             </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
-            <button type="button" onClick={handleSignUpClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Setting up your account…" : "Set Up My Account"}
+            <button type="button" onClick={handlePasswordSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
+              {signInBusy ? "Signing in…" : "Sign In"}
             </button>
-            <div style={{ textAlign:"center", marginTop:14 }}>
-              <button type="button" onClick={function() { setSignInMode("signin"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
-                Already set up an account? Tap here to sign in
+            <div style={{ textAlign:"center", marginTop:12 }}>
+              <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setSignInPassword(""); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
+                Send me a sign-in link instead
               </button>
             </div>
           </div>
@@ -3529,58 +3664,19 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
                 {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
               </div>
             ) : null}
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Type the email address you gave the club and your password. Your catches and spots will show up on all your devices once you sign in.</div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:12, lineHeight:1.6 }}>
+              Type your club email address below. We'll send you a link — tap it and you're in. No password needed.
+            </div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Your club email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password</div>
-            <div style={{ position:"relative", marginBottom:10 }}>
-              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
-              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
-            </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
-            {resetSent ? (
-              <div style={{ fontSize:12, color:th.green, marginBottom:8, lineHeight:1.5 }}>We sent an email to your address. Open it and tap the link inside to pick a new password. Then come back here and sign in.</div>
-            ) : null}
-            <button type="button" onClick={handleSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Signing in…" : "Sign In"}
+            <button type="button" onClick={handleSendLinkClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
+              {signInBusy ? "Sending…" : "Send me a sign-in link"}
             </button>
-            <div style={{ textAlign:"center", marginTop:10, marginBottom:6, display:"flex", justifyContent:"space-between" }}>
-              <button type="button" onClick={function() { setSignInMode("signup"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
-                First time here? Tap to get started
+            <div style={{ textAlign:"center", marginTop:12 }}>
+              <button type="button" onClick={function() { setSignInMode("password"); setSignInLocalError(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
+                I have a password — sign in with password
               </button>
-              <button type="button" onClick={handleForgotClick} disabled={signInBusy} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
-                Forgot your password?
-              </button>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-              {getOAuthPlaceholderButtons().map(function(btn) {
-                return (
-                  <button
-                    key={btn.id}
-                    type="button"
-                    disabled={!btn.enabled || signInBusy}
-                    onClick={function() {
-                      setSignInLocalError("");
-                      onOAuthSignIn(btn.id).catch(function(err) {
-                        setSignInLocalError(err && err.message ? err.message : "Sign-in failed.");
-                      });
-                    }}
-                    style={{
-                      width:"100%",
-                      background: btn.enabled ? th.card : "transparent",
-                      border:"1px solid " + th.border,
-                      borderRadius:8,
-                      padding:"9px 0",
-                      cursor: btn.enabled && !signInBusy ? "pointer" : "not-allowed",
-                      fontSize:12,
-                      color: btn.enabled ? th.white : th.muted,
-                      opacity: btn.enabled ? 1 : 0.55,
-                    }}
-                  >
-                    {btn.label}{btn.enabled ? "" : " (set API key)"}
-                  </button>
-                );
-              })}
             </div>
           </div>
         )}
@@ -3940,6 +4036,8 @@ export default function App() {
   const [authMember, setAuthMember] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [pendingLinkHref, setPendingLinkHref] = useState(null);
+  const [clubSpotsNewCount, setClubSpotsNewCount] = useState(0);
   const [clubMembers, setClubMembers] = useState([]);
   const [clubMembersLoading, setClubMembersLoading] = useState(false);
   const [localRoster, setLocalRoster] = useState(function() { return getInitialRoster(); });
@@ -3976,6 +4074,15 @@ export default function App() {
       setAuthLoading(false);
       setAuthError(errMsg || "");
     });
+  }, []);
+
+  useEffect(function() {
+    if (!isSignInLink(window.location.href)) return;
+    setPendingLinkHref(window.location.href);
+    setTab("me");
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
   useEffect(function() {
@@ -4020,17 +4127,48 @@ export default function App() {
     });
   }, []);
 
-  var handleSignUp = useCallback(function(email, password) {
-    return signUpMemberEmail(email, password).then(function(result) {
+  useEffect(function() {
+    if (!authMember) { setClubSpotsNewCount(0); return; }
+    var seenAt = "";
+    try { seenAt = localStorage.getItem("rfc_club_spots_seen_at") || ""; } catch(e) {}
+    if (!seenAt) return;
+    loadClubSharedSpots().then(function(spots) {
+      var count = (spots || []).filter(function(s) {
+        return s.created_at && s.created_at > seenAt && s.memberId !== (authMember && authMember.id);
+      }).length;
+      setClubSpotsNewCount(count);
+    }).catch(function() {});
+  }, [authMember ? authMember.id : null]);
+
+  var handleMarkClubSpotsSeen = useCallback(function() {
+    try { localStorage.setItem("rfc_club_spots_seen_at", new Date().toISOString()); } catch(e) {}
+    setClubSpotsNewCount(0);
+  }, []);
+
+  var handleSendLink = useCallback(function(email) {
+    return sendSignInLink(email);
+  }, []);
+
+  var handleCompleteLink = useCallback(function(email, href) {
+    var linkHref = href || pendingLinkHref;
+    if (email) {
+      return completeSignInWithLinkAndEmail(email, linkHref).then(function(result) {
+        setAuthUser(result.user);
+        setAuthMember(result.member);
+        setAuthError("");
+        setPendingLinkHref(null);
+      });
+    }
+    return completeSignInWithLink(linkHref).then(function(result) {
+      if (result.needsEmail) {
+        throw Object.assign(new Error("needsEmail"), { needsEmail: true });
+      }
       setAuthUser(result.user);
       setAuthMember(result.member);
       setAuthError("");
+      setPendingLinkHref(null);
     });
-  }, []);
-
-  var handlePasswordReset = useCallback(function(email) {
-    return sendMemberPasswordReset(email);
-  }, []);
+  }, [pendingLinkHref]);
 
   var handleSignOut = useCallback(function() {
     signOutMember().then(function() {
@@ -4079,7 +4217,7 @@ export default function App() {
     reader.readAsText(file);
   }, []);
 
-  var sharingRoster = sharingRosterFromSources(clubMembers, localRoster);
+  var sharingRoster = sharingRosterFromSources(clubMembers, localRoster, authMember ? authMember.id : null);
 
   useEffect(function() {
     persistProfileToStorage(profile);
@@ -4114,18 +4252,22 @@ export default function App() {
       <div key={tab} className="tab-content" style={{ padding:"0 14px" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
-        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} authMember={authMember} />}
+        {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} authMember={authMember} onMarkClubSpotsSeen={handleMarkClubSpotsSeen} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignUp={handleSignUp} onPasswordReset={handlePasswordReset} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
+          var badge = n.id === "spots" && clubSpotsNewCount > 0;
           return (
             <button key={n.id} onClick={function() { if (n.id === "home") setHomeSection("forecast"); setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
-              <span style={{ fontSize:16 }}>{n.emoji}</span>
+              <div style={{ position:"relative", display:"inline-flex" }}>
+                <span style={{ fontSize:16 }}>{n.emoji}</span>
+                {badge ? <span style={{ position:"absolute", top:-4, right:-7, background:th.red, borderRadius:"50%", minWidth:14, height:14, fontSize:8, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, padding:"0 2px", boxSizing:"border-box" }}>{clubSpotsNewCount > 9 ? "9+" : clubSpotsNewCount}</span> : null}
+              </div>
               <span style={{ fontSize:9, color:tab===n.id ? th.green : th.muted, fontFamily:"monospace", letterSpacing:0.2 }}>{n.label}</span>
             </button>
           );

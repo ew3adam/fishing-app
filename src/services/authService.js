@@ -1,10 +1,12 @@
 /**
  * Sign-in with roster gate — only emails on Firestore members collection may stay signed in.
+ * Primary flow: passwordless email link (sendSignInLink / completeSignInWithLink).
+ * Fallback: email + password for members who set up passwords previously.
  */
 import {
-  createUserWithEmailAndPassword,
-  deleteUser,
-  sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -16,8 +18,70 @@ import { getAuthProviderConfig } from "../config/authProviders.js";
 
 var ROSTER_BLOCK_MSG = "Your email isn't on the club list. Ask the club president to add you first.";
 var OAUTH_NOT_CONFIGURED_MSG = "This sign-in option isn't set up yet. Contact the club admin.";
+var EMAIL_SIGN_IN_KEY = "rfc_sign_in_email";
 
-/** Email/password sign-in; rejects if email not on active roster. */
+/**
+ * Send a passwordless sign-in link to the member's club email.
+ * The link opens the app and completeSignInWithLink finishes the flow.
+ * Stores the email in localStorage so same-device completion works automatically.
+ */
+export async function sendSignInLink(email) {
+  var normalized = normalizeEmail(email);
+  if (!normalized) throw new Error("Type a valid email address.");
+  var settings = {
+    url: window.location.origin + window.location.pathname,
+    handleCodeInApp: true,
+  };
+  await sendSignInLinkToEmail(getFirebaseAuth(), normalized, settings);
+  window.localStorage.setItem(EMAIL_SIGN_IN_KEY, normalized);
+}
+
+/** Returns true if the given URL contains a Firebase email sign-in link. */
+export function isSignInLink(href) {
+  return isSignInWithEmailLink(getFirebaseAuth(), href);
+}
+
+/**
+ * Complete sign-in from an email link — same device that requested it.
+ * Returns { needsEmail: true } when localStorage has no email (different device).
+ * Returns { user, member } on success.
+ */
+export async function completeSignInWithLink(href) {
+  var auth = getFirebaseAuth();
+  var email = window.localStorage.getItem(EMAIL_SIGN_IN_KEY) || "";
+  if (!email) return { needsEmail: true };
+  var cred = await signInWithEmailLink(auth, email, href);
+  var user = cred.user;
+  window.localStorage.removeItem(EMAIL_SIGN_IN_KEY);
+  var member = await findMemberByEmail(user.email || email);
+  if (!member || !member.isActive || !member.email) {
+    await signOut(auth);
+    throw new Error(ROSTER_BLOCK_MSG);
+  }
+  await linkAuthUidToMember(member.id, user.uid);
+  return { user: user, member: member };
+}
+
+/**
+ * Complete sign-in when the email must be confirmed (opened link on a different device).
+ */
+export async function completeSignInWithLinkAndEmail(email, href) {
+  var auth = getFirebaseAuth();
+  var normalized = normalizeEmail(email);
+  if (!normalized) throw new Error("Type a valid email address.");
+  var cred = await signInWithEmailLink(auth, normalized, href);
+  var user = cred.user;
+  window.localStorage.removeItem(EMAIL_SIGN_IN_KEY);
+  var member = await findMemberByEmail(user.email || normalized);
+  if (!member || !member.isActive || !member.email) {
+    await signOut(auth);
+    throw new Error(ROSTER_BLOCK_MSG);
+  }
+  await linkAuthUidToMember(member.id, user.uid);
+  return { user: user, member: member };
+}
+
+/** Email/password fallback sign-in; rejects if email not on active roster. */
 export async function signInMemberEmail(email, password) {
   var auth = getFirebaseAuth();
   var normalized = normalizeEmail(email);
@@ -40,54 +104,6 @@ export async function signInMemberEmail(email, password) {
 
   await linkAuthUidToMember(memberAfter.id, user.uid);
   return { user: user, member: memberAfter };
-}
-
-/** Self-serve first-time signup — roster-gated; rolls back Auth account if email not on roster. */
-export async function signUpMemberEmail(email, password) {
-  var auth = getFirebaseAuth();
-  var normalized = normalizeEmail(email);
-  if (!normalized) {
-    throw new Error("Enter a valid email address.");
-  }
-  if (String(password || "").length < 10) {
-    throw new Error("Password must be at least 10 characters.");
-  }
-
-  var cred;
-  try {
-    cred = await createUserWithEmailAndPassword(auth, normalized, password);
-  } catch (e) {
-    if (e && e.code === "auth/email-already-in-use") {
-      throw new Error("You already set up an account with this email. Tap \"Already set up? Sign in\" to log in.");
-    }
-    throw e;
-  }
-
-  var user = cred.user;
-  var member;
-  try {
-    member = await findMemberByEmail(user.email || normalized);
-  } catch (e) {
-    try { await deleteUser(user); } catch (_) {}
-    throw e;
-  }
-
-  if (!member || !member.isActive || !member.email) {
-    await deleteUser(user);
-    throw new Error(ROSTER_BLOCK_MSG);
-  }
-
-  await linkAuthUidToMember(member.id, user.uid);
-  return { user: user, member: member };
-}
-
-/** Send Firebase password-reset email; only if email is on the active roster. */
-export async function sendMemberPasswordReset(email) {
-  var normalized = normalizeEmail(email);
-  if (!normalized) {
-    throw new Error("Enter a valid email address.");
-  }
-  await sendPasswordResetEmail(getFirebaseAuth(), normalized);
 }
 
 export async function signOutMember() {

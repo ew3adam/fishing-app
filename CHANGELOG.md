@@ -8,18 +8,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added
-- **Self-serve member signup** (`authService.signUpMemberEmail`): roster-gated account
-  creation using `createUserWithEmailAndPassword`; rolls back the Auth account if the
-  email is not in the active Firestore members collection.
-- **Forgot password flow** (`authService.sendMemberPasswordReset`): sends Firebase
-  password-reset email; confirmation message shown inline in the sign-in card.
-- **ProfileTab auth modes**: sign-in card now toggles between `signin`, `signup`, and
-  a forgot-password confirmation state; "New member? Set up your account" and
-  "Already have an account? Sign in" links switch between modes.
+- **Passwordless email link sign-in** (primary flow): member types their club email →
+  taps "Send me a sign-in link" → Firebase emails a magic link → tap opens app and
+  signs in automatically. No password creation required; Firebase Auth account is
+  created on first link use.
+- `authService.sendSignInLink(email)` — sends `signInWithEmailLink` email; stores
+  email in localStorage for same-device auto-complete.
+- `authService.isSignInLink(href)` — detects Firebase email-link URLs.
+- `authService.completeSignInWithLink(href)` — completes sign-in on same device
+  (reads email from localStorage); returns `{ needsEmail: true }` if opened on a
+  different device.
+- `authService.completeSignInWithLinkAndEmail(email, href)` — completes sign-in when
+  user must confirm their email (different-device scenario).
+- **Mount-time link detection** in `App.jsx`: on load, checks if the URL is an email
+  sign-in link; if so, navigates to Profile tab, cleans the URL, and auto-completes
+  (or shows a confirm-email prompt for different-device opens).
+- **ProfileTab auth modes** (replaced old signin/signup/forgot with):
+  - `link` — default: email input + "Send me a sign-in link" button
+  - `link-sent` — confirmation screen with "check your email" message
+  - `link-completing` — spinner while auto-completing on same device
+  - `link-confirm` — email-confirm prompt for different-device sign-in
+  - `password` — fallback password sign-in for members who set one up previously
+- **Plain-language errors** (`translateAuthError`): all Firebase error codes mapped to
+  friendly messages understandable by any user.
+- **Password show/hide toggle** in password fallback mode.
+
+### Removed
+- `authService.signUpMemberEmail` — replaced by email link (auto-creates account on
+  first sign-in).
+- `authService.sendMemberPasswordReset` — replaced by send-link flow.
+- "First time here?" / "Create account" / "Forgot password?" UI modes — email link
+  flow handles all three cases in one step.
+
+### Added (continued)
+- **Club Spots badge**: red number badge on Spots tab nav icon when new club-shared spots
+  exist since the member's last visit; clears on opening Club Spots view.
+- **Self excluded from sharing picker**: signed-in user no longer sees themselves in the
+  member list when sharing a spot.
+- **Saved spots visible on Guide view**: user's private spots appear at the top of the
+  Spots tab main view without needing to switch to "My spots" toggle.
+- **"Your spots" card on Home**: after GPS loads, shows closest private spots with
+  species and seasonal bait tips.
+- **Pinned spot → RFC Bite Forecast**: new `pinHome` boolean on spots. Toggled via
+  "Show on home page" checkbox in the map-picker save form and spot detail Sharing
+  section. When pinned, the RFC Bite Forecast card shows that spot's name, species,
+  bait tips, and notes instead of the nearest generic water. Only one spot can be
+  pinned at a time. Falls back to generic nearest water when no spot is pinned.
 
 ### Next
-- Enable Email/Password in Firebase Console (rfc-management → Auth → Sign-in method)
-- Admin panel: list members + `authUid` link status (who has set up an account)
+- **Firebase Console (manual, one-time steps)**:
+  1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
+  2. Authentication → Settings → Authorized domains → Add `ew3adam.github.io`
+- Email/Password provider can stay enabled as fallback.
+- Admin panel: list members + `authUid` link status (who has signed in vs. not yet)
 
 ---
 
