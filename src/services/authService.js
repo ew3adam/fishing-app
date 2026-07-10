@@ -2,6 +2,9 @@
  * Sign-in with roster gate — only emails on Firestore members collection may stay signed in.
  */
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -37,6 +40,54 @@ export async function signInMemberEmail(email, password) {
 
   await linkAuthUidToMember(memberAfter.id, user.uid);
   return { user: user, member: memberAfter };
+}
+
+/** Self-serve first-time signup — roster-gated; rolls back Auth account if email not on roster. */
+export async function signUpMemberEmail(email, password) {
+  var auth = getFirebaseAuth();
+  var normalized = normalizeEmail(email);
+  if (!normalized) {
+    throw new Error("Enter a valid email address.");
+  }
+  if (String(password || "").length < 10) {
+    throw new Error("Password must be at least 10 characters.");
+  }
+
+  var cred;
+  try {
+    cred = await createUserWithEmailAndPassword(auth, normalized, password);
+  } catch (e) {
+    if (e && e.code === "auth/email-already-in-use") {
+      throw new Error("An account with this email already exists — use Sign in instead.");
+    }
+    throw e;
+  }
+
+  var user = cred.user;
+  var member;
+  try {
+    member = await findMemberByEmail(user.email || normalized);
+  } catch (e) {
+    try { await deleteUser(user); } catch (_) {}
+    throw e;
+  }
+
+  if (!member || !member.isActive || !member.email) {
+    await deleteUser(user);
+    throw new Error(ROSTER_BLOCK_MSG);
+  }
+
+  await linkAuthUidToMember(member.id, user.uid);
+  return { user: user, member: member };
+}
+
+/** Send Firebase password-reset email; only if email is on the active roster. */
+export async function sendMemberPasswordReset(email) {
+  var normalized = normalizeEmail(email);
+  if (!normalized) {
+    throw new Error("Enter a valid email address.");
+  }
+  await sendPasswordResetEmail(getFirebaseAuth(), normalized);
 }
 
 export async function signOutMember() {

@@ -7,10 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
-### Planned
-- Roster-gated self-service signup (member sets own password in-app)
-- Full Firebase Auth account sync for all active members
-- Member sync pipeline: spreadsheet → Firestore → Auth
+### Added
+- **Self-serve member signup** (`authService.signUpMemberEmail`): roster-gated account
+  creation using `createUserWithEmailAndPassword`; rolls back the Auth account if the
+  email is not in the active Firestore members collection.
+- **Forgot password flow** (`authService.sendMemberPasswordReset`): sends Firebase
+  password-reset email; confirmation message shown inline in the sign-in card.
+- **ProfileTab auth modes**: sign-in card now toggles between `signin`, `signup`, and
+  a forgot-password confirmation state; "New member? Set up your account" and
+  "Already have an account? Sign in" links switch between modes.
+
+### Next
+- Enable Email/Password in Firebase Console (rfc-management → Auth → Sign-in method)
+- Admin panel: list members + `authUid` link status (who has set up an account)
 
 ---
 

@@ -6,22 +6,28 @@ lastSessionAt: "2026-07-09T00:00:00-05:00"
 
 ## Where we left off
 
-- Reviewed how data (catches, profile, spots) saves to Firebase — requires signed-in
-  Firebase Auth account whose email matches Firestore `members` collection.
-- Reviewed the SDS folder (`Ideas - Software Design Specification (SDS)/`, one level
-  above repo) — long-term Cloudflare + TypeScript + D1 vision documented and saved
-  to memory. SDS stays outside repo (privacy — no PII on GitHub).
-- Created `CHANGELOG.md` at repo root — full phase history (Phases 1–8) from git log.
-- Created `~/.claude/CLAUDE.md` — global Claude Code rule: always use `CHANGELOG.md`
-  at repo root; migrate any differently-named files after asking Adam first.
-- Committed and pushed `CHANGELOG.md` (`efa49fe`).
+Built the complete member auth flow (self-serve, roster-gated):
+
+- `authService.js` — added `signUpMemberEmail`: creates Firebase Auth account, reads
+  Firestore roster while authenticated, rolls back the account if email not found/inactive,
+  links `authUid` to member doc on success.
+- `authService.js` — added `sendMemberPasswordReset`: wraps `sendPasswordResetEmail`.
+- `App.jsx` — ProfileTab sign-in card now has three modes:
+  - **signin** (default) — existing email/password form + "Forgot password?" link on the right
+  - **signup** — email + password + confirm; roster-gated account creation
+  - Forgot password sends reset email and shows confirmation in the card.
+
+Firestore `members` collection is already seeded (user confirmed). The CSV import
+script is at `C:\…\RFC\Firebase\scripts\import-members-from-csv.js`.
 
 ## Next
 
-- Member sync pipeline: spreadsheet → Firestore → Firebase Auth (self-service signup).
-  Plan was drafted but not approved — pick up with `/plan` next session.
-- Roster-gated "set your password" signup flow in app (member sets own password).
-- Future: full active roster + Auth accounts synced from spreadsheet via CSV import.
+- **Enable Email/Password auth in Firebase Console** (manual, one-time):
+  Firebase Console → project `rfc-management` → Authentication → Sign-in method →
+  Email/Password → toggle ON. Without this, all sign-in and sign-up calls fail.
+- Test the full flow end-to-end: sign up with a roster email, sign in, check cloud sync.
+- Consider adding an **admin panel** in Settings tab to see/manage members and their
+  `authUid` link status (which members have set up accounts vs. haven't yet).
 
 ## Save state
 

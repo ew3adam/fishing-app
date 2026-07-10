@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, signUpMemberEmail, sendMemberPasswordReset, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots } from "./services/fishingSyncService.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
@@ -3321,7 +3321,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSignUp, onPasswordReset, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -3330,6 +3330,9 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   const [signInPassword, setSignInPassword] = useState("");
   const [signInBusy, setSignInBusy] = useState(false);
   const [signInLocalError, setSignInLocalError] = useState("");
+  const [signInMode, setSignInMode] = useState("signin");
+  const [signUpConfirm, setSignUpConfirm] = useState("");
+  const [resetSent, setResetSent] = useState(false);
   const [rosterHealth, setRosterHealth] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
 
@@ -3419,6 +3422,36 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
     });
   }
 
+  function handleSignUpClick() {
+    setSignInLocalError("");
+    if (!signInPassword || signInPassword !== signUpConfirm) {
+      setSignInLocalError("Passwords do not match.");
+      return;
+    }
+    setSignInBusy(true);
+    onSignUp(signInEmail, signInPassword).catch(function(err) {
+      setSignInLocalError(err && err.message ? err.message : "Account creation failed.");
+    }).finally(function() {
+      setSignInBusy(false);
+    });
+  }
+
+  function handleForgotClick() {
+    setSignInLocalError("");
+    if (!signInEmail) {
+      setSignInLocalError("Enter your email above first.");
+      return;
+    }
+    setSignInBusy(true);
+    onPasswordReset(signInEmail).then(function() {
+      setResetSent(true);
+    }).catch(function(err) {
+      setSignInLocalError(err && err.message ? err.message : "Could not send reset email.");
+    }).finally(function() {
+      setSignInBusy(false);
+    });
+  }
+
   var displayName = authMember ? authMember.displayName : (form.name || "Your Profile");
   var displayEmail = authMember ? authMember.email : form.email;
 
@@ -3431,7 +3464,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
       </div>
 
       <Card T={T} borderColor={authUser ? th.green + "55" : th.orange + "55"}>
-        <SecLabel text={authUser ? "Signed in — syncs phone and browser" : "RFC member sign-in"} T={T} />
+        <SecLabel text={authUser ? "Signed in — syncs phone and browser" : signInMode === "signup" ? "Create your RFC account" : "RFC member sign-in"} T={T} />
         {authLoading ? (
           <div style={{ fontSize:13, color:th.muted }}>Checking sign-in…</div>
         ) : authUser && authMember ? (
@@ -3440,6 +3473,25 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
             <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Catches and spots save to RFC cloud (project rfc-management). Same account on every device.</div>
             {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
             <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted }}>Sign out</button>
+          </div>
+        ) : signInMode === "signup" ? (
+          <div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your email must be on the RFC roster. First time only — you'll sign in normally after this.</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Choose a password (min 10 characters)</div>
+            <input type="password" value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={iStyle} autoComplete="new-password" />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Confirm password</div>
+            <input type="password" value={signUpConfirm} onChange={function(e) { setSignUpConfirm(e.target.value); }} placeholder="Confirm password" style={iStyle} autoComplete="new-password" />
+            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+            <button type="button" onClick={handleSignUpClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
+              {signInBusy ? "Creating account…" : "Create my account"}
+            </button>
+            <div style={{ textAlign:"center", marginTop:14 }}>
+              <button type="button" onClick={function() { setSignInMode("signin"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
+                Already have an account? Sign in
+              </button>
+            </div>
           </div>
         ) : (
           <div>
@@ -3457,10 +3509,21 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password (min 10 characters)</div>
             <input type="password" value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={iStyle} autoComplete="current-password" />
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+            {resetSent ? (
+              <div style={{ fontSize:12, color:th.green, marginBottom:8, lineHeight:1.5 }}>Reset email sent — check your inbox and follow the link, then come back to sign in.</div>
+            ) : null}
             <button type="button" onClick={handleSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
               {signInBusy ? "Signing in…" : "Sign in with Email"}
             </button>
-            <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:6 }}>
+            <div style={{ textAlign:"center", marginTop:10, marginBottom:6, display:"flex", justifyContent:"space-between" }}>
+              <button type="button" onClick={function() { setSignInMode("signup"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
+                New member? Set up your account
+              </button>
+              <button type="button" onClick={handleForgotClick} disabled={signInBusy} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
+                Forgot password?
+              </button>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
               {getOAuthPlaceholderButtons().map(function(btn) {
                 return (
                   <button
@@ -3928,6 +3991,18 @@ export default function App() {
     });
   }, []);
 
+  var handleSignUp = useCallback(function(email, password) {
+    return signUpMemberEmail(email, password).then(function(result) {
+      setAuthUser(result.user);
+      setAuthMember(result.member);
+      setAuthError("");
+    });
+  }, []);
+
+  var handlePasswordReset = useCallback(function(email) {
+    return sendMemberPasswordReset(email);
+  }, []);
+
   var handleSignOut = useCallback(function() {
     signOutMember().then(function() {
       setAuthUser(null);
@@ -4015,7 +4090,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSignUp={handleSignUp} onPasswordReset={handlePasswordReset} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
