@@ -14,8 +14,8 @@ import { findMemberByEmail, linkAuthUidToMember, normalizeEmail } from "./member
 import { loadFishingProfileFromCloud, saveFishingProfileToCloud } from "./fishingSyncService.js";
 import { getAuthProviderConfig } from "../config/authProviders.js";
 
-var ROSTER_BLOCK_MSG = "Not an RFC member — contact the club admin.";
-var OAUTH_NOT_CONFIGURED_MSG = "This sign-in method is not configured yet. Add API keys in .env.local (see .env.example).";
+var ROSTER_BLOCK_MSG = "Your email isn't on the club list. Ask the club president to add you first.";
+var OAUTH_NOT_CONFIGURED_MSG = "This sign-in option isn't set up yet. Contact the club admin.";
 
 /** Email/password sign-in; rejects if email not on active roster. */
 export async function signInMemberEmail(email, password) {
@@ -58,7 +58,7 @@ export async function signUpMemberEmail(email, password) {
     cred = await createUserWithEmailAndPassword(auth, normalized, password);
   } catch (e) {
     if (e && e.code === "auth/email-already-in-use") {
-      throw new Error("An account with this email already exists — use Sign in instead.");
+      throw new Error("You already set up an account with this email. Tap \"Already set up? Sign in\" to log in.");
     }
     throw e;
   }

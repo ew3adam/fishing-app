@@ -3418,21 +3418,21 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   function translateAuthError(err) {
     var code = err && err.code ? err.code : "";
     if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
-      return "Email or password is incorrect.";
+      return "That email or password didn't work. Double-check what you typed and try again.";
     }
     if (code === "auth/too-many-requests") {
-      return "Too many failed attempts — wait a few minutes or use Forgot password.";
+      return "You've tried too many times. Wait a few minutes, then try again. Or tap \"Forgot your password?\" below.";
     }
     if (code === "auth/user-disabled") {
-      return "This account has been disabled. Contact the club admin.";
+      return "Your account has been turned off. Ask the club president for help.";
     }
     if (code === "auth/network-request-failed") {
-      return "Network error — check your connection and try again.";
+      return "Can't connect to the internet. Check your Wi-Fi or cell signal, then try again.";
     }
     if (code === "auth/weak-password") {
-      return "Password must be at least 10 characters.";
+      return "Your password needs to be at least 10 characters long. Try making it longer.";
     }
-    return (err && err.message) ? err.message : "Something went wrong — try again.";
+    return (err && err.message) ? err.message : "Something went wrong. Try again.";
   }
 
   function handleSignInClick() {
@@ -3448,7 +3448,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   function handleSignUpClick() {
     setSignInLocalError("");
     if (!signInPassword || signInPassword !== signUpConfirm) {
-      setSignInLocalError("Passwords do not match.");
+      setSignInLocalError("The two passwords you typed are different. Make sure they match exactly.");
       return;
     }
     setSignInBusy(true);
@@ -3462,7 +3462,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
   function handleForgotClick() {
     setSignInLocalError("");
     if (!signInEmail) {
-      setSignInLocalError("Enter your email above first.");
+      setSignInLocalError("Type your email address in the box above first.");
       return;
     }
     setSignInBusy(true);
@@ -3487,22 +3487,22 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
       </div>
 
       <Card T={T} borderColor={authUser ? th.green + "55" : th.orange + "55"}>
-        <SecLabel text={authUser ? "Signed in — syncs phone and browser" : signInMode === "signup" ? "Create your RFC account" : "RFC member sign-in"} T={T} />
+        <SecLabel text={authUser ? "You're signed in!" : signInMode === "signup" ? "First time here? Create your account" : "Sign in to RFC Fishing"} T={T} />
         {authLoading ? (
           <div style={{ fontSize:13, color:th.muted }}>Checking sign-in…</div>
         ) : authUser && authMember ? (
           <div>
             <div style={{ fontSize:13, color:th.white, marginBottom:8 }}>{displayEmail}</div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Catches and spots save to RFC cloud (project rfc-management). Same account on every device.</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your catches and spots are saved to the cloud. You can open the app on any phone or computer and see the same data.</div>
             {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
             <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted }}>Sign out</button>
           </div>
         ) : signInMode === "signup" ? (
           <div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your email must be on the RFC roster. First time only — you'll sign in normally after this.</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>You only do this once. Pick a password for your club email address. Next time you'll just sign in normally.</div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Choose a password (min 10 characters)</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Pick a password (at least 10 characters)</div>
             <div style={{ position:"relative", marginBottom:10 }}>
               <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="new-password" />
               <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
@@ -3514,11 +3514,11 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
             </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
             <button type="button" onClick={handleSignUpClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Creating account…" : "Create my account"}
+              {signInBusy ? "Setting up your account…" : "Set Up My Account"}
             </button>
             <div style={{ textAlign:"center", marginTop:14 }}>
               <button type="button" onClick={function() { setSignInMode("signin"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
-                Already have an account? Sign in
+                Already set up an account? Tap here to sign in
               </button>
             </div>
           </div>
@@ -3529,27 +3529,27 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
                 {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
               </div>
             ) : null}
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Only emails on the club roster can sign in. Data on this phone alone does not appear in a desktop browser until you sign in.</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Type the email address you gave the club and your password. Your catches and spots will show up on all your devices once you sign in.</div>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
             <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password (min 10 characters)</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password</div>
             <div style={{ position:"relative", marginBottom:10 }}>
               <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
               <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
             </div>
             {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
             {resetSent ? (
-              <div style={{ fontSize:12, color:th.green, marginBottom:8, lineHeight:1.5 }}>Reset email sent — check your inbox and follow the link, then come back to sign in.</div>
+              <div style={{ fontSize:12, color:th.green, marginBottom:8, lineHeight:1.5 }}>We sent an email to your address. Open it and tap the link inside to pick a new password. Then come back here and sign in.</div>
             ) : null}
             <button type="button" onClick={handleSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Signing in…" : "Sign in with Email"}
+              {signInBusy ? "Signing in…" : "Sign In"}
             </button>
             <div style={{ textAlign:"center", marginTop:10, marginBottom:6, display:"flex", justifyContent:"space-between" }}>
               <button type="button" onClick={function() { setSignInMode("signup"); setSignInLocalError(""); setSignUpConfirm(""); setResetSent(false); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
-                New member? Set up your account
+                First time here? Tap to get started
               </button>
               <button type="button" onClick={handleForgotClick} disabled={signInBusy} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
-                Forgot password?
+                Forgot your password?
               </button>
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
