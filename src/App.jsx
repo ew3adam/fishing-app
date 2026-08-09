@@ -1757,6 +1757,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pickCenter, setPickCenter] = useState({ lat:41.84, lng:-87.83 });
   const [pickPin, setPickPin] = useState(null);
   const [pickName, setPickName] = useState("");
+  const [pickDefaultName, setPickDefaultName] = useState(""); // tracks whether pickName is still an unedited pre-fill
   const [pickShare, setPickShare] = useState(false);
   const [pickPinHome, setPickPinHome] = useState(false);
   const [pickBackTo, setPickBackTo] = useState("my");
@@ -1813,6 +1814,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setPickCenter({ lat:centerLat || 41.84, lng:centerLng || -87.83 });
     setPickPin(pin || null);
     setPickName(defaultName || "");
+    setPickDefaultName(defaultName || "");
     setPickShare(false);
     setPickBackTo(backTo || "my");
     setPrivView("pickmap");
@@ -1822,8 +1824,20 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setSaveErr("");
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPrivView(pickBackTo === "main" ? "main" : "my");
+  }
+
+  /** Pin moved away from where a name was pre-filled for (e.g. tapped a Guide Spot, then repositioned
+   *  the pin to the real spot) — the old name no longer describes this location, so stop assuming it does. */
+  function handlePickMove(lat, lng) {
+    if (pickDefaultName && pickName === pickDefaultName && haversineMi(pickCenter.lat, pickCenter.lng, lat, lng) > 0.3) {
+      setPickName("");
+      setPickDefaultName("");
+    }
+    setPickPin({ lat:lat, lng:lng });
+    setSaveErr("");
   }
 
   function saveFromPickMap() {
@@ -1853,6 +1867,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     }
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPickPinHome(false);
     setPrivView("my");
@@ -2065,13 +2080,18 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           centerLng={pickCenter.lng}
           pinLat={pickPin ? pickPin.lat : null}
           pinLng={pickPin ? pickPin.lng : null}
-          onPick={function(lat, lng) { setPickPin({ lat:lat, lng:lng }); setSaveErr(""); }}
+          onPick={handlePickMove}
           height={300}
         />
         {pickPin ? (
           <div style={{ marginTop:12 }}>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot name</div>
-            <input value={pickName} onChange={function(e) { setPickName(e.target.value); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            <input value={pickName} onChange={function(e) { setPickName(e.target.value); setPickDefaultName(""); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            {pickDefaultName && pickName === pickDefaultName ? (
+              <div style={{ fontSize:11, color:th.gold, marginTop:-6, marginBottom:10 }}>
+                Pre-filled from "{pickDefaultName}" — check it still matches where your pin is, or edit it.
+              </div>
+            ) : null}
             <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Keep private or share?</div>
             <div style={{ display:"flex", gap:8, marginBottom:10 }}>
               <button type="button" onClick={function() { setPickShare(false); }} style={{ flex:1, background:!pickShare ? th.green + "33" : "transparent", border:"1px solid " + (!pickShare ? th.green : th.border), borderRadius:8, color:!pickShare ? th.green : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:!pickShare ? 700 : 400 }}>Private</button>
