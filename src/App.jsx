@@ -986,7 +986,11 @@ function BFRDial({ score, color, T }) {
 
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation_probability,surface_pressure&hourly=surface_pressure&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
+    // Note: precipitation_probability is an *hourly*-only Open-Meteo field — requesting it under
+    // `current` (as this used to) silently returns nothing, so precip always read 0%. Fetch it via
+    // `hourly` instead and look up the entry matching the current hour; `current.precipitation` gives
+    // real-time rain (mm) as a separate, non-forecast signal.
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation,surface_pressure&hourly=surface_pressure,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
@@ -995,6 +999,12 @@ async function loadWeather(lat, lng) {
     if (d.hourly && d.hourly.surface_pressure && d.hourly.surface_pressure.length > 3) {
       pressurePrior = d.hourly.surface_pressure[Math.max(0, d.hourly.surface_pressure.length - 4)];
     }
+    var nowHourKey = c.time ? String(c.time).slice(0, 13) : null; // e.g. "2026-08-09T17" — same tz as hourly.time
+    var hourIdx = -1;
+    if (nowHourKey && d.hourly && d.hourly.time) {
+      hourIdx = d.hourly.time.findIndex(function(t) { return String(t).slice(0, 13) === nowHourKey; });
+    }
+    var precipProbPct = (hourIdx >= 0 && d.hourly.precipitation_probability) ? d.hourly.precipitation_probability[hourIdx] : 0;
     var sunrise = d.daily && d.daily.sunrise ? d.daily.sunrise[0] : null;
     var sunset = d.daily && d.daily.sunset ? d.daily.sunset[0] : null;
     return {
@@ -1007,7 +1017,8 @@ async function loadWeather(lat, lng) {
       sunrise: sunrise,
       sunset: sunset,
       code: c.weathercode,
-      precip: c.precipitation_probability || 0,
+      precip: precipProbPct || 0,
+      rainingNowMm: c.precipitation || 0,
       icon: WX_ICON[c.weathercode] || "🌡️",
       condition: WX_LABEL[c.weathercode] || "Unknown",
       lat: lat,
@@ -1030,6 +1041,34 @@ async function loadWeather(lat, lng) {
     const m = txt.match(/\{[^}]+\}/);
     if (m) return JSON.parse(m[0]);
     return null;
+  }
+}
+
+/**
+ * Active NWS severe-weather alerts (flood/storm/wind/etc.) for a point — safety info, not bite quality.
+ * Public weather.gov API, no key. Bite score never reflects this; the Home banner is what should.
+ */
+async function loadActiveWeatherAlerts(lat, lng) {
+  try {
+    const r = await fetch("https://api.weather.gov/alerts/active?point=" + lat + "," + lng, {
+      headers: { "Accept": "application/geo+json" },
+    });
+    if (!r.ok) return [];
+    const d = await r.json();
+    return (d.features || []).map(function(f) {
+      var p = f.properties || {};
+      return {
+        id: f.id || p.id,
+        event: p.event || "Weather Alert",
+        headline: p.headline || p.event || "",
+        severity: p.severity || "Unknown",
+        urgency: p.urgency || "Unknown",
+        expires: p.expires || null,
+        senderName: p.senderName || "National Weather Service",
+      };
+    });
+  } catch (e) {
+    return []; // A failed alert check should never block the rest of Home from loading.
   }
 }
 
@@ -1228,6 +1267,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   });
   const [nearestWater, setNearestWater] = useState(null);
   const [userGps, setUserGps] = useState(null);
+  const [weatherAlerts, setWeatherAlerts] = useState([]);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
@@ -1241,6 +1281,8 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         setLoading(false);
         if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
       });
+      // Safety, not bite quality — loaded independently so a slow/failed alert check never blocks the forecast.
+      loadActiveWeatherAlerts(la, ln).then(setWeatherAlerts);
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -1331,6 +1373,28 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           </div>
         </div>
       )}
+
+      {weatherAlerts.length > 0 ? (
+        <div style={{ background:th.red + "22", border:"1px solid " + th.red, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+          {weatherAlerts.map(function(a, i) {
+            return (
+              <div key={a.id || i} style={{ marginBottom:i < weatherAlerts.length - 1 ? 10 : 0 }}>
+                <div style={{ fontSize:13, color:th.red, fontWeight:800 }}>⚠️ {a.event} — {a.senderName}</div>
+                <div style={{ fontSize:11, color:th.white, marginTop:2, lineHeight:1.45 }}>{a.headline}</div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.4 }}>
+            This is a safety alert, separate from the bite score below — a good bite score doesn't mean it's safe to be out. Check conditions before you go.
+          </div>
+        </div>
+      ) : null}
+      {wx && wx.rainingNowMm > 0.5 && weatherAlerts.length === 0 ? (
+        <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "55", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:12, color:th.blue, fontWeight:700 }}>
+          🌧️ Actively raining at your location right now
+        </div>
+      ) : null}
+
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
         <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
