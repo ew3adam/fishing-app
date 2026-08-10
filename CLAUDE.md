@@ -10,8 +10,12 @@ At the start of every session:
 1. Run `git fetch` and check if local branch is behind remote — if so, pull automatically.
 2. Report: current branch, uncommitted changes, and a one-line summary of where we left off (see `docs/dev-session-log.md`).
 
-## Keeping this file current
-This file must stay accurate as the app evolves — that's an ongoing responsibility, not a one-off docs pass. Whenever a change touches something this file describes (tech stack, tab structure, data model/sync behavior, auth flow, a documented gotcha, the key-files table, dev commands), update the relevant section **in the same commit/PR as the code change**, not only when someone explicitly asks for a "docs" task. Before calling any non-trivial change done, check whether it made a claim here stale and fix it — treat a stale CLAUDE.md the same as a bug you introduced.
+## Keeping docs current
+`CLAUDE.md` and `CHANGELOG.md` must both stay accurate as the app evolves — that's an ongoing responsibility, not a one-off docs pass.
+- **`CLAUDE.md`**: whenever a change touches something this file describes (tech stack, tab structure, data model/sync behavior, auth flow, a documented gotcha, the key-files table, dev commands), update the relevant section **in the same commit/PR as the code change**, not only when someone explicitly asks for a "docs" task.
+- **`CHANGELOG.md`**: add an entry under `## [Unreleased]` (Keep a Changelog format — `Added`/`Fixed`/`Removed`, etc.) for any user-facing change or notable internal fix, in the same commit/PR as the change itself.
+
+Before calling any non-trivial change done, check whether it made a claim in either file stale and fix it — treat stale docs the same as a bug you introduced.
 
 ## Tech Stack
 - **Framework**: React 18 + Vite 5, plain JS/JSX (no TypeScript)
@@ -95,6 +99,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `scripts/scan-pii.js` | PII/secrets scanner (pre-commit + pre-deploy) |
 | `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
 | `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
+| `CHANGELOG.md` | User-facing + notable internal changes, Keep a Changelog format under `[Unreleased]` — keep current per "Keeping docs current" above |
 
 ## Coding Style
 - Vanilla JS inside JSX (no TypeScript).
@@ -103,7 +108,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 - Minimal diffs: no drive-by refactors unless asked; if you do touch a file, leave it cleaner per `docs/refactoring-policy.md` (delete dead code/unused imports you encounter in the area you're already editing — don't go looking for more).
 
 ## Important Constraints
-- **Keep CLAUDE.md current** — update it alongside any change that affects what it documents (see "Keeping this file current" above); don't let it drift into a stale snapshot.
+- **Keep CLAUDE.md and CHANGELOG.md current** — update both alongside any change that affects what they document (see "Keeping docs current" above); don't let them drift into a stale snapshot.
 - **No test suite, no linter** — manually test in browser before marking anything done.
 - **PII scan** — `npm run scan:pii` audits the repo; pre-commit hook blocks staged emails/phones/passwords; `npm run deploy` scans `src`, `public`, `data` first. Known-safe strings go in `scripts/pii-allowlist.txt`.
 - `App.jsx` is intentionally monolithic; don't split it unless the user asks.
