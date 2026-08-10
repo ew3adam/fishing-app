@@ -1025,22 +1025,27 @@ async function loadWeather(lat, lng) {
       lng: lng,
     };
   } catch(e) {
-    // Fallback: ask Claude for estimate
-    const now = new Date();
-    const mo = now.toLocaleString("default",{month:"long"});
-    const hr = now.getHours();
-    const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
-        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
-      })
-    });
-    const data = await res.json();
-    const txt = (data.content && data.content[0] && data.content[0].text) || "";
-    const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
-    return null;
+    // Fallback: ask Claude for an estimate. This only works where api.anthropic.com is reachable
+    // without an API key (this app never sends one) — in a normal browser it 401s/CORS-fails, so
+    // this whole block must never throw: a failure here should mean "no weather", not a stuck app.
+    try {
+      const now = new Date();
+      const mo = now.toLocaleString("default",{month:"long"});
+      const hr = now.getHours();
+      const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
+          messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
+        })
+      });
+      const data = await res.json();
+      const txt = (data.content && data.content[0] && data.content[0].text) || "";
+      const m = txt.match(/\{[^}]+\}/);
+      return m ? JSON.parse(m[0]) : null;
+    } catch (e2) {
+      return null;
+    }
   }
 }
 
@@ -1280,6 +1285,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         setNearestWater(findNearestHomeWater(la, ln));
         setLoading(false);
         if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
+      }).catch(function() {
+        // loadWeather already catches its own failures and resolves null/an estimate — this is
+        // a defensive backstop so a future change there can never leave loading stuck true forever.
+        setWx(null);
+        setLoading(false);
       });
       // Safety, not bite quality — loaded independently so a slow/failed alert check never blocks the forecast.
       loadActiveWeatherAlerts(la, ln).then(setWeatherAlerts);

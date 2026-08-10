@@ -3,129 +3,105 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-A React fishing app for RFC (a fishing club). Members log catches, scout spots, view a club feed, and sync data across devices. Client-side-only PWA (no custom backend) deployed to GitHub Pages, backed by a Firebase project shared with the separate RFC CRM.
+A React fishing app for RFC (Riverside Fishing Club, North Riverside IL). Members log catches, get species/rig guidance, scout spots, view a club feed, and sync data across devices. Client-side only (no server) — deployed as a static site to GitHub Pages, with Firebase for auth/data.
 
 ## Startup Protocol
 At the start of every session:
 1. Run `git fetch` and check if local branch is behind remote — if so, pull automatically.
 2. Report: current branch, uncommitted changes, and a one-line summary of where we left off (see `docs/dev-session-log.md`).
 
-When the user says **"save state"** (any casing): update `docs/dev-session-log.md` (`lastSessionAt`, **Where we left off** + **Next**), run `npm run scan:pii`, then `git add` / `git commit` / `git push origin main`. Never commit `.env.local`, service-account JSON, real member CSVs, or PII in docs.
-
 ## Tech Stack
-- **Framework**: React 18 + Vite 5, no TypeScript
-- **Backend**: Firebase (Auth, Firestore, Storage) — project `rfc-management`, shared with the RFC CRM app
-- **Maps**: Leaflet
+- **Framework**: React 18 + Vite 5, plain JS/JSX (no TypeScript)
+- **Backend**: Firebase (Auth, Firestore, Storage) — shared project `rfc-management`, also used by a separate RFC CRM app
+- **Maps**: Leaflet, OpenStreetMap tiles
 - **EXIF parsing**: exifr (reads GPS coords from catch photos)
-- **Weather**: Open-Meteo, called directly from the browser (no key)
-- **Deploy**: `npm run deploy` → gh-pages branch
-- **No test framework and no linter are configured.** Manually verify in the browser (`npm run dev`) before marking work done.
+- **Weather**: Open-Meteo REST API (no key)
+- **AI features**: direct browser `fetch` to `api.anthropic.com` (weather-estimate fallback, fishing tips, tackle images/lookups) — see gotcha below
+- **Deploy**: `npm run deploy` → `gh-pages` branch (GitHub Pages); base path also supports Cloudflare Pages
 
 ## Development Commands
 ```bash
-npm install       # also installs the pre-commit PII-scan git hook (npm "prepare" script)
-npm run dev        # local dev server — http://localhost:5173/fishing-app/ (note the base path)
-npm run dev -- --host 0.0.0.0   # bind to all interfaces (useful in cloud/VM sandboxes)
-npm run build      # production build (vite build)
-npm run preview    # preview a production build locally
-npm run scan:pii          # full-repo PII/secrets audit
-npm run scan:pii:staged   # staged-files-only scan (what the pre-commit hook runs)
-npm run deploy      # scan:pii on src/public/data → build → gh-pages -d dist
+npm install
+npm run dev       # local dev server, served at /fishing-app/ base path
+npm run build     # production build
+npm run preview   # preview the production build
+npm run deploy    # PII scan on src/public/data, then build, then push to gh-pages
+npm run scan:pii        # full-repo PII/secrets audit
+npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 ```
-There is no single-test command — there are no automated tests in this repo.
+- No test suite and no linter are configured — manually verify changes in the browser.
+- `npm install` runs `scripts/setup-git-hooks.js` (via the `prepare` script), which wires a pre-commit hook that blocks commits containing emails/phones/passwords (see `scripts/scan-pii.js` and `scripts/pii-allowlist.txt`).
+- Firebase security rules (`firebase/firestore.rules`, `firebase/storage.rules`) are deployed separately, not by `npm run deploy`: `firebase deploy --only firestore:rules,storage --project rfc-management` (see `docs/FIREBASE-DEPLOY.md`).
 
-### Vite base path
-`vite.config.js` sets `base: '/fishing-app/'` normally, but `'/'` when `CF_PAGES` is set (Cloudflare Pages preview builds). Local dev and GitHub Pages URLs must include the `/fishing-app/` prefix.
+## Architecture
 
-## High-Level Architecture
+### Entry point and the monolith
+`src/main.jsx` renders `src/App.jsx` — that's the entire app. `App.jsx` (~4300 lines) owns all tabs, all state, and all UI as one file; keep changes there unless the user explicitly asks to split it (see `docs/refactoring-policy.md` for the "leave it cleaner than you found it" rule that otherwise applies).
 
-### Entry point and the two "App" files
-`src/main.jsx` renders `src/App.jsx` — that is the entire live application (routing, all tabs, all state). **`src/FishingApp.jsx` (~2.4k lines) is dead code**: it is never imported anywhere and hasn't been touched since the initial commit. Don't extend it and don't assume it reflects current behavior; treat `src/App.jsx` as the single source of truth. If asked to clean up dead code, this file is a candidate for removal, but confirm with the user first since it's a large deletion.
+**Gotcha:** `src/FishingApp.jsx` (~2400 lines) is a separate, unrelated file that looks like an alternate copy of the app but is **not imported anywhere** — `main.jsx` only ever renders `App.jsx`. Don't edit `FishingApp.jsx` expecting it to affect the running app; confirm with the user before touching or removing it.
 
-### `src/App.jsx` is a deliberate ~4.3k-line monolith
-Nearly all UI, state, and business logic lives in one file: THEMES/constants, standalone helpers (distance math, bite-forecast scoring, EXIF spot resolution, moon/solunar calc, etc.), a handful of shared UI primitives (`Card`, `Pill`, `OBtn`, `BFRDial`), and one function per tab. Rough map (line numbers drift as the file grows — use `grep -n "^function "` to re-locate):
+### Tabs (`NAV` array in `App.jsx`, ~line 4020)
+`Home` → `Species` → `Spots` → `Tackle` (`catalogue`) → `Catch` → `Scout` → `Learn`, plus `Profile` reached via a header avatar button (not in `NAV`). Each tab is its own top-level function component inside `App.jsx` (e.g. `HomeTab`, `SpotsTab`, `CatchTab`, `ProfileTab`, `ScoutTab`) — search for `function XxxTab(` to jump to one.
+- **Home**: toggles between Forecast (weather + species/bait tips, optionally overridden by a pinned spot) and the Club Feed.
+- **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
+- **Spots**: private + club-shared fishing spots, Leaflet map picker.
+- **Scout**: browse/search known spots.
+- **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme.
 
-| Tab component | Nav tab |
-|---|---|
-| `HomeTab` | Home — Forecast ⇄ Club Feed toggle (`homeSection` state: `"forecast"` \| `"feed"`) |
-| `SpeciesTab` | Species |
-| `SpotsTab` | Spots — private + club-shared spots |
-| `LakesTab` / `CatalogueTab` | supporting screens under Spots/Tackle |
-| `CatchTab` | Catch — log a new catch only (no feed here; links out to Home's Club Feed) |
-| `LearnTab` | Learn |
-| `ProfileTab` | Profile (opened via header avatar, not a bottom nav tab) — also owns all auth UI |
-| `ScoutTab` | Scout — browse `SCOUT_SPOTS` (`src/data/scoutSpots.js`) |
+### Local-first, cloud-synced data
+Profile and catches live in `localStorage` first and are mirrored to Firestore once a member is signed in — this is not a thin Firestore client, so don't assume every read/write round-trips the network. Sync logic is in `src/services/fishingSyncService.js`:
+- `members/{memberId}/fishingProfile/main` — level, favSpecies, favSpots, gear, privateSpots, spotActivityLog
+- `members/{memberId}/fishingCatches/{catchId}` — individual catch records (photo stored in Firebase Storage, not as base64 in Firestore — see `catchPhotoStorage.js`)
+- Club feed (`loadClubFeedCatches`) and the club spot map (`loadClubSharedSpots`) work by fetching the active roster and reading every member's subcollections client-side, filtering to `visibility: club/public_feed` catches and `shareClub: true` spots in JS. **That filtering is client-side only, not rules-enforced**: `firebase/firestore.rules` lets any signed-in member read the full `fishingProfile/{docId}` doc for any other member (`allow read: if isSignedIn();`), including non-shared `privateSpots` entries — the rule doesn't scope by field. Don't treat an unset `shareClub` flag as actually private; a signed-in member could read it directly from Firestore regardless of what the UI shows.
 
-`App.jsx` is intentionally monolithic — **don't split it into files unless the user explicitly asks**. When touching it, prefer the smallest diff that accomplishes the task; this file has a documented history of large speculative rewrites being reverted (see `docs/CLAUDE-CODE-HANDOFF.md`).
+### Auth and the roster gate
+Only emails present in the Firestore `members` collection (shared with the RFC CRM app, project `rfc-management`) with `isActive !== false` may use the app — `src/services/authService.js` signs the user out again if the roster lookup fails. Primary sign-in is **passwordless email link** (`sendSignInLink` / `completeSignInWithLink[AndEmail]`); email+password (`signInMemberEmail`) is kept only as a fallback for members who set a password previously. Google/Facebook/Apple/Phone are wired as placeholders (`src/config/authProviders.js`, `signInMemberOAuth`) that throw a "not configured yet" error until `VITE_*` client IDs are set and the provider is enabled in the Firebase Console.
 
-### Services layer (`src/services/`) — Firestore access
-All Firebase reads/writes go through these modules rather than being inlined in components:
-- `firebase.js` (in `src/lib/`) — app/auth/db/storage init; hardcoded public web-config fallbacks, overridable via `VITE_FIREBASE_*` env vars.
-- `authService.js` — roster-gated sign-in. Primary flow is passwordless email link (`sendSignInLink`/`completeSignInWithLink*`); email+password is a fallback for members who set one up previously. Only emails present in the `members` roster are allowed to stay signed in.
-- `memberService.js` — active member roster lookups; member doc ID is `firstname_lastname` (e.g. `adam_bielawski`).
-- `fishingSyncService.js` — reads/writes `fishingProfile` and `fishingCatches`; also the club feed query (catches with `visibility` in `club`/`public_feed`).
-- `catchPhotoStorage.js` — compresses and uploads catch photos to Firebase Storage (kept out of Firestore docs to avoid document-size limits; some older catches still have base64 photos inline — see `resolveCatchPhotoUrl`).
-- `rosterImport.js` / `rosterHealthService.js` — CSV roster import, seed roster fallback, and a connectivity/health probe for the roster + auth setup.
-
-### Firestore data model
-```
-members/{memberId}                        — CRM roster row (shared with CRM app)
-members/{memberId}/fishingProfile/main    — level, favSpecies, favSpots, gear, privateSpots
-members/{memberId}/fishingCatches/{id}    — individual catch records (visibility: private|club|public_feed)
-```
-`firebase/firestore.rules` is the source of truth for access control. Notably: the fishing app may only ever update **`authUid`** and **`lastFishingAppLoginAt`** on a `members/{memberId}` doc — every other roster field is CRM-owned and read-only from this app. A signed-in member can write their own `fishingProfile`/`fishingCatches`; club-visible catches are readable by any signed-in member, and `likeCount` is the only field other members may update on someone else's club catch.
+There are two separate "roster" concepts — don't conflate them:
+- **Cloud roster** (`src/services/memberService.js`) — the Firestore `members` collection, source of truth for who can sign in.
+- **Local roster** (`src/services/rosterImport.js`) — a CSV/JSON import cached in `localStorage`, used for the member-sharing picker and offline directory before/without a cloud roster; seeded from `data/seeds/club-roster-v1.json`. Format documented in `docs/roster-format.md`.
 
 ### Spot privacy
-Club feed posts must never leak street addresses or raw GPS. `src/utils/feedSpotPrivacy.js` provides `looksLikePrivateAddress`, `buildSpotDisplayName`, `sanitizeSpotForForm`, and `formatFeedSpotName` — always run spot text through these before it reaches `ClubFeedList.jsx` or any shared/club-visibility write. This exists because an earlier revision leaked home addresses to the club feed and was reverted (see `docs/CLAUDE-CODE-HANDOFF.md`, "Reverted work").
+`src/utils/feedSpotPrivacy.js` strips anything that looks like a street address or raw GPS coordinates before a spot name reaches the club feed or a shared catch — always route spot names shown outside a member's own private view through `formatFeedSpotName` / `buildSpotDisplayName` / `sanitizeSpotForForm` rather than passing raw strings.
 
-### PII scanning
-`scripts/scan-pii.js` blocks staged commits (via a git hook auto-installed by `npm install`'s `prepare` script) and full-repo/deploy scans from containing real emails, phones, or credential-shaped files (e.g. `service-account.json`, `.env.local`). `scripts/pii-allowlist.txt` holds known-safe strings (placeholders, public club contact). `npm run deploy` always runs the full scan over `src`, `public`, `data` before building.
+### AI features have no API key
+Several features (weather-estimate fallback, one-line fishing tips, tackle image/info lookups in `App.jsx`) call `https://api.anthropic.com/v1/messages` directly from the browser with **no `x-api-key`/auth header at all**. This only works in environments that transparently proxy that origin (e.g. this session's sandboxed network, or Claude.ai's artifact preview) — in a normal browser hitting the real `api.anthropic.com`, or the deployed GitHub Pages site, these calls will fail with 401/CORS errors. Most call sites (`loadFishingTip`, `loadTackleImage`) wrap the whole thing in `try/catch` and fail silently — those are fine. **`loadWeather`'s Anthropic fallback is not**: it runs unguarded inside the `catch` block that handles the Open-Meteo failure (`src/App.jsx` ~line 1016-1033), so if it also throws (CORS/network error), the exception isn't caught anywhere, `loadWeather(...)` rejects, and its only caller (`HomeTab`'s `load()`, ~line 1118) has no `.catch()` — so `setLoading(false)` never runs and the forecast can be stuck loading. Treat this as a real bug to fix (wrap the Anthropic call in its own `try/catch` returning `null`, and/or add a `.catch()` at the call site), not as an intentional silent-fallback pattern — don't add a client-exposed API key to "fix" it instead.
+
+### Firebase config
+`src/lib/firebase.js` has hardcoded fallback values for the public web config (safe to expose — it's not a secret); `VITE_FIREBASE_*` env vars override them when set (see `.env.example`). `src/config/authProviders.js` **is committed to git** (not gitignored) and reads `VITE_GOOGLE_CLIENT_ID` / `VITE_FACEBOOK_APP_ID` / `VITE_APPLE_CLIENT_ID` / `VITE_PHONE_AUTH_ENABLED` at runtime, all disabled by default; `src/config/authProviders.example.js` is an older/unused template with a different (static object) shape — prefer editing `authProviders.js` directly.
 
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
-| `docs/RFC-MASTER-PLAN.md` | Product/engineering master plan and phased rollout decisions |
-| `docs/CLAUDE-CODE-HANDOFF.md` | Latest architecture/state pass-down, including reverted work not to reintroduce |
-| `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
-| `docs/refactoring-policy.md` | Leave-it-cleaner-than-you-found-it policy; checklist mirrored in the PR template |
-| `src/App.jsx` | Main app (~276KB, single large component) — all tabs, state, and UI logic |
-| `src/FishingApp.jsx` | **Dead code**, not imported — do not treat as current |
-| `src/lib/firebase.js` | Firebase init (supports env-var overrides via `VITE_FIREBASE_*`) |
-| `src/services/fishingSyncService.js` | Firestore sync for catches and fishing profiles |
-| `src/services/authService.js` | Auth (email link + password fallback, OAuth), cloud profile pull/push |
-| `src/services/memberService.js` | Active member roster from Firestore |
-| `src/services/rosterImport.js` | CSV roster import + seed roster |
-| `src/components/ClubFeedList.jsx` | Club-wide catch feed |
-| `src/components/SpotMapPicker.jsx` / `SpotMapThumb.jsx` | Leaflet map for picking / read-only display of spots |
-| `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed |
+| `src/App.jsx` | The app — all tabs, state, and UI logic (see Architecture above) |
+| `src/FishingApp.jsx` | Unused/orphaned duplicate — not imported by `main.jsx`, do not assume edits here matter |
+| `src/lib/firebase.js` | Firebase init (env-var overrides via `VITE_FIREBASE_*`) |
+| `src/services/fishingSyncService.js` | Firestore sync for catches, fishing profiles, club feed, club spot map |
+| `src/services/authService.js` | Auth (email link + password fallback + OAuth placeholders), roster gate, cloud profile pull/push |
+| `src/services/memberService.js` | Cloud roster (Firestore `members` collection) lookup/formatting helpers |
+| `src/services/rosterImport.js` | Local CSV/JSON roster import + seed roster, cached in `localStorage` |
+| `src/services/rosterHealthService.js` | Diagnostic check that the roster/auth Firestore reads work |
+| `src/services/catchPhotoStorage.js` | Compresses + uploads catch photos to Firebase Storage; strips base64 before Firestore writes |
+| `src/components/ClubFeedList.jsx` | Club-wide catch feed (pull-to-refresh, likes) |
+| `src/components/SpotMapPicker.jsx` / `SpotMapThumb.jsx` | Leaflet map for picking/displaying spots |
+| `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed (see Architecture above) |
 | `src/data/scoutSpots.js` | Static list of known scout spots |
-| `src/config/authProviders.js` | OAuth provider config (gitignored, do not commit real keys — template: `authProviders.example.js`) |
-| `firebase/firestore.rules`, `firebase/storage.rules` | Security rules — source of truth for what each role can read/write |
-
-## Important Constraints
-- **No test suite and no linter** — manually test in browser before marking anything done.
-- **PII scan** — `npm run scan:pii` audits the repo; pre-commit hook blocks staged emails/phones/passwords. Deploy runs the scan on `src`, `public`, `data` first.
-- `App.jsx` is intentionally monolithic; don't split it unless the user asks. Prefer minimal diffs — large speculative rewrites in this file have been built, shipped, and then reverted before.
-- `src/FishingApp.jsx` is unused dead code; don't build on it.
-- Firebase config has hardcoded fallback values (public web config); env vars override them.
-- `authProviders.js` is gitignored — use `authProviders.example.js` as the template.
-- Spot privacy must be respected: use `feedSpotPrivacy.js` utilities before pushing spots to the club feed.
-- `members/{memberId}` roster docs are CRM-owned; this app may only write `authUid` and `lastFishingAppLoginAt` on them (enforced by Firestore rules, not just convention).
-
-## App Tabs (as of last known state)
-1. **Home** — Forecast ⇄ Club Feed toggle; also shows a pinned spot's forecast when the member has pinned one
-2. **Species** — species reference info
-3. **Spots** — private + club-shared spots, map picker, sharing/privacy controls
-4. **Catch** — log a new catch (photo upload, EXIF GPS, species, size, weight, gear) — log only, no feed
-5. **Scout** — browse/search known spots (`SCOUT_SPOTS`) with map
-6. **Learn** — glossary/how-to content
-7. **Profile** — member profile, auth (sign in/up), gear list, favourite spots, roster/admin tools — opened via header avatar, not a bottom nav tab
-
-Do not reintroduce the 5-tab nav, "Scout Now" advisor, or offline service worker — that redesign was built and explicitly reverted (`docs/CLAUDE-CODE-HANDOFF.md`).
+| `data/seeds/club-roster-v1.json` | Seed data for the local roster import |
+| `src/config/authProviders.js` | OAuth provider runtime config (committed; no real secrets, only client IDs) |
+| `firebase/firestore.rules`, `firebase/storage.rules` | Security rules; deploy per `docs/FIREBASE-DEPLOY.md` |
+| `scripts/scan-pii.js` | PII/secrets scanner (pre-commit + pre-deploy) |
+| `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
+| `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
 
 ## Coding Style
-- Vanilla JS style inside JSX (no TypeScript).
-- Inline styles via theme objects (`THEMES.dark/light/bluesteel`) — no CSS modules. Note `ClubFeedList.jsx` keeps its own local copy of a subset of `THEMES` rather than importing from `App.jsx`.
-- `var` used throughout the codebase; match existing style.
-- Keep diffs minimal — no drive-by refactors unless asked; if you do touch a file for another reason, it's fine (and encouraged, per `docs/refactoring-policy.md`) to remove dead code/duplication you notice in the area you're already changing, but don't mix that with feature/bug-fix work in the same PR unless trivial.
+- Vanilla JS inside JSX (no TypeScript).
+- Inline styles via theme objects (`THEMES.dark`, `THEMES.light`, `THEMES.bluesteel`) — no CSS modules. The same `THEMES` shape is duplicated per-file (`App.jsx`, `ClubFeedList.jsx`, etc.) rather than shared — match that pattern rather than introducing a shared import.
+- `var` used throughout the codebase (mixed with `const`/`let` in newer code) — match the surrounding function's style rather than normalizing.
+- Minimal diffs: no drive-by refactors unless asked; if you do touch a file, leave it cleaner per `docs/refactoring-policy.md` (delete dead code/unused imports you encounter in the area you're already editing — don't go looking for more).
+
+## Important Constraints
+- **No test suite, no linter** — manually test in browser before marking anything done.
+- **PII scan** — `npm run scan:pii` audits the repo; pre-commit hook blocks staged emails/phones/passwords; `npm run deploy` scans `src`, `public`, `data` first. Known-safe strings go in `scripts/pii-allowlist.txt`.
+- `App.jsx` is intentionally monolithic; don't split it unless the user asks.
+- Spot privacy must be respected: use `feedSpotPrivacy.js` utilities before pushing spots/catches to the club feed.
+- Never commit `.env`/`.env.local`, `service-account.json`, real member CSVs, or PII in docs (also enforced by the PII scanner's blocked-filename list).
