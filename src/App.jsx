@@ -1500,6 +1500,9 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
 
       <Card T={T} borderColor={rating ? rating.color : undefined}>
         <SecLabel text="Today's Conditions" T={T} />
+        <div style={{ fontSize:11, color:th.gold, marginBottom:10, lineHeight:1.45 }}>
+          ⚠️ This score is fishing conditions only — it doesn't check flood, storm, or other severe weather alerts. Check your phone's Weather app or weather.gov for active alerts before heading out.
+        </div>
         {loading ? (
           <div style={{ textAlign:"center", padding:"20px 0", color:th.muted }}>Fetching live conditions...</div>
         ) : wx ? (
