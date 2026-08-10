@@ -6,7 +6,7 @@ import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadC
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
-import { buildSpotDisplayName, sanitizeSpotForForm } from "./utils/feedSpotPrivacy.js";
+import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
@@ -986,7 +986,11 @@ function BFRDial({ score, color, T }) {
 
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation_probability,surface_pressure&hourly=surface_pressure&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
+    // Note: precipitation_probability is an *hourly*-only Open-Meteo field — requesting it under
+    // `current` (as this used to) silently returns nothing, so precip always read 0%. Fetch it via
+    // `hourly` instead and look up the entry matching the current hour; `current.precipitation` gives
+    // real-time rain (mm) as a separate, non-forecast signal.
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation,surface_pressure&hourly=surface_pressure,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
@@ -995,6 +999,12 @@ async function loadWeather(lat, lng) {
     if (d.hourly && d.hourly.surface_pressure && d.hourly.surface_pressure.length > 3) {
       pressurePrior = d.hourly.surface_pressure[Math.max(0, d.hourly.surface_pressure.length - 4)];
     }
+    var nowHourKey = c.time ? String(c.time).slice(0, 13) : null; // e.g. "2026-08-09T17" — same tz as hourly.time
+    var hourIdx = -1;
+    if (nowHourKey && d.hourly && d.hourly.time) {
+      hourIdx = d.hourly.time.findIndex(function(t) { return String(t).slice(0, 13) === nowHourKey; });
+    }
+    var precipProbPct = (hourIdx >= 0 && d.hourly.precipitation_probability) ? d.hourly.precipitation_probability[hourIdx] : 0;
     var sunrise = d.daily && d.daily.sunrise ? d.daily.sunrise[0] : null;
     var sunset = d.daily && d.daily.sunset ? d.daily.sunset[0] : null;
     return {
@@ -1007,29 +1017,63 @@ async function loadWeather(lat, lng) {
       sunrise: sunrise,
       sunset: sunset,
       code: c.weathercode,
-      precip: c.precipitation_probability || 0,
+      precip: precipProbPct || 0,
+      rainingNowMm: c.precipitation || 0,
       icon: WX_ICON[c.weathercode] || "🌡️",
       condition: WX_LABEL[c.weathercode] || "Unknown",
       lat: lat,
       lng: lng,
     };
   } catch(e) {
-    // Fallback: ask Claude for estimate
-    const now = new Date();
-    const mo = now.toLocaleString("default",{month:"long"});
-    const hr = now.getHours();
-    const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
-        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
-      })
+    // Fallback: ask Claude for an estimate. This only works where api.anthropic.com is reachable
+    // without an API key (this app never sends one) — in a normal browser it 401s/CORS-fails, so
+    // this whole block must never throw: a failure here should mean "no weather", not a stuck app.
+    try {
+      const now = new Date();
+      const mo = now.toLocaleString("default",{month:"long"});
+      const hr = now.getHours();
+      const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
+          messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
+        })
+      });
+      const data = await res.json();
+      const txt = (data.content && data.content[0] && data.content[0].text) || "";
+      const m = txt.match(/\{[^}]+\}/);
+      return m ? JSON.parse(m[0]) : null;
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
+/**
+ * Active NWS severe-weather alerts (flood/storm/wind/etc.) for a point — safety info, not bite quality.
+ * Public weather.gov API, no key. Bite score never reflects this; the Home banner is what should.
+ */
+async function loadActiveWeatherAlerts(lat, lng) {
+  try {
+    const r = await fetch("https://api.weather.gov/alerts/active?point=" + lat + "," + lng, {
+      headers: { "Accept": "application/geo+json" },
     });
-    const data = await res.json();
-    const txt = (data.content && data.content[0] && data.content[0].text) || "";
-    const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
-    return null;
+    if (!r.ok) return [];
+    const d = await r.json();
+    return (d.features || []).map(function(f) {
+      var p = f.properties || {};
+      return {
+        id: f.id || p.id,
+        event: p.event || "Weather Alert",
+        headline: p.headline || p.event || "",
+        severity: p.severity || "Unknown",
+        urgency: p.urgency || "Unknown",
+        expires: p.expires || null,
+        senderName: p.senderName || "National Weather Service",
+      };
+    });
+  } catch (e) {
+    return []; // A failed alert check should never block the rest of Home from loading.
   }
 }
 
@@ -1063,6 +1107,126 @@ async function loadTackleImage(itemName) {
     const m = allText.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(\?\S*)?/i);
     return m ? m[0] : null;
   } catch(e) { return null; }
+}
+
+// ─── SCOUT: nearby water / access discovery (Overpass + Nominatim, no key) ────
+
+/** Compass bearing in degrees (0-360) from point 1 to point 2. */
+function bearingDeg(lat1, lng1, lat2, lng2) {
+  var r = Math.PI / 180;
+  var y = Math.sin((lng2 - lng1) * r) * Math.cos(lat2 * r);
+  var x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng2 - lng1) * r);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+/** Bucket a bearing into 8-way compass direction — same idiom as windCompass(). */
+function bearingCompass8(deg) {
+  if (deg == null || !isFinite(deg)) return null;
+  var dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+/** fetch() with a hard timeout — Overpass's own [timeout:] setting doesn't bound network stalls. */
+function fetchWithTimeout(url, options, ms) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, ms || 20000);
+  return fetch(url, Object.assign({}, options, { signal: controller.signal })).finally(function() {
+    clearTimeout(timer);
+  });
+}
+
+/** Best-effort public/private read from OSM tags. Never authoritative — always shown with a disclaimer. */
+function accessLabelFromOsmTags(tags) {
+  tags = tags || {};
+  if (tags.access === "private" || tags.access === "no") return "Private";
+  if (tags.access === "permit" || tags.access === "permissive") return "By permission";
+  if (tags.boundary === "protected_area" || tags.leisure === "nature_reserve") return "Public";
+  if (tags.operator && /forest preserve|park district|state park|county park|conservation district/i.test(tags.operator)) return "Public";
+  if (tags.access === "yes" || tags.access === "public") return "Public";
+  return "Unknown";
+}
+
+function overpassElementLatLng(el) {
+  if (el.lat != null && el.lon != null) return { lat: el.lat, lng: el.lon };
+  if (el.center && el.center.lat != null) return { lat: el.center.lat, lng: el.center.lon };
+  return null;
+}
+
+/** Named/typed water features from OpenStreetMap within radiusMi of lat/lng. No API key; capped result count. */
+async function loadNearbyWater(lat, lng, radiusMi) {
+  var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
+  var q = "[out:json][timeout:25];(" +
+    "node[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"waterway\"~\"^(river|stream|canal)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "node[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    ");out center tags 80;";
+  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(q),
+  }, 20000);
+  if (!r.ok) throw new Error("Overpass water query failed");
+  var data = await r.json();
+  var seen = {};
+  return (data.elements || []).map(function(el) {
+    var pos = overpassElementLatLng(el);
+    if (!pos) return null;
+    var tags = el.tags || {};
+    var name = tags.name || null;
+    if (!name) return null; // unnamed water is too noisy to surface (retention basins, ditches, etc.)
+    var key = name + "|" + pos.lat.toFixed(3) + "|" + pos.lng.toFixed(3);
+    if (seen[key]) return null;
+    seen[key] = true;
+    var type = tags.waterway ? (tags.waterway.charAt(0).toUpperCase() + tags.waterway.slice(1)) :
+      tags.water ? (tags.water.charAt(0).toUpperCase() + tags.water.slice(1)) : "Water";
+    return { id: "osm_" + (el.id || key), name: name, lat: pos.lat, lng: pos.lng, waterType: type, access: accessLabelFromOsmTags(tags), source: "osm" };
+  }).filter(Boolean);
+}
+
+/** Businesses/clubs that advertise fishing access (pay lakes, marinas, guide services) via their own published contact info. */
+async function loadNearbyFishingBusinesses(lat, lng, radiusMi) {
+  var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
+  var q = "[out:json][timeout:25];(" +
+    "node[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "node[\"tourism\"][\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    ");out center tags 40;";
+  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(q),
+  }, 20000);
+  if (!r.ok) throw new Error("Overpass business query failed");
+  var data = await r.json();
+  return (data.elements || []).map(function(el) {
+    var pos = overpassElementLatLng(el);
+    if (!pos) return null;
+    var tags = el.tags || {};
+    var name = tags.name;
+    if (!name) return null;
+    return {
+      id: "biz_" + (el.id || name),
+      name: name,
+      lat: pos.lat,
+      lng: pos.lng,
+      phone: tags.phone || tags["contact:phone"] || null,
+      website: tags.website || tags["contact:website"] || null,
+      source: "business",
+    };
+  }).filter(Boolean);
+}
+
+/** Geocode a place name (city, address, landmark) via OSM Nominatim — single result, called on explicit search only. */
+async function geocodePlaceName(query) {
+  var q = String(query || "").trim();
+  if (!q) return null;
+  var r = await fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q), {}, 15000);
+  if (!r.ok) throw new Error("Location search failed");
+  var results = await r.json();
+  if (!results || !results.length) return null;
+  return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), label: results[0].display_name };
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -1108,6 +1272,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   });
   const [nearestWater, setNearestWater] = useState(null);
   const [userGps, setUserGps] = useState(null);
+  const [weatherAlerts, setWeatherAlerts] = useState([]);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
@@ -1120,7 +1285,14 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         setNearestWater(findNearestHomeWater(la, ln));
         setLoading(false);
         if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
+      }).catch(function() {
+        // loadWeather already catches its own failures and resolves null/an estimate — this is
+        // a defensive backstop so a future change there can never leave loading stuck true forever.
+        setWx(null);
+        setLoading(false);
       });
+      // Safety, not bite quality — loaded independently so a slow/failed alert check never blocks the forecast.
+      loadActiveWeatherAlerts(la, ln).then(setWeatherAlerts);
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -1211,6 +1383,28 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           </div>
         </div>
       )}
+
+      {weatherAlerts.length > 0 ? (
+        <div style={{ background:th.red + "22", border:"1px solid " + th.red, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+          {weatherAlerts.map(function(a, i) {
+            return (
+              <div key={a.id || i} style={{ marginBottom:i < weatherAlerts.length - 1 ? 10 : 0 }}>
+                <div style={{ fontSize:13, color:th.red, fontWeight:800 }}>⚠️ {a.event} — {a.senderName}</div>
+                <div style={{ fontSize:11, color:th.white, marginTop:2, lineHeight:1.45 }}>{a.headline}</div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.4 }}>
+            This is a safety alert, separate from the bite score below — a good bite score doesn't mean it's safe to be out. Check conditions before you go.
+          </div>
+        </div>
+      ) : null}
+      {wx && wx.rainingNowMm > 0.5 && weatherAlerts.length === 0 ? (
+        <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "55", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:12, color:th.blue, fontWeight:700 }}>
+          🌧️ Actively raining at your location right now
+        </div>
+      ) : null}
+
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
         <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
@@ -1576,6 +1770,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pickCenter, setPickCenter] = useState({ lat:41.84, lng:-87.83 });
   const [pickPin, setPickPin] = useState(null);
   const [pickName, setPickName] = useState("");
+  const [pickDefaultName, setPickDefaultName] = useState(""); // tracks whether pickName is still an unedited pre-fill
   const [pickShare, setPickShare] = useState(false);
   const [pickPinHome, setPickPinHome] = useState(false);
   const [pickBackTo, setPickBackTo] = useState("my");
@@ -1632,6 +1827,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setPickCenter({ lat:centerLat || 41.84, lng:centerLng || -87.83 });
     setPickPin(pin || null);
     setPickName(defaultName || "");
+    setPickDefaultName(defaultName || "");
     setPickShare(false);
     setPickBackTo(backTo || "my");
     setPrivView("pickmap");
@@ -1641,8 +1837,20 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setSaveErr("");
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPrivView(pickBackTo === "main" ? "main" : "my");
+  }
+
+  /** Pin moved away from where a name was pre-filled for (e.g. tapped a Guide Spot, then repositioned
+   *  the pin to the real spot) — the old name no longer describes this location, so stop assuming it does. */
+  function handlePickMove(lat, lng) {
+    if (pickDefaultName && pickName === pickDefaultName && haversineMi(pickCenter.lat, pickCenter.lng, lat, lng) > 0.3) {
+      setPickName("");
+      setPickDefaultName("");
+    }
+    setPickPin({ lat:lat, lng:lng });
+    setSaveErr("");
   }
 
   function saveFromPickMap() {
@@ -1672,6 +1880,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     }
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPickPinHome(false);
     setPrivView("my");
@@ -1884,13 +2093,18 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           centerLng={pickCenter.lng}
           pinLat={pickPin ? pickPin.lat : null}
           pinLng={pickPin ? pickPin.lng : null}
-          onPick={function(lat, lng) { setPickPin({ lat:lat, lng:lng }); setSaveErr(""); }}
+          onPick={handlePickMove}
           height={300}
         />
         {pickPin ? (
           <div style={{ marginTop:12 }}>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot name</div>
-            <input value={pickName} onChange={function(e) { setPickName(e.target.value); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            <input value={pickName} onChange={function(e) { setPickName(e.target.value); setPickDefaultName(""); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            {pickDefaultName && pickName === pickDefaultName ? (
+              <div style={{ fontSize:11, color:th.gold, marginTop:-6, marginBottom:10 }}>
+                Pre-filled from "{pickDefaultName}" — check it still matches where your pin is, or edit it.
+              </div>
+            ) : null}
             <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Keep private or share?</div>
             <div style={{ display:"flex", gap:8, marginBottom:10 }}>
               <button type="button" onClick={function() { setPickShare(false); }} style={{ flex:1, background:!pickShare ? th.green + "33" : "transparent", border:"1px solid " + (!pickShare ? th.green : th.border), borderRadius:8, color:!pickShare ? th.green : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:!pickShare ? 700 : 400 }}>Private</button>
@@ -3831,6 +4045,8 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
 }
 
 // ─── SCOUT TAB ────────────────────────────────────────────────────────────────
+var SCOUT_DIRS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
 function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var th = THEMES[T];
   var fileRef = useRef();
@@ -3844,6 +4060,58 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [history, setHistory] = useState(loadScoutHistory);
   var season = getSeason(new Date().getMonth());
 
+  // Radius (miles) — user adjustable, defaults to a 10mi car-trip range.
+  var [radiusMi, setRadiusMi] = useState(10);
+  var [radiusDraft, setRadiusDraft] = useState("10");
+  function commitRadius(raw) {
+    var v = parseInt(raw, 10);
+    if (!isFinite(v) || v < 1) v = 1;
+    if (v > 50) v = 50;
+    setRadiusMi(v);
+    setRadiusDraft(String(v));
+  }
+
+  // Scout a location other than where you're standing (e.g. traveling out of state).
+  var [searchText, setSearchText] = useState("");
+  var [manualPos, setManualPos] = useState(null);
+  var [geoLoading, setGeoLoading] = useState(false);
+  var [geoError, setGeoError] = useState("");
+  function handleSearchLocation() {
+    if (!searchText.trim()) return;
+    setGeoLoading(true);
+    setGeoError("");
+    geocodePlaceName(searchText).then(function(result) {
+      if (!result) { setGeoError("No match found. Try a city, zip, or address."); return; }
+      setManualPos({ lat: result.lat, lng: result.lng, label: result.label });
+    }).catch(function() {
+      setGeoError("Location search failed. Try again.");
+    }).finally(function() {
+      setGeoLoading(false);
+    });
+  }
+  function handleUseGps() {
+    setManualPos(null);
+    setSearchText("");
+    setGeoError("");
+  }
+
+  // Directions to exclude — e.g. "I never want to drive north of here."
+  var [excludedDirs, setExcludedDirs] = useState([]);
+  function toggleDir(d) {
+    setExcludedDirs(function(prev) {
+      return prev.indexOf(d) >= 0 ? prev.filter(function(x) { return x !== d; }) : prev.concat([d]);
+    });
+  }
+
+  // Nearby water (OpenStreetMap/Overpass), fishing businesses (Overpass), and club-shared member spots.
+  var [waterResults, setWaterResults] = useState([]);
+  var [waterLoading, setWaterLoading] = useState(false);
+  var [waterError, setWaterError] = useState("");
+  var [bizResults, setBizResults] = useState([]);
+  var [bizLoading, setBizLoading] = useState(false);
+  var [clubSpots, setClubSpots] = useState([]);
+  var [clubSpotsLoading, setClubSpotsLoading] = useState(false);
+
   useEffect(function() {
     setGpsLoading(true);
     if (!navigator.geolocation) { setGpsLoading(false); return; }
@@ -3854,9 +4122,69 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
     );
   }, []);
 
+  // Club-shared spots — loaded once, filtered client-side alongside SCOUT_SPOTS below.
+  useEffect(function() {
+    var cancelled = false;
+    setClubSpotsLoading(true);
+    loadClubSharedSpots().then(function(spots) {
+      if (!cancelled) setClubSpots(spots || []);
+    }).catch(function() {
+      if (!cancelled) setClubSpots([]);
+    }).finally(function() {
+      if (!cancelled) setClubSpotsLoading(false);
+    });
+    return function() { cancelled = true; };
+  }, []);
+
+  var activePos = manualPos || userPos;
+
+  // Overpass lookups — debounced, and only once we have a real position (live GPS or a searched location).
+  useEffect(function() {
+    if (gpsLoading && !manualPos) return;
+    var cancelled = false;
+    var t = setTimeout(function() {
+      setWaterLoading(true);
+      setWaterError("");
+      loadNearbyWater(activePos.lat, activePos.lng, radiusMi).then(function(list) {
+        if (!cancelled) setWaterResults(list);
+      }).catch(function() {
+        if (!cancelled) { setWaterResults([]); setWaterError("Could not load nearby water right now."); }
+      }).finally(function() {
+        if (!cancelled) setWaterLoading(false);
+      });
+      setBizLoading(true);
+      loadNearbyFishingBusinesses(activePos.lat, activePos.lng, radiusMi).then(function(list) {
+        if (!cancelled) setBizResults(list);
+      }).catch(function() {
+        if (!cancelled) setBizResults([]);
+      }).finally(function() {
+        if (!cancelled) setBizLoading(false);
+      });
+    }, 500);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [activePos.lat, activePos.lng, radiusMi, gpsLoading, manualPos]);
+
+  function passesDirection(lat, lng) {
+    if (!excludedDirs.length) return true;
+    var b = bearingCompass8(bearingDeg(activePos.lat, activePos.lng, lat, lng));
+    return excludedDirs.indexOf(b) < 0;
+  }
+
   var nearSpots = SCOUT_SPOTS.map(function(s) {
-    return Object.assign({}, s, { distMi: haversineMi(userPos.lat, userPos.lng, s.lat, s.lng) });
-  }).filter(function(s) { return s.distMi <= 10; }).sort(function(a, b) { return a.distMi - b.distMi; });
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearClubSpots = clubSpots.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng), displayName: formatFeedSpotName(s.name, s.name) });
+  }).filter(function(s) { return isFinite(s.distMi) && s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearWater = waterResults.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearBiz = bizResults.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
 
   function handleScoutPhoto(e) {
     var f = e.target.files && e.target.files[0];
@@ -3977,15 +4305,75 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
       ) : (
         <div>
           <div style={{ fontSize:18, color:th.white, fontWeight:800, marginBottom:4 }}>📍 Fishable Water Near You</div>
-          <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Within 10 miles · sorted nearest first</div>
-          {gpsLoading ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
-          {!gpsLoading && nearSpots.length === 0 ? (
-            <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No scout spots within 10 miles. Try Identify Spot with a photo.</div></Card>
-          ) : null}
+          <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>
+            Within {radiusMi} mi{excludedDirs.length ? " · excluding " + excludedDirs.join("/") : ""} · sorted nearest first
+          </div>
+
+          <Card T={T}>
+            <SecLabel text="Search a location" T={T} />
+            <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+              <input
+                type="text"
+                value={searchText}
+                onChange={function(e) { setSearchText(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === "Enter") handleSearchLocation(); }}
+                placeholder="City, zip, or address — e.g. scouting a trip"
+                style={{ flex:1, minWidth:0, background:th.bg, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12 }}
+              />
+              <button type="button" onClick={handleSearchLocation} disabled={geoLoading} style={{ background:th.blue, color:"#fff", border:"none", borderRadius:8, padding:"0 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                {geoLoading ? "…" : "Go"}
+              </button>
+            </div>
+            {manualPos ? (
+              <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>
+                Scouting: {manualPos.label ? manualPos.label.split(",").slice(0, 2).join(",") : (manualPos.lat.toFixed(3) + ", " + manualPos.lng.toFixed(3))}
+                {" · "}
+                <span onClick={handleUseGps} style={{ color:th.blue, cursor:"pointer", textDecoration:"underline" }}>use my location instead</span>
+              </div>
+            ) : null}
+            {geoError ? <div style={{ fontSize:11, color:th.red, marginBottom:6 }}>{geoError}</div> : null}
+
+            <SecLabel text="Radius" T={T} />
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+              <input
+                type="number" min="1" max="50" value={radiusDraft}
+                onChange={function(e) { setRadiusDraft(e.target.value); }}
+                onBlur={function(e) { commitRadius(e.target.value); }}
+                style={{ width:70, background:th.bg, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12 }}
+              />
+              <span style={{ fontSize:10, color:th.muted }}>miles (max 50)</span>
+            </div>
+
+            <SecLabel text="Don't show me this direction" T={T} />
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {SCOUT_DIRS_8.map(function(d) {
+                var off = excludedDirs.indexOf(d) >= 0;
+                return (
+                  <button key={d} type="button" onClick={function() { toggleDir(d); }}
+                    style={{ background: off ? th.red + "22" : "transparent", border:"1px solid " + (off ? th.red : th.border), color: off ? th.red : th.muted, borderRadius:20, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card T={T} borderColor={th.gold + "55"}>
+            <div style={{ fontSize:13, color:th.gold, fontWeight:800, marginBottom:6 }}>🌾 Private land open by permission — IRAP</div>
+            <div style={{ fontSize:11, color:th.muted, lineHeight:1.5, marginBottom:8 }}>
+              Illinois DNR's Recreational Access Program leases private ponds, streams, and riverbank from landowners for public fishing (Apr 1–Sep 30). You register directly with IDNR — they broker access, not this app, and no landowner contact info is ever shown here.
+            </div>
+            <a href="https://dnr.illinois.gov/conservation/irap/fishing.html" target="_blank" rel="noopener noreferrer" style={{ display:"block", textAlign:"center", background:th.card, border:"1px solid " + th.gold, borderRadius:8, padding:10, color:th.gold, fontSize:12, fontWeight:700, textDecoration:"none" }}>
+              Find IRAP sites &amp; register →
+            </a>
+          </Card>
+
+          {gpsLoading && !manualPos ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
+
           {nearSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={idx} T={T} borderColor={th.blue + "33"}>
+              <Card key={"known_" + idx} T={T} borderColor={th.blue + "33"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
                   <Pill label={s.waterType} color={th.blue} />
@@ -4004,6 +4392,79 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
               </Card>
             );
           })}
+
+          {nearClubSpots.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"club_" + idx} T={T} borderColor={th.teal + "55"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.displayName}</div>
+                  <Pill label="Club spot" color={th.teal} />
+                </div>
+                <div style={{ fontSize:12, color:th.green, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · shared by {s.credit || "a club member"}</div>
+                {(s.species_present || []).length ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+                    {s.species_present.slice(0, 4).map(function(sp, i) { return <Pill key={i} label={sp} color={th.green} />; })}
+                  </div>
+                ) : null}
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {nearWater.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"osm_" + idx} T={T} borderColor={th.blue + "33"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <Pill label={s.waterType} color={th.blue} />
+                </div>
+                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · Unverified water</div>
+                <Pill label={"Access: " + s.access} color={s.access === "Private" ? th.red : s.access === "Public" ? th.green : th.muted} />
+                <div style={{ fontSize:10, color:th.muted, margin:"8px 0", lineHeight:1.5 }}>
+                  Found via OpenStreetMap, not an official access list. May be private property, restricted, or unsafe to reach. Verify before you go.
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {nearBiz.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"biz_" + idx} T={T} borderColor={th.orange + "55"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <Pill label="Business" color={th.orange} />
+                </div>
+                <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · contact them directly for access &amp; hours</div>
+                {s.phone || s.website ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:12, marginBottom:6 }}>
+                    {s.phone ? <a href={"tel:" + s.phone} style={{ color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>📞 {s.phone}</a> : null}
+                    {s.website ? <a href={s.website} target="_blank" rel="noopener noreferrer" style={{ color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>🔗 Website</a> : null}
+                  </div>
+                ) : null}
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {!gpsLoading && !waterLoading && !bizLoading && !clubSpotsLoading && !nearSpots.length && !nearClubSpots.length && !nearWater.length && !nearBiz.length ? (
+            <Card T={T}><div style={{ fontSize:13, color:th.muted }}>Nothing found in range. Try a bigger radius or clear an excluded direction.</div></Card>
+          ) : null}
+
+          {waterLoading || bizLoading ? <div style={{ fontSize:11, color:th.muted, textAlign:"center", margin:"6px 0" }}>Searching OpenStreetMap for more water…</div> : null}
+          {waterError ? <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>{waterError}</div> : null}
         </div>
       )}
 
