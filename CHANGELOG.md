@@ -55,7 +55,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   bait tips, and notes instead of the nearest generic water. Only one spot can be
   pinned at a time. Falls back to generic nearest water when no spot is pinned.
 
+### Added (continued)
+- **Scout tab overhaul**: adjustable search radius (1–50mi), location search via Nominatim
+  geocoding, direction-exclude chips, and three result tiers — club-shared spots (Firestore),
+  named water + access-label guesses (OSM/Overpass), and fishing businesses (OSM/Overpass).
+  IRAP card links out to Illinois DNR's official access program rather than surfacing any
+  landowner contact info.
+- **NWS severe weather alert banner** on Home: `loadActiveWeatherAlerts` (weather.gov, no
+  key) shows a red safety banner separate from the bite score when an active alert exists
+  for the member's coordinates.
+- `CLAUDE.md` rewritten to match the current codebase (tab list, local-first/cloud-synced
+  data model, roster gate, spot-privacy gotcha, AI-feature-with-no-API-key gotcha), plus a
+  standing "keep this file current" policy — update `CLAUDE.md` and this changelog in the
+  same commit/PR as any change to what they document, not only during dedicated docs passes.
+
+### Fixed
+- **Home rain % always showing 0%**: `loadWeather` was reading `precipitation_probability`
+  from Open-Meteo's `current` block (only valid under `hourly`).
+- **Home forecast could hang on "Fetching live conditions…" forever**: `loadWeather`'s
+  Anthropic fallback ran unguarded inside the Open-Meteo `catch` block with no `.catch()`
+  at the call site; now wrapped in its own try/catch (returns `null` on failure) plus a
+  defensive `.catch()` on the call site so the loading spinner always clears.
+- **Spots — stale pre-filled name**: tapping a Guide Spot to prefill a name, then dragging
+  the map pin >0.3mi away, now clears the name (with a "check it still matches" hint)
+  instead of silently keeping a name that no longer matches the pin.
+
 ### Next
+- **Confirm on a real device**: NWS alert banner rendering, Scout tab Overpass water/
+  business results, location search accuracy — this sandbox's network egress blocks
+  `api.open-meteo.com`, `overpass-api.de`, `nominatim.openstreetmap.org`, and
+  `api.weather.gov`, so live data from those services is still unverified.
 - **Firebase Console (manual, one-time steps)**:
   1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
   2. Authentication → Settings → Authorized domains → Add `ew3adam.github.io`

@@ -1,10 +1,16 @@
 ---
-lastSessionAt: "2026-08-10T01:00:00-05:00"
+lastSessionAt: "2026-08-10T02:00:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
+
+Small policy/doc session, prompted directly by the user after CLAUDE.md drifted (see PR #15/#16 duplicate-rewrite story below): added a standing "Keeping this file current" section to `CLAUDE.md` instructing future sessions to update it in the same commit/PR as any change it describes — tech stack, tabs, data model/sync, auth flow, gotchas, key files — rather than only during dedicated docs passes. Cross-referenced from Important Constraints too.
+
+While picking this up, found that branch `claude/claude-md-docs-c7f440`'s original CLAUDE.md rewrite had already landed on `main` byte-for-byte via PR #15 (its own PR #16 was closed unmerged as a duplicate). Reset the branch onto latest `main` and did the new policy work on top of current history instead of stacking on the stale base.
+
+### Previous session (for reference)
 
 PR #15 (Scout overhaul, Home weather/alert fixes) was revisited, hardened, tested as far as this sandbox allows, and **merged to `main` and deployed live** on `ew3adam.github.io`.
 
