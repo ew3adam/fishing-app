@@ -4107,6 +4107,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
     setManualPos(null);
     setSearchText("");
     setGeoError("");
+    requestGps(); // force a fresh read, not just whatever userPos happened to be set to earlier
   }
 
   // Directions to exclude — e.g. "I never want to drive north of here."
@@ -4350,13 +4351,21 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
                 {geoLoading ? "…" : "Go"}
               </button>
             </div>
-            {manualPos ? (
-              <div style={{ fontSize:11, color:th.muted, marginBottom:6 }}>
-                Scouting: {manualPos.label ? manualPos.label.split(",").slice(0, 2).join(",") : (manualPos.lat.toFixed(3) + ", " + manualPos.lng.toFixed(3))}
-                {" · "}
-                <span onClick={handleUseGps} style={{ color:th.blue, cursor:"pointer", textDecoration:"underline" }}>use my location instead</span>
-              </div>
-            ) : null}
+
+            {/* Always-visible, explicit way to (re)search your current position — not just an
+                automatic one-time attempt on load. Also the way back from a manual search. */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6 }}>
+              <span style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>
+                {manualPos
+                  ? "Scouting: " + (manualPos.label ? manualPos.label.split(",").slice(0, 2).join(",") : (manualPos.lat.toFixed(3) + ", " + manualPos.lng.toFixed(3)))
+                  : gpsLoading ? "Getting your location…"
+                  : gpsError ? "⚠️ Location unavailable"
+                  : "📍 Using your current location"}
+              </span>
+              <button type="button" onClick={handleUseGps} disabled={gpsLoading} style={{ flexShrink:0, background:"transparent", border:"1px solid " + th.blue, color:th.blue, borderRadius:8, padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                {gpsLoading ? "…" : "📍 Use my location"}
+              </button>
+            </div>
             {geoError ? <div style={{ fontSize:11, color:th.red, marginBottom:6 }}>{geoError}</div> : null}
 
             <SecLabel text="Radius" T={T} />
