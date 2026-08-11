@@ -55,6 +55,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   bait tips, and notes instead of the nearest generic water. Only one spot can be
   pinned at a time. Falls back to generic nearest water when no spot is pinned.
 
+### Added (continued)
+- **Severe weather disclaimer on Home**: "Today's Conditions" card now warns that the
+  fishing-conditions score doesn't check flood/storm/wind alerts, and points members to
+  their phone's Weather app or weather.gov before heading out.
+- **Scout tab overhaul**: adjustable search radius (1–50mi, was fixed at 10), a
+  location search field (scout a place you're not standing in), direction-exclude
+  chips, club-shared spots pulled into Scout's results, live named-water and
+  fishing-business lookups from OpenStreetMap/Overpass (with a best-effort
+  public/private access label and an "unverified" disclaimer), and an IRAP card
+  linking to Illinois DNR's official private-land fishing access program.
+- **NWS severe weather alert banner on Home**: pulls active alerts for the member's
+  location from the free NWS API and shows them above the Bite Forecast card,
+  explicitly separate from the bite-quality score (which has no way to know about
+  flood/storm conditions on its own).
+- **GPS-fallback notice on Home and Scout**: if location access is denied, times out,
+  or isn't supported, both tabs now show a clear warning that results are centered on
+  a default location (North Riverside, IL) instead of silently showing the wrong
+  spots with no explanation — plus a Retry button. The Scout "can't load live water"
+  message also moved from the bottom of a long results list to right under the
+  search controls, where it's actually visible.
+
+### Fixed
+- **Home rain % stuck at 0%**: `loadWeather` was requesting Open-Meteo's
+  `precipitation_probability` under `current` params, but that field only exists
+  under `hourly` — rain chance silently always read 0%. Now reads the correct hourly
+  value for the current hour.
+- **Spots: stale pre-filled name**: tapping a Guide Spot to prefill a spot name, then
+  dragging the map pin more than ~0.3mi away, now clears the name (with a heads-up
+  hint while it's still unedited) instead of silently keeping a name that no longer
+  matches the pin.
+- **Home forecast could get stuck loading**: `loadWeather`'s Anthropic-estimate
+  fallback could throw with nothing to catch it, leaving the forecast on "Fetching
+  live conditions…" forever if both Open-Meteo and the fallback failed. Now guarded
+  with its own try/catch plus a defensive `.catch()` at the call site.
+
 ### Next
 - **Firebase Console (manual, one-time steps)**:
   1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
