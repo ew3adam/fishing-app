@@ -1273,12 +1273,16 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   const [nearestWater, setNearestWater] = useState(null);
   const [userGps, setUserGps] = useState(null);
   const [weatherAlerts, setWeatherAlerts] = useState([]);
+  // True when geolocation failed/was denied and everything on this screen is centered on the
+  // North Riverside default instead of where the member actually is — must be surfaced, not silent.
+  const [usedDefaultLocation, setUsedDefaultLocation] = useState(false);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
-    function doLoad(la, ln) {
+    function doLoad(la, ln, isDefault) {
+      setUsedDefaultLocation(!!isDefault);
       setUserGps({ lat:la, lng:ln });
       loadWeather(la, ln).then(function(w) {
         setWx(w);
@@ -1296,11 +1300,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        function(pos) { doLoad(pos.coords.latitude, pos.coords.longitude); },
-        function() { doLoad(lat, lng); },
+        function(pos) { doLoad(pos.coords.latitude, pos.coords.longitude, false); },
+        function() { doLoad(lat, lng, true); },
         { timeout:6000 }
       );
-    } else { doLoad(lat, lng); }
+    } else { doLoad(lat, lng, true); }
   }, []);
 
   useEffect(function() {
@@ -1383,6 +1387,16 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           </div>
         </div>
       )}
+
+      {usedDefaultLocation && !loading ? (
+        <div style={{ background:th.red + "18", border:"1px solid " + th.red + "55", borderRadius:12, padding:"10px 14px", marginBottom:12 }}>
+          <div style={{ fontSize:12, color:th.red, fontWeight:700, marginBottom:2 }}>⚠️ Couldn't get your location</div>
+          <div style={{ fontSize:11, color:th.white, lineHeight:1.45, marginBottom:8 }}>
+            Everything below is for North Riverside, IL (default), not where you actually are. Enable location access for this site in your phone/browser Settings, then refresh.
+          </div>
+          <span style={{ fontSize:11, color:th.green, cursor:"pointer", fontWeight:700 }} onClick={load}>↻ Retry location</span>
+        </div>
+      ) : null}
 
       {weatherAlerts.length > 0 ? (
         <div style={{ background:th.red + "22", border:"1px solid " + th.red, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
@@ -4112,15 +4126,27 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [clubSpots, setClubSpots] = useState([]);
   var [clubSpotsLoading, setClubSpotsLoading] = useState(false);
 
-  useEffect(function() {
+  // gpsError stays null on real success. On any failure userPos silently keeps its North Riverside
+  // default (see useState above) — without this flag there's no way to tell "that's really where you
+  // are" from "GPS never worked and you're looking at the wrong town's spots."
+  var [gpsError, setGpsError] = useState(null);
+  function requestGps() {
     setGpsLoading(true);
-    if (!navigator.geolocation) { setGpsLoading(false); return; }
+    setGpsError(null);
+    if (!navigator.geolocation) { setGpsLoading(false); setGpsError("Your browser doesn't support location access."); return; }
     navigator.geolocation.getCurrentPosition(
-      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); },
-      function() { setGpsLoading(false); },
+      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); setGpsError(null); },
+      function(err) {
+        setGpsLoading(false);
+        var msg = err && err.code === 1 ? "Location access was denied — enable it for this site in your browser/phone Settings, then tap Retry."
+          : err && err.code === 3 ? "Location request timed out — tap Retry, or search a location below."
+          : "Couldn't get your location — tap Retry, or search a location below.";
+        setGpsError(msg);
+      },
       { timeout:8000, enableHighAccuracy:true }
     );
-  }, []);
+  }
+  useEffect(function() { requestGps(); }, []);
 
   // Club-shared spots — loaded once, filtered client-side alongside SCOUT_SPOTS below.
   useEffect(function() {
@@ -4358,6 +4384,9 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
             </div>
           </Card>
 
+          {waterLoading || bizLoading ? <div style={{ fontSize:11, color:th.muted, textAlign:"center", margin:"6px 0" }}>Searching OpenStreetMap for more water…</div> : null}
+          {waterError ? <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>⚠️ {waterError} (known spots below still work; this only affects live OpenStreetMap results)</div> : null}
+
           <Card T={T} borderColor={th.gold + "55"}>
             <div style={{ fontSize:13, color:th.gold, fontWeight:800, marginBottom:6 }}>🌾 Private land open by permission — IRAP</div>
             <div style={{ fontSize:11, color:th.muted, lineHeight:1.5, marginBottom:8 }}>
@@ -4369,6 +4398,15 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
           </Card>
 
           {gpsLoading && !manualPos ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
+
+          {gpsError && !manualPos && !gpsLoading ? (
+            <Card T={T} borderColor={th.red + "88"}>
+              <div style={{ fontSize:12, color:th.red, fontWeight:700, marginBottom:6 }}>⚠️ Not using your real location</div>
+              <div style={{ fontSize:12, color:th.white, lineHeight:1.5, marginBottom:10 }}>{gpsError}</div>
+              <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Everything below is centered on a default spot (North Riverside, IL), not where you actually are.</div>
+              <button type="button" onClick={requestGps} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>↻ Retry location</button>
+            </Card>
+          ) : null}
 
           {nearSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
@@ -4462,9 +4500,6 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
           {!gpsLoading && !waterLoading && !bizLoading && !clubSpotsLoading && !nearSpots.length && !nearClubSpots.length && !nearWater.length && !nearBiz.length ? (
             <Card T={T}><div style={{ fontSize:13, color:th.muted }}>Nothing found in range. Try a bigger radius or clear an excluded direction.</div></Card>
           ) : null}
-
-          {waterLoading || bizLoading ? <div style={{ fontSize:11, color:th.muted, textAlign:"center", margin:"6px 0" }}>Searching OpenStreetMap for more water…</div> : null}
-          {waterError ? <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>{waterError}</div> : null}
         </div>
       )}
 
