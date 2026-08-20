@@ -40,8 +40,8 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 
 **Gotcha:** `src/FishingApp.jsx` (~2400 lines) is a separate, unrelated file that looks like an alternate copy of the app but is **not imported anywhere** — `main.jsx` only ever renders `App.jsx`. Don't edit `FishingApp.jsx` expecting it to affect the running app; confirm with the user before touching or removing it.
 
-### Tabs (`NAV` array in `App.jsx`, ~line 4020)
-`Home` → `Species` → `Spots` → `Tackle` (`catalogue`) → `Catch` → `Scout` → `Learn`, plus `Profile` reached via a header avatar button (not in `NAV`). Each tab is its own top-level function component inside `App.jsx` (e.g. `HomeTab`, `SpotsTab`, `CatchTab`, `ProfileTab`, `ScoutTab`) — search for `function XxxTab(` to jump to one.
+### Tabs (`NAV` array in `App.jsx`, ~line 4528)
+`Home` → `Scout` → `Species` → `Spots` → `Tackle` (`catalogue`) → `Catch` → `Learn`, plus `Profile` reached via a header avatar button (not in `NAV`). Each tab is its own top-level function component inside `App.jsx` (e.g. `HomeTab`, `SpotsTab`, `CatchTab`, `ProfileTab`, `ScoutTab`) — search for `function XxxTab(` to jump to one.
 - **Home**: toggles between Forecast (weather + species/bait tips, optionally overridden by a pinned spot) and the Club Feed.
 - **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
 - **Spots**: private + club-shared fishing spots, Leaflet map picker.

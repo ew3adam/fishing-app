@@ -4527,11 +4527,11 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
 // ─── NAV + APP ────────────────────────────────────────────────────────────────
 var NAV = [
   {id:"home",emoji:"🏠",label:"Home"},
+  {id:"scout",emoji:"🔍",label:"Scout"},
   {id:"fish",emoji:"🐟",label:"Species"},
   {id:"spots",emoji:"📍",label:"Spots"},
   {id:"catalogue",emoji:"📚",label:"Tackle"},
   {id:"catch",emoji:"📸",label:"Catch"},
-  {id:"scout",emoji:"🔍",label:"Scout"},
   {id:"learn",emoji:"📖",label:"Learn"},
 ];
 
