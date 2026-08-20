@@ -76,6 +76,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   message also moved from the bottom of a long results list to right under the
   search controls, where it's actually visible.
 
+### Changed
+- **Bottom nav order**: Scout moved from 6th to 2nd position, right after Home
+  (`Home, Scout, Species, Spots, Tackle, Catch, Learn`).
+
 ### Fixed
 - **Home rain % stuck at 0%**: `loadWeather` was requesting Open-Meteo's
   `precipitation_probability` under `current` params, but that field only exists
