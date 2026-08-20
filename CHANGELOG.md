@@ -76,6 +76,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   message also moved from the bottom of a long results list to right under the
   search controls, where it's actually visible.
 
+### Added (continued)
+- **Scout results map**: "Near Me" now shows a read-only overview map (blue dot =
+  you, red pins = every known/club/OSM/business result currently listed) above the
+  result cards, so a member can visually check a pin actually sits on water before
+  trusting the card — prompted by a reported bad `SCOUT_SPOTS` coordinate.
+
 ### Changed
 - **Bottom nav order**: Scout moved from 6th to 2nd position, right after Home
   (`Home, Scout, Species, Spots, Tackle, Catch, Learn`).
