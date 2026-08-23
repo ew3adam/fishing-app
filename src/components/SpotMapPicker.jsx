@@ -61,6 +61,11 @@ export default function SpotMapPicker({ centerLat, centerLng, pinLat, pinLng, on
         border: "1px solid rgba(255,255,255,0.15)",
         overflow: "hidden",
         zIndex: 0,
+        // Belt-and-suspenders on top of Leaflet's own CSS: force pinch/pan gestures over the map to
+        // go to Leaflet's JS zoom, not the phone browser's native page-zoom (which otherwise wins the
+        // gesture and snaps back to the locked page scale the instant you release — looks exactly
+        // like "zoom in, let go, it reverts").
+        touchAction: "none",
       }}
     />
   );
