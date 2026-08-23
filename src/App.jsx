@@ -9,6 +9,7 @@ import SaveToast from "./components/SaveToast.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
+import ScoutResultsMap from "./components/ScoutResultsMap.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
@@ -4416,6 +4417,19 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
               <button type="button" onClick={requestGps} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>↻ Retry location</button>
             </Card>
           ) : null}
+
+          <Card T={T}>
+            <SecLabel text="Map view" T={T} />
+            <ScoutResultsMap
+              center={activePos}
+              mutedColor={th.muted}
+              height={260}
+              markers={nearSpots.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; })
+                .concat(nearClubSpots.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.displayName, distMi:s.distMi }; }))
+                .concat(nearWater.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; }))
+                .concat(nearBiz.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; }))}
+            />
+          </Card>
 
           {nearSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);

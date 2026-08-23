@@ -45,7 +45,7 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 - **Home**: toggles between Forecast (weather + species/bait tips, optionally overridden by a pinned spot) and the Club Feed.
 - **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
 - **Spots**: private + club-shared fishing spots, Leaflet map picker.
-- **Scout**: browse/search known spots.
+- **Scout**: browse/search known spots, club-shared spots, and live OSM/Overpass water + businesses; results also plot as red pins on a `ScoutResultsMap` overview map (blue dot = your position) so a bad/mislabeled entry is visible before you drive there — see spot-data-quality gotcha below.
 - **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme.
 
 ### Local-first, cloud-synced data
@@ -63,6 +63,9 @@ There are two separate "roster" concepts — don't conflate them:
 
 ### Spot privacy
 `src/utils/feedSpotPrivacy.js` strips anything that looks like a street address or raw GPS coordinates before a spot name reaches the club feed or a shared catch — always route spot names shown outside a member's own private view through `formatFeedSpotName` / `buildSpotDisplayName` / `sanitizeSpotForForm` rather than passing raw strings.
+
+### Spot data quality is unverified — don't trust coordinates on faith
+`src/data/scoutSpots.js` (`SCOUT_SPOTS`) is a hand-typed lat/lng list — nothing checks it against real-world data, and it has shipped at least one confirmed-wrong entry (a "DPR — Riverside Lagoon" pin reported ~0.5mi off from the real Swan Pond location). Live Overpass/Nominatim results in Scout are labeled "Unverified" for the same reason — OSM tags can mislabel or mis-locate a feature, and this app has no way to confirm a pin is really on fishable water vs. private property from the server side. `ScoutResultsMap` (red pins on a Leaflet map, in Scout's "Near Me" view) exists specifically so a member can *visually* catch a bad pin before driving out — treat that as the actual verification mechanism, not something to duplicate with more automated "is this real" logic. If you're asked to fix a specific bad `SCOUT_SPOTS` entry, get real coordinates from the reporting member (a dropped pin/link) rather than guessing from geocoding — this sandbox's network egress blocks Nominatim, Overpass, and even generic `WebFetch` to most map/reference sites (confirmed: `nominatim.openstreetmap.org`, `openstreetmap.org`, `wikipedia.org`, `riverside.il.us` all blocked), so coordinates can't be independently verified from here; `WebSearch` still works for background research.
 
 ### AI features have no API key
 Several features (weather-estimate fallback, one-line fishing tips, tackle image/info lookups in `App.jsx`) call `https://api.anthropic.com/v1/messages` directly from the browser with **no `x-api-key`/auth header at all**. This only works in environments that transparently proxy that origin (e.g. this session's sandboxed network, or Claude.ai's artifact preview) — in a normal browser hitting the real `api.anthropic.com`, or the deployed GitHub Pages site, these calls will fail with 401/CORS errors. Most call sites (`loadFishingTip`, `loadTackleImage`) wrap the whole thing in `try/catch` and fail silently — those are fine. **`loadWeather`'s Anthropic fallback is not**: it runs unguarded inside the `catch` block that handles the Open-Meteo failure (`src/App.jsx` ~line 1016-1033), so if it also throws (CORS/network error), the exception isn't caught anywhere, `loadWeather(...)` rejects, and its only caller (`HomeTab`'s `load()`, ~line 1118) has no `.catch()` — so `setLoading(false)` never runs and the forecast can be stuck loading. Treat this as a real bug to fix (wrap the Anthropic call in its own `try/catch` returning `null`, and/or add a `.catch()` at the call site), not as an intentional silent-fallback pattern — don't add a client-exposed API key to "fix" it instead.
@@ -84,6 +87,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `src/services/catchPhotoStorage.js` | Compresses + uploads catch photos to Firebase Storage; strips base64 before Firestore writes |
 | `src/components/ClubFeedList.jsx` | Club-wide catch feed (pull-to-refresh, likes) |
 | `src/components/SpotMapPicker.jsx` / `SpotMapThumb.jsx` | Leaflet map for picking/displaying spots |
+| `src/components/ScoutResultsMap.jsx` | Read-only Leaflet overview map for Scout results (red pins) — visual sanity-check, not a picker |
 | `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed (see Architecture above) |
 | `src/data/scoutSpots.js` | Static list of known scout spots |
 | `data/seeds/club-roster-v1.json` | Seed data for the local roster import |
