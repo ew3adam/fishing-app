@@ -1,14 +1,27 @@
 ---
-lastSessionAt: "2026-08-10T01:00:00-05:00"
+lastSessionAt: "2026-08-23T18:30:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-PR #15 (Scout overhaul, Home weather/alert fixes) was revisited, hardened, tested as far as this sandbox allows, and **merged to `main` and deployed live** on `ew3adam.github.io`.
+Follow-up session on top of the PR #15/#17 work below. Shipped and deployed three more PRs, then spent the rest of the session on non-code items (Firebase Console troubleshooting, a member invite email).
 
-Real-world trigger for prioritizing this: while testing the separate severe-weather disclaimer (PR #17), the live app showed "GREAT DAY 85/100" during an active NWS Flood Watch for the user's area — confirming the gap PR #15's alert banner was built to close was a real, not theoretical, problem.
+1. **PR #19 — GPS-fallback notice + explicit "Use my location" button** (merged, deployed). Root cause of a reported bug (member at Lake Ida saw Cal-Sag spots instead, no warning): Home/Scout silently fell back to a hardcoded North Riverside coordinate on any geolocation failure. Now both show a clear warning + Retry when that happens, and Scout has an always-visible "📍 Use my location" button/status line instead of only a silent one-time attempt on load.
+2. **PR #20 — NAV reorder** (merged, deployed). Scout moved from 6th to 2nd position in the bottom nav, right after Home, per direct request.
+3. **PR #21 — Scout results overview map** (merged, deployed). New `ScoutResultsMap` component: read-only Leaflet map in Scout's "Near Me" view — blue dot for the member's position, red pin for every listed result (known/club/OSM water/businesses). Prompted by a reported bad `SCOUT_SPOTS` coordinate ("DPR — Riverside Lagoon" ~0.5mi off from the real Swan Pond location) — this app has no server-side way to verify a pin is really on water vs. private property, so the map is a *visual* tool for the member to catch bad data, not an automated guarantee. Documented as a standing gotcha in `CLAUDE.md`.
+4. **Firebase login troubleshooting**: member hit `auth/unauthorized-continue-uri` ("domain not allowlisted") testing email-link sign-in on a Cloudflare Pages domain. Root cause explained (Firebase Authorized domains is exact-match, Cloudflare preview domains were never added) but **not fixed** — this requires the Firebase Console, which this session has no access to. Walked the user through the exact steps (Authentication → Sign-in method → enable Email link; Authentication → Settings → Authorized domains → add `ew3adam.github.io` + whichever Cloudflare domain is actually used) — not confirmed done as of this note.
+5. **Sent a member-invite email** via the user's connected Gmail (a capability outside the app itself — this session has no ability to send email from inside the app, since it's a static client-only site). Sent a `[TEST]` copy to the user's own address first, then the real version, both to the user's own personal address. No other real members have been invited yet.
+
+Real-world trigger for the PR #15/#17 work below (kept for history): while testing the separate severe-weather disclaimer (PR #17), the live app showed "GREAT DAY 85/100" during an active NWS Flood Watch for the user's area — confirming the gap PR #15's alert banner was built to close was a real, not theoretical, problem.
+
+## Future scope (stated intent, not started)
+
+The user has flagged a larger plan for later, **after current functionality is solid** — don't start any of this without it being explicitly picked back up:
+- A visual/UX modernization pass (different feel from the current theme system).
+- Migrating off Firebase to a database/backend with no cost at this app's scale.
+- **Hard requirement carried into that migration**: the app must be able to send email from *within* itself (e.g. a self-serve "invite a member" flow), not rely on a human manually sending email outside the app the way this session just did. Whatever backend is chosen needs to support outbound email — a static client-only site can't do this on its own (no server to hold an email-provider key safely); options to weigh when this is picked up: a small serverless function, a Firebase Extension (e.g. Trigger Email), or a full backend if one exists in the new stack.
 
 ### What shipped (squashed into `main` via PR #15)
 1. **CLAUDE.md** — replaced this branch's original rewrite with the separately Codex-reviewed version from PR #16 (which caught two real bugs — see #3 below), so there's one canonical, accurate doc instead of two competing drafts. PR #16 itself is now redundant and was closed with a pointer to this merge.
@@ -33,8 +46,10 @@ This sandbox's network egress blocks all four external APIs these features touch
 
 ## Next
 
-- **Confirm on a real device**, ideally somewhere with an active NWS alert or known good Scout-tab test area: does the red safety banner render correctly on Home, do Scout's water/business cards populate with sane results, does location search return the right place.
-- Firebase Console item still outstanding from an earlier session (never confirmed done): Auth → Sign-in method → enable **Email link (passwordless)**, and Auth → Settings → Authorized domains → add `ew3adam.github.io`.
+- **Firebase Console, still outstanding across multiple sessions now**: Authentication → Sign-in method → enable **Email link (passwordless)**; Authentication → Settings → Authorized domains → add `ew3adam.github.io` (+ any Cloudflare domain actually used for testing). Blocks real member sign-in until done — confirm before inviting anyone else.
+- **Confirm the test invite email actually works** once the above is done: open the email sent to the user's own address, tap the sign-in link, verify it completes sign-in without the `auth/unauthorized-continue-uri` error.
+- **Confirm on a real device**, ideally somewhere with an active NWS alert or known good Scout-tab test area: does the red safety banner render correctly on Home, do Scout's water/business cards populate with sane results (PR #21's map is the tool to check this with), does location search return the right place.
+- See "Future scope" above before starting any modernization/backend-migration work — that's intentionally deferred, not a current task.
 
 ## Save state
 
