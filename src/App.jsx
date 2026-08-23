@@ -4092,7 +4092,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [geoLoading, setGeoLoading] = useState(false);
   var [geoError, setGeoError] = useState("");
   function handleSearchLocation() {
-    if (!searchText.trim()) return;
+    if (!searchText.trim()) { setGeoError("Type a city, zip, or address first."); return; }
     setGeoLoading(true);
     setGeoError("");
     geocodePlaceName(searchText).then(function(result) {
