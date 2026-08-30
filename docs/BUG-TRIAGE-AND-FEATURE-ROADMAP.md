@@ -8,7 +8,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: BUG-1 through BUG-4 have fixes up for review (PR #28, PR #29); BUG-5 through BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: BUG-1 through BUG-5 have fixes up for review (PR #28, PR #29, PR #31); BUG-6 and BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
@@ -16,7 +16,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 | [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` | Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28) |
 | [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
 | [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
-| [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Open — not started |
+| [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Fix up for review — [PR #31](https://github.com/ew3adam/fishing-app/pull/31) |
 | [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Open — not started (root cause already diagnosed in an earlier session, see `dev-session-log.md`) |
 | [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
 
@@ -53,7 +53,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** S in this repo (remove the fragile fallback once data is clean) + a backfill step in `rfc-firebase`.
 
 ### BUG-5 (P1) — CSV roster import breaks on quoted fields containing commas
-**Status:** Open — not started.
+**Status:** Fix up for review — [PR #31](https://github.com/ew3adam/fishing-app/pull/31). Took the small-dependency-free-parser branch of the fix direction below, plus the row/column-count sanity check. Verified live by importing the real shipped module through the Vite dev server and exercising it directly (quoted commas, escaped quotes, CRLF, a malformed row now throwing instead of silently shifting).
 **Impact:** any roster CSV export (e.g., from Excel/Sheets) with a quoted field containing a comma — a notes column, "Smith, Jr." — silently shifts every subsequent column with no error surfaced.
 **Root cause:** `parseRosterCsv` (`rosterImport.js`) splits on a bare `,` and only strips leading/trailing quote characters; no proper CSV quoting/escaping support.
 **Fix direction:** swap in a small, dependency-free RFC 4180-aware parser (a few dozen lines), or take a minimal CSV parsing library if one's acceptable for this "no backend, keep it light" app. Add a row-count/column-count sanity check that surfaces an error instead of silently importing shifted data.
