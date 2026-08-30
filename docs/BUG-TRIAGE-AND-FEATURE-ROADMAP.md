@@ -8,7 +8,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: all seven bugs (BUG-1 through BUG-7) have fixes up for review (PR #28, PR #29, PR #31, PR #32, PR #33).** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: all seven original bugs (BUG-1 through BUG-7) have fixes up for review (PR #28, PR #29, PR #31, PR #32, PR #33); a follow-up audit after that work found three more (BUG-8, BUG-9, BUG-10), also up for review (PR #35, PR #36).** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (merged); those aren't BUG-1..10 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
@@ -19,6 +19,9 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 | [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Fix up for review — [PR #31](https://github.com/ew3adam/fishing-app/pull/31) |
 | [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Fix up for review — [PR #32](https://github.com/ew3adam/fishing-app/pull/32) |
 | [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Fix up for review — [PR #33](https://github.com/ew3adam/fishing-app/pull/33) (FEATURE-2 built to close it) |
+| [BUG-8](#bug-8-p1--buildspotdisplaynames-private-address-fallback-fabricates-a-real-spot-name) | **P1** | `buildSpotDisplayName`'s private-address fallback fabricates a real spot name | `feedSpotPrivacy.js` | Fix up for review — [PR #35](https://github.com/ew3adam/fishing-app/pull/35) |
+| [BUG-9](#bug-9-p1--spotstabs-club-shared-map-view-renders-an-unsanitized-spot-name) | **P1** | SpotsTab's "Club shared map" view renders an unsanitized spot name | `App.jsx` (`SpotsTab`) | Fix up for review — [PR #35](https://github.com/ew3adam/fishing-app/pull/35) |
+| [BUG-10](#bug-10-p2--club-feed-like-button-can-double-count-on-a-rapid-double-tap) | **P2** | Club feed like button can double-count on a rapid double-tap | `ClubFeedList.jsx` | Fix up for review — [PR #36](https://github.com/ew3adam/fishing-app/pull/36) |
 
 ### BUG-1 (P0) — Catch photos can exceed `localStorage` quota and break catch logging
 **Status:** Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28). Verified live via Playwright: a ~5.81MB synthetic photo compressed to 333.7KB (17.8x smaller) before hitting `localStorage`.
@@ -71,6 +74,35 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Impact:** real readability barrier for older members specifically — 155 of 480 `fontSize` declarations in `App.jsx` are 9–11px, often paired with the low-contrast `muted` theme color; 3 of 9 `<img>` tags have no `alt` text.
 **Fix direction:** folded into Feature-1 below (text-size setting) rather than a standalone patch — fixing font sizes piecemeal without a real setting just moves the problem around.
 **Effort:** rolled into FEATURE-2.
+
+---
+
+## Follow-up audit (found after BUG-1 through BUG-7 shipped)
+
+A second pass over files/areas not closely covered by the original review, plus a fresh look at
+this session's own new code, found three more bugs — BUG-8, BUG-9, BUG-10. Same severity scale
+as Part 1 above.
+
+### BUG-8 (P1) — `buildSpotDisplayName`'s private-address fallback fabricates a real spot name
+**Status:** Fix up for review — [PR #35](https://github.com/ew3adam/fishing-app/pull/35).
+**Impact:** a member whose entered spot text looked like a private address or raw GPS coordinates had their club-visible catch silently misattributed to a real, specific, unrelated spot — not a safe generic label, an actively wrong one — with no indication to them that their entered text got swapped for something else.
+**Root cause:** `buildSpotDisplayName(spot, knownWaterNames)` (`feedSpotPrivacy.js`) returned `knownWaterNames[0]` when `looksLikePrivateAddress` matched, instead of the generic `"RFC water"` label its own other branches and the sibling `formatFeedSpotName` both use. The one call site (`App.jsx`'s `submitCatch`) always passed the same fixed-order list, so this was always the same value in practice: `KNOWN_SPOTS[0].name`, i.e. `"Salt Creek"`.
+**Fix direction:** always fall back to `"RFC water"`, matching the rest of the function and `formatFeedSpotName`.
+**Effort:** XS.
+
+### BUG-9 (P1) — SpotsTab's "Club shared map" view renders an unsanitized spot name
+**Status:** Fix up for review — [PR #35](https://github.com/ew3adam/fishing-app/pull/35).
+**Impact:** a member's freely-typed spot name — which could be a real street address if they weren't careful when saving it privately — reached every other club member unsanitized once shared, contradicting the privacy invariant `CLAUDE.md` documents for this exact scenario.
+**Root cause:** the "Club shared map" view in `SpotsTab` (`App.jsx`) rendered `s.name` directly. The other two places a club-shared spot name is displayed — `ScoutTab`'s `nearClubSpots` and the club catch feed (`ClubFeedList.jsx`) — both already correctly route through `formatFeedSpotName` first; this one didn't.
+**Fix direction:** route through `formatFeedSpotName(s.name, s.name)`, same as the other two display points.
+**Effort:** XS.
+
+### BUG-10 (P2) — Club feed like button can double-count on a rapid double-tap
+**Status:** Fix up for review — [PR #36](https://github.com/ew3adam/fishing-app/pull/36).
+**Impact:** a rapid double-tap on "Nice fish" silently double-counts a `likeCount` that's visible to the entire club, with no way for it to self-correct afterward.
+**Root cause:** `ClubFeedList.jsx`'s `toggleLike` reads `wasLiked` from the `likes` state closure with no synchronous re-entry guard. Two click events fired back to back both run before React flushes the first call's state update, so both read the same stale `wasLiked` and each send their own `+1`/`-1` to Firestore via `updateCatchLike`'s `increment()`. Same root-cause pattern as the double-submit bug already fixed in `CatchTab.submitCatch` (BUG-1, PR #28) — a `useState` guard alone isn't sufficient here either, for the same reason.
+**Fix direction:** a `useRef` guard, keyed per-post so liking two different posts in quick succession still both go through.
+**Effort:** XS.
 
 ---
 
