@@ -3,6 +3,7 @@ import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots } from "./services/fishingSyncService.js";
+import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
@@ -808,6 +809,23 @@ function fishingScore(wx) {
 }
 
 var HOME_TARGET_SPECIES_KEY = "rfc_home_target_species_v1";
+// FEATURE-2 / BUG-7 (docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md): a real text-size setting, not
+// reliant on OS/browser zoom (index.html sets user-scalable=no, which blocks pinch-zoom too).
+// App.jsx has ~480 inline fontSize:N declarations, ~155 of them 9-11px -- rewriting each to a
+// relative unit would be a large, high-conflict-risk refactor across the whole file. Applying
+// CSS `zoom` to the app's single root wrapper scales the entire rendered subtree (text, controls,
+// tap targets) exactly like a real browser zoom would, without touching any of those individual
+// styles.
+var TEXT_SCALE_KEY = "rfc_text_scale_v1";
+var TEXT_SCALE_OPTIONS = [
+  { id:"small", label:"Small", zoom:0.9 },
+  { id:"medium", label:"Medium", zoom:1 },
+  { id:"large", label:"Large", zoom:1.2 },
+];
+function textScaleZoom(id) {
+  var opt = TEXT_SCALE_OPTIONS.find(function(o) { return o.id === id; });
+  return opt ? opt.zoom : 1;
+}
 var HOME_WATER_SPOTS = LOCAL_SPOTS.map(function(s) {
   return { name:s.name, lat:s.lat, lng:s.lng, species:s.species || [], waterType:s.tag || "Water", tip:s.tip || "", parking:s.addr || "" };
 });
@@ -2418,7 +2436,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           return (
             <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
               <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
-              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{formatFeedSpotName(s.name, s.name)}</div>
               <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
@@ -2864,6 +2882,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
   const [cloudSaving, setCloudSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Guarding re-entry with the `submitting` state alone isn't enough: two click events fired
+  // back to back (a real double-tap) can both read the same pre-update `submitting` value from
+  // the same render's closure before React flushes the first setSubmitting(true). A ref is
+  // mutated immediately and is shared across both calls, so it's the actual guard; the state
+  // above only drives the button's disabled/label UI.
+  const submittingRef = useRef(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
@@ -2911,7 +2936,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     var dt = exif.DateTimeOriginal || exif.CreateDate;
     if (dt) setF("date", new Date(dt).toLocaleDateString());
   }
-  useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
+  useEffect(function() {
+    try {
+      localStorage.setItem("rfc_catches_v1", JSON.stringify(catches));
+    } catch (e) {
+      if (onSaveToast) onSaveToast("Couldn't save your catch log on this device (storage full). Signed-in catches still synced to the cloud.", "error");
+    }
+  }, [catches]);
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -3076,10 +3107,25 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     e.target.value = "";
   }
 
-  function submitCatch() {
+  async function submitCatch() {
+    // Guard re-entry from the very first line -- the button's `disabled` prop can't protect
+    // against a double-tap that lands before this state update re-renders, and there's a real
+    // async gap (photo compression, below) between a tap and cloudSaving being set. Without
+    // this, two taps race into two concurrent submitCatch calls, each adding its own catch/cloud
+    // doc for the same catch (flagged by review on this PR). submittingRef is what actually
+    // blocks the second call; setSubmitting mirrors it into state for the button's UI.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
-    var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    var spotDisplayName = buildSpotDisplayName(form.spot);
+    // Compress before this ever reaches localStorage -- a raw phone photo (4-8MB) as base64 can
+    // single-handedly approach the ~5-10MB localStorage quota. Reuses the same compression already
+    // used for the cloud upload (catchPhotoStorage.js), just applied to the local copy too.
+    var localPhoto = photo;
+    if (isDataUrlImage(photo)) {
+      try { localPhoto = await compressDataUrl(photo, 1200, 0.82); } catch (e) { /* keep original if compression fails */ }
+    }
     var entry = {
       id:Date.now(),
       user:(profile && profile.name) || "Angler",
@@ -3092,7 +3138,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       spotDisplayName:spotDisplayName,
       notes:form.notes,
       date:form.date,
-      photo:photo,
+      photo:localPhoto,
       visibility:vis,
       likeCount:0,
     };
@@ -3111,7 +3157,11 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
           setCatches(function(list) {
             return list.map(function(c) {
               if (String(c.id) === String(entry.id)) {
-                return Object.assign({}, c, { photoUrl: result.photoUrl });
+                // Cloud copy exists now -- drop the local base64 rather than keeping both;
+                // resolveCatchPhotoUrl already prefers photoUrl over photo, so nothing needs it.
+                var updated = Object.assign({}, c, { photoUrl: result.photoUrl });
+                delete updated.photo;
+                return updated;
               }
               return c;
             });
@@ -3122,9 +3172,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
         finishStep("Saved on this device — cloud sync failed. " + (err && err.message ? err.message : ""), "error");
       }).finally(function() {
         setCloudSaving(false);
+        setSubmitting(false);
+        submittingRef.current = false;
       });
     } else {
       finishStep("Saved on this device only. Sign in to back up to RFC cloud.", "info");
+      setSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
@@ -3588,7 +3642,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
               </Card>
-              <button onClick={submitCatch} disabled={cloudSaving} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:cloudSaving ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:cloudSaving ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)")}</button>
+              <button onClick={submitCatch} disabled={submitting} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:submitting ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:submitting ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (submitting ? "Saving…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"))}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
@@ -3665,7 +3719,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -4033,6 +4087,20 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
         <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>More themes coming in a future update.</div>
       </Card>
 
+      <Card T={T}>
+        <SecLabel text="Text Size" T={T} />
+        <div style={{ display:"flex", gap:8 }}>
+          {TEXT_SCALE_OPTIONS.map(function(opt) {
+            return (
+              <button key={opt.id} onClick={function() { setTextScale(opt.id); }} style={{ flex:1, background:textScale===opt.id ? th.green + "33" : "transparent", border:"1px solid " + (textScale===opt.id ? th.green : th.border), borderRadius:8, color:textScale===opt.id ? th.green : th.muted, padding:"8px 4px", cursor:"pointer", fontSize:11 }}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>Scales the whole app, not just this screen — handy if pinch-zoom is disabled on your phone.</div>
+      </Card>
+
       <Card T={T} borderColor={th.blue + "44"}>
         <SecLabel text="Download my data" T={T} />
         <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Export profile, catches, and scout history as a JSON backup file.</div>
@@ -4076,8 +4144,8 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var season = getSeason(new Date().getMonth());
 
   // Radius (miles) — user adjustable, defaults to a 10mi car-trip range.
-  var [radiusMi, setRadiusMi] = useState(10);
-  var [radiusDraft, setRadiusDraft] = useState("10");
+  var [radiusMi, setRadiusMi] = useState(5);
+  var [radiusDraft, setRadiusDraft] = useState("5");
   function commitRadius(raw) {
     var v = parseInt(raw, 10);
     if (!isFinite(v) || v < 1) v = 1;
@@ -4553,6 +4621,13 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
   const [theme, setTheme] = useState("dark");
+  const [textScale, setTextScaleState] = useState(function() {
+    try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
+  });
+  function setTextScale(id) {
+    setTextScaleState(id);
+    try { localStorage.setItem(TEXT_SCALE_KEY, id); } catch (e) {}
+  }
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authMember, setAuthMember] = useState(null);
@@ -4621,7 +4696,9 @@ export default function App() {
         }));
       });
     }).catch(function() {});
-    mergeLocalCatchesToCloud(memberId, JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")).catch(function() {});
+    var localCatchesForMerge = [];
+    try { localCatchesForMerge = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); } catch (e) {}
+    mergeLocalCatchesToCloud(memberId, localCatchesForMerge).catch(function() {});
     loadCatchesFromCloud(memberId).then(function(cloudCatches) {
       if (cloudCatches && cloudCatches.length) {
         try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
@@ -4760,7 +4837,7 @@ export default function App() {
   }, [profile, authMember ? authMember.id : null]);
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
+    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48, zoom:textScaleZoom(textScale) }}>
       <SaveToast toast={toast} />
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -4779,7 +4856,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {

@@ -118,24 +118,28 @@ export async function updateCatchLike(catchOwnerId, catchId, delta) {
 /** Club-wide feed — catches with visibility club or public_feed from all active members. */
 export async function loadClubFeedCatches() {
   var members = await listActiveMembers(120);
-  var feed = [];
-  var i;
-  for (i = 0; i < members.length; i++) {
-    var m = members[i];
+  // One Firestore read per member, in parallel rather than sequential -- with N members this
+  // used to be N round trips end-to-end; Promise.all overlaps them into one round trip's worth
+  // of latency. Each member's read still fails independently (e.g. rules block), same as before.
+  var perMember = await Promise.all(members.map(async function(m) {
     try {
       var snap = await getDocs(catchesCol(m.id));
-      snap.docs.forEach(function(d) {
+      return snap.docs.reduce(function(acc, d) {
         var data = d.data() || {};
         if (data.visibility === "club" || data.visibility === "public_feed") {
-          feed.push(Object.assign({}, data, {
+          acc.push(Object.assign({}, data, {
             id: d.id,
             memberId: m.id,
             memberName: m.displayName || m.id,
           }));
         }
-      });
-    } catch (e) { /* skip member if rules block */ }
-  }
+        return acc;
+      }, []);
+    } catch (e) {
+      return []; // skip member if rules block
+    }
+  }));
+  var feed = [].concat.apply([], perMember);
   return feed.sort(function(a, b) {
     return String(b.date || b.id || "").localeCompare(String(a.date || a.id || ""));
   });
@@ -144,23 +148,23 @@ export async function loadClubFeedCatches() {
 /** All members' spots flagged shareClub — for club map. */
 export async function loadClubSharedSpots() {
   var members = await listActiveMembers(120);
-  var spots = [];
-  var i;
-  for (i = 0; i < members.length; i++) {
-    var m = members[i];
+  // See loadClubFeedCatches above -- same N-reads-in-parallel treatment.
+  var perMember = await Promise.all(members.map(async function(m) {
     try {
       var snap = await getDoc(profileRef(m.id));
-      if (!snap.exists()) continue;
+      if (!snap.exists()) return [];
       var profile = snap.data() || {};
-      (profile.privateSpots || []).forEach(function(s) {
-        if (!s || !s.shareClub) return;
-        spots.push(Object.assign({}, s, {
+      return (profile.privateSpots || []).filter(function(s) { return s && s.shareClub; }).map(function(s) {
+        return Object.assign({}, s, {
           memberId: m.id,
           credit: m.displayName || m.id,
-        }));
+        });
       });
-    } catch (e) { /* skip if rules block */ }
-  }
+    } catch (e) {
+      return []; // skip if rules block
+    }
+  }));
+  var spots = [].concat.apply([], perMember);
   return spots.sort(function(a, b) {
     return String(a.name || "").localeCompare(String(b.name || ""));
   });

@@ -58,28 +58,29 @@ export function mapMemberDoc(id, data) {
   };
 }
 
-/** Find roster member by email (case-insensitive). */
+/** Find roster member by email (case-insensitive, regardless of how the CRM stored it). */
 export async function findMemberByEmail(email) {
   var normalized = normalizeEmail(email);
   if (!normalized || !isValidEmail(normalized)) {
     return null;
   }
   var db = getFirebaseDb();
+  // Fast path: works whenever the CRM stored the email lowercase, which is the common case.
   var q = query(collection(db, "members"), where("email", "==", normalized), limit(5));
   var snap = await getDocs(q);
-  if (snap.empty) {
-    // CRM import may store mixed-case email — try original trimmed if different
-    var alt = String(email || "").replace(/\s+/g, "").trim();
-    if (alt && alt !== normalized) {
-      q = query(collection(db, "members"), where("email", "==", alt), limit(5));
-      snap = await getDocs(q);
-    }
+  if (!snap.empty) {
+    var docSnap = snap.docs[0];
+    return mapMemberDoc(docSnap.id, docSnap.data());
   }
-  if (snap.empty) {
-    return null;
-  }
-  var docSnap = snap.docs[0];
-  return mapMemberDoc(docSnap.id, docSnap.data());
+  // Firestore has no case-insensitive query, and a CRM-imported email isn't guaranteed lowercase
+  // (see BUG-4 in docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md) -- a mixed-case stored email would miss
+  // the exact-match query above no matter how the member typed it. Fall back to a scan of active
+  // members instead of guessing at alternate casings: mapMemberDoc already normalizes every
+  // member's email to lowercase, so this comparison is inherently case-insensitive. Only runs on
+  // a query miss, so the common already-lowercase case pays no extra cost.
+  var members = await listActiveMembers(200);
+  var match = members.find(function(m) { return m.email === normalized; });
+  return match || null;
 }
 
 /** Load member by Firestore document id. */

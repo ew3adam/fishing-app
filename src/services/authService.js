@@ -20,6 +20,25 @@ var ROSTER_BLOCK_MSG = "Your email isn't on the club list. Ask the club presiden
 var OAUTH_NOT_CONFIGURED_MSG = "This sign-in option isn't set up yet. Contact the club admin.";
 var EMAIL_SIGN_IN_KEY = "rfc_sign_in_email";
 
+// Canonical production URL for the sign-in continue link (BUG-6 in
+// docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md). This app deploys to both GitHub Pages (the actual
+// `npm run deploy` target, per CLAUDE.md) and Cloudflare Pages, and Cloudflare also spins up a
+// fresh preview subdomain per branch/PR. Deriving the link from window.location at send time
+// meant whoever clicked "send me a link" could embed a throwaway preview URL that 404s once the
+// PR closes -- or one Firebase's Authorized domains list never had added, which is exactly the
+// auth/unauthorized-continue-uri failure noted in docs/dev-session-log.md. GitHub Pages is the
+// canonical production URL going forward; every member gets a link to this address regardless
+// of which domain they happened to be on when they hit "send link."
+var CANONICAL_SIGN_IN_URL = "https://ew3adam.github.io/fishing-app/";
+
+/** window.location only in local dev, so `npm run dev` keeps working with no extra setup. */
+function signInLinkUrl() {
+  if (import.meta.env.DEV) {
+    return window.location.origin + window.location.pathname;
+  }
+  return CANONICAL_SIGN_IN_URL;
+}
+
 /**
  * Send a passwordless sign-in link to the member's club email.
  * The link opens the app and completeSignInWithLink finishes the flow.
@@ -29,7 +48,7 @@ export async function sendSignInLink(email) {
   var normalized = normalizeEmail(email);
   if (!normalized) throw new Error("Type a valid email address.");
   var settings = {
-    url: window.location.origin + window.location.pathname,
+    url: signInLinkUrl(),
     handleCodeInApp: true,
   };
   await sendSignInLinkToEmail(getFirebaseAuth(), normalized, settings);

@@ -9,8 +9,8 @@ export function isDataUrlImage(value) {
   return typeof value === "string" && value.indexOf("data:image") === 0;
 }
 
-/** Resize/compress before upload to stay under Storage limits. */
-function compressDataUrl(dataUrl, maxDim, quality) {
+/** Resize/compress before upload to stay under Storage limits — also reused for local storage (see App.jsx submitCatch). */
+export function compressDataUrl(dataUrl, maxDim, quality) {
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.onload = function() {
