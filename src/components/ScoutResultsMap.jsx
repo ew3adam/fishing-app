@@ -17,6 +17,7 @@ export default function ScoutResultsMap({ center, markers, height, mutedColor })
   var cln = center && parseFloat(center.lng);
   var validCenter = isFinite(cla) && isFinite(cln);
   var list = Array.isArray(markers) ? markers : [];
+  var listKey = list.map(function(m) { return m.lat + "," + m.lng; }).join("|");
 
   useEffect(function() {
     if (!validCenter || !mapRef.current) return;
@@ -64,7 +65,7 @@ export default function ScoutResultsMap({ center, markers, height, mutedColor })
     } else {
       map.setView([cla, cln], 13);
     }
-  }, [cla, cln, validCenter, list]);
+  }, [cla, cln, validCenter, listKey]);
 
   useEffect(function() {
     return function() {

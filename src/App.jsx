@@ -4076,8 +4076,8 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var season = getSeason(new Date().getMonth());
 
   // Radius (miles) — user adjustable, defaults to a 10mi car-trip range.
-  var [radiusMi, setRadiusMi] = useState(10);
-  var [radiusDraft, setRadiusDraft] = useState("10");
+  var [radiusMi, setRadiusMi] = useState(5);
+  var [radiusDraft, setRadiusDraft] = useState("5");
   function commitRadius(raw) {
     var v = parseInt(raw, 10);
     if (!isFinite(v) || v < 1) v = 1;
