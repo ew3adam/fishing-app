@@ -8,7 +8,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: BUG-1 through BUG-6 have fixes up for review (PR #28, PR #29, PR #31, PR #32); only BUG-7 has no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: all seven bugs (BUG-1 through BUG-7) have fixes up for review (PR #28, PR #29, PR #31, PR #32, PR #33).** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
@@ -18,7 +18,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 | [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
 | [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Fix up for review — [PR #31](https://github.com/ew3adam/fishing-app/pull/31) |
 | [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Fix up for review — [PR #32](https://github.com/ew3adam/fishing-app/pull/32) |
-| [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
+| [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Fix up for review — [PR #33](https://github.com/ew3adam/fishing-app/pull/33) (FEATURE-2 built to close it) |
 
 ### BUG-1 (P0) — Catch photos can exceed `localStorage` quota and break catch logging
 **Status:** Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28). Verified live via Playwright: a ~5.81MB synthetic photo compressed to 333.7KB (17.8x smaller) before hitting `localStorage`.
@@ -67,7 +67,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** S, but needs a decision on the canonical URL (plain `ew3adam.github.io` vs. a custom domain, if one's ever added) before fixing.
 
 ### BUG-7 (P2) — Accessibility gaps: tiny text, missing `alt` text
-**Status:** Open — not started; folded into FEATURE-2 (text-size setting), not a standalone fix.
+**Status:** Fix up for review — [PR #33](https://github.com/ew3adam/fishing-app/pull/33). The missing-`alt`-text half was already fixed (all 9 `<img>` tags in `App.jsx` now have `alt`) — the PR closes the tiny-text half by building FEATURE-2 (a Small/Medium/Large text-size setting), per the fix direction below, rather than patching font sizes piecemeal.
 **Impact:** real readability barrier for older members specifically — 155 of 480 `fontSize` declarations in `App.jsx` are 9–11px, often paired with the low-contrast `muted` theme color; 3 of 9 `<img>` tags have no `alt` text.
 **Fix direction:** folded into Feature-1 below (text-size setting) rather than a standalone patch — fixing font sizes piecemeal without a real setting just moves the problem around.
 **Effort:** rolled into FEATURE-2.
@@ -87,6 +87,7 @@ Each entry: problem, goal, in/out of scope, rough approach, effort. Ordered by r
 **Effort:** M.
 
 ### FEATURE-2 — Real text-size setting
+**Status:** Fix up for review — [PR #33](https://github.com/ew3adam/fishing-app/pull/33). Shipped via a CSS `zoom` on the app's single root wrapper rather than the `--rfc-scale`/`rem` approach sketched below — the spike this ticket called for concluded that rewriting App.jsx's ~480 individual `fontSize` declarations to a relative unit was too large/high-conflict a refactor for this pass; `zoom` gets the same real-scaling result (not reliant on OS/browser zoom, since `index.html` disables that) without touching them. Also note: `theme` turned out not to actually be persisted anywhere in the current code (the "persisted the same way `theme` already is" line below was aspirational, not accurate) — text scale is instead persisted the same way `HOME_TARGET_SPECIES_KEY` already is, a plain standalone `localStorage` key, kept local-only/per-device rather than synced via `profile`.
 **Problem:** small text (BUG-7) compounds with `user-scalable=no` in `index.html`, which blocks the usual pinch-zoom workaround.
 **Goal:** a Profile setting (Small/Medium/Large, or a slider) that scales the app's text, not reliant on OS/browser zoom.
 **In scope:** a root font-size CSS variable multiplied through the existing `THEMES`-based inline-style system; persisted the same way `theme` already is.
