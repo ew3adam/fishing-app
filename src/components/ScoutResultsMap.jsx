@@ -90,6 +90,10 @@ export default function ScoutResultsMap({ center, markers, height, mutedColor })
           border: "1px solid rgba(255,255,255,0.15)",
           overflow: "hidden",
           zIndex: 0,
+          // Same fix as SpotMapPicker: force pinch/pan on this interactive map to Leaflet's JS zoom
+          // instead of the phone browser's native page-zoom, which otherwise wins the gesture and
+          // snaps back to the locked page scale on release.
+          touchAction: "none",
         }}
       />
       <div style={{ fontSize: 10, color: mutedColor || "#8a9a7a", marginTop: 6, lineHeight: 1.4 }}>

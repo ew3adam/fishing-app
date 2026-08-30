@@ -1889,7 +1889,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   function saveFromPickMap() {
     setSaveErr("");
     if (!pickPin) {
-      setSaveErr("Tap the map to drop a pin first.");
+      setSaveErr("Press and hold the map to drop a pin first.");
       return;
     }
     var draft = {
@@ -2119,8 +2119,8 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     return (
       <div>
         <OBtn label="← Back" onClick={closePickMap} color={th.green} style={{ margin:"12px 0 10px" }} />
-        <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>Tap the map to place a pin</div>
-        <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Pan and zoom, then tap where you fish. Pin stays in the app.</div>
+        <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>Press and hold the map to place a pin</div>
+        <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Pan and zoom freely, then press and hold where you fish — same as dropping a pin in Google Maps. Pin stays in the app.</div>
         <SpotMapPicker
           centerLat={pickCenter.lat}
           centerLng={pickCenter.lng}
