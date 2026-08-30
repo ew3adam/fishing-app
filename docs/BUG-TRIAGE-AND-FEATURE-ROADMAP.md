@@ -8,17 +8,20 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-| ID | Severity | Title | Where |
-|----|----------|-------|-------|
-| [BUG-1](#bug-1-p0--catch-photos-can-exceed-localstorage-quota-and-break-catch-logging) | **P0** | Catch photos can exceed `localStorage` quota and break catch logging | `CatchTab`, `App.jsx` |
-| [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` |
-| [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` |
-| [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` |
-| [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` |
-| [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` |
-| [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) |
+**Status as of this update: none of BUG-1 through BUG-7 have a fix shipped yet.** The two PRs that exist so far in this line of work are process, not fixes — #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches the actual bug code below. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+
+| ID | Severity | Title | Where | Status |
+|----|----------|-------|-------|--------|
+| [BUG-1](#bug-1-p0--catch-photos-can-exceed-localstorage-quota-and-break-catch-logging) | **P0** | Catch photos can exceed `localStorage` quota and break catch logging | `CatchTab`, `App.jsx` | Open — not started |
+| [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` | Open — not started |
+| [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Open — not started |
+| [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Open — not started |
+| [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Open — not started |
+| [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Open — not started (root cause already diagnosed in an earlier session, see `dev-session-log.md`) |
+| [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
 
 ### BUG-1 (P0) — Catch photos can exceed `localStorage` quota and break catch logging
+**Status:** Open — not started.
 **Impact:** the core catch-logging feature can break itself from normal use, with no error message a member would understand.
 **Root cause:** `readImageFile` (`App.jsx` ~2915) stores the **full, uncompressed** photo as base64 directly into the `catches` array. That array is written to `localStorage` on every change (`App.jsx:2914`) with **no try/catch**. A modern phone photo (4–8MB) plus base64 overhead (~33%) can single-handedly approach the ~5–10MB `localStorage` quota most browsers enforce per origin. Two or three catches logged while signed out (nothing offloads to Firebase Storage) can throw `QuotaExceededError` inside a `useEffect`.
 **Compounding factor:** even after a photo successfully uploads to Firebase Storage, the local copy still keeps the raw base64 (`App.jsx:3110-3118` only *adds* `photoUrl`, never drops `photo`) — bloat accumulates for signed-in members too, just slower.
@@ -29,36 +32,42 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** S–M.
 
 ### BUG-2 (P1) — Corrupt local catch data can silently break post-sign-in sync
+**Status:** Open — not started.
 **Impact:** if BUG-1 ever produces a partial/corrupt write, sign-in sync breaks with zero visible error.
 **Root cause:** `App.jsx:4624` — `JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")` runs unguarded inside the post-sign-in effect. A synchronous throw here also skips `loadCatchesFromCloud` on the next line, since both are in the same effect body.
 **Fix direction:** wrap in try/catch, default to `[]` on parse failure (same pattern already used elsewhere, e.g. `loadScoutHistory`).
 **Effort:** XS. Ship alongside BUG-1.
 
 ### BUG-3 (P1) — Club feed and club-spot map do N sequential Firestore reads
+**Status:** Open — not started.
 **Impact:** feed/map load time scales linearly with roster size; burns Firestore read quota; already noticeably slow at current roster size, will get worse as the club grows.
 **Root cause:** `loadClubFeedCatches` and `loadClubSharedSpots` (`fishingSyncService.js`) loop over every active member with `for` + `await` instead of `Promise.all` — fully sequential.
 **Fix direction:** parallelize with `Promise.all` (low-risk, same result shape). Longer-term (not this ticket): a Firestore `collectionGroup` query would remove the N-reads pattern entirely, but that's a rules/index redesign, not a quick fix.
 **Effort:** S.
 
 ### BUG-4 (P1) — Sign-in can fail for roster emails not stored lowercase
+**Status:** Open — not started.
 **Impact:** a member whose CRM-imported email has any uppercase character may be unable to sign in, with a confusing "not on the club list" error despite being a real active member.
 **Root cause:** `findMemberByEmail` (`memberService.js`) queries with a lowercased version of what the member *typed*; Firestore's `==` is case-sensitive, so if the stored `email` field isn't lowercase, the primary query misses and the fallback only helps if the member happens to type the exact original casing.
 **Fix direction:** normalize `email` to lowercase at the source — either a one-time backfill script against the `members` collection, or enforce lowercase on every CRM write path (that's in the sibling `rfc-firebase` repo, not this one — cross-repo ticket).
 **Effort:** S in this repo (remove the fragile fallback once data is clean) + a backfill step in `rfc-firebase`.
 
 ### BUG-5 (P1) — CSV roster import breaks on quoted fields containing commas
+**Status:** Open — not started.
 **Impact:** any roster CSV export (e.g., from Excel/Sheets) with a quoted field containing a comma — a notes column, "Smith, Jr." — silently shifts every subsequent column with no error surfaced.
 **Root cause:** `parseRosterCsv` (`rosterImport.js`) splits on a bare `,` and only strips leading/trailing quote characters; no proper CSV quoting/escaping support.
 **Fix direction:** swap in a small, dependency-free RFC 4180-aware parser (a few dozen lines), or take a minimal CSV parsing library if one's acceptable for this "no backend, keep it light" app. Add a row-count/column-count sanity check that surfaces an error instead of silently importing shifted data.
 **Effort:** S.
 
 ### BUG-6 (P2) — Passwordless sign-in link domain depends on `window.location` at send-time
+**Status:** Open — not started. Root cause was already diagnosed (not fixed) in an earlier session — see `docs/dev-session-log.md`'s note on the `auth/unauthorized-continue-uri` troubleshooting.
 **Impact:** already diagnosed this cycle as the mechanism behind the "invite email links to the wrong place" issue — the link a member gets depends on whatever URL happened to be open when *someone* triggered the send, not a fixed, correct production URL.
 **Root cause:** `sendSignInLink` (`authService.js:32`) builds `url: window.location.origin + window.location.pathname` live.
 **Fix direction:** hardcode (or env-configure) the canonical production URL for the continue-link instead of deriving it from the current page, reserving `window.location`-based behavior for local dev only.
 **Effort:** S, but needs a decision on the canonical URL (plain `ew3adam.github.io` vs. a custom domain, if one's ever added) before fixing.
 
 ### BUG-7 (P2) — Accessibility gaps: tiny text, missing `alt` text
+**Status:** Open — not started; folded into FEATURE-2 (text-size setting), not a standalone fix.
 **Impact:** real readability barrier for older members specifically — 155 of 480 `fontSize` declarations in `App.jsx` are 9–11px, often paired with the low-contrast `muted` theme color; 3 of 9 `<img>` tags have no `alt` text.
 **Fix direction:** folded into Feature-1 below (text-size setting) rather than a standalone patch — fixing font sizes piecemeal without a real setting just moves the problem around.
 **Effort:** rolled into FEATURE-2.
