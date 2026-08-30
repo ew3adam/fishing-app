@@ -3,6 +3,7 @@ import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots } from "./services/fishingSyncService.js";
+import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
@@ -2911,7 +2912,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     var dt = exif.DateTimeOriginal || exif.CreateDate;
     if (dt) setF("date", new Date(dt).toLocaleDateString());
   }
-  useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
+  useEffect(function() {
+    try {
+      localStorage.setItem("rfc_catches_v1", JSON.stringify(catches));
+    } catch (e) {
+      if (onSaveToast) onSaveToast("Couldn't save your catch log on this device (storage full). Signed-in catches still synced to the cloud.", "error");
+    }
+  }, [catches]);
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -3076,10 +3083,17 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     e.target.value = "";
   }
 
-  function submitCatch() {
+  async function submitCatch() {
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
     var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
     var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    // Compress before this ever reaches localStorage -- a raw phone photo (4-8MB) as base64 can
+    // single-handedly approach the ~5-10MB localStorage quota. Reuses the same compression already
+    // used for the cloud upload (catchPhotoStorage.js), just applied to the local copy too.
+    var localPhoto = photo;
+    if (isDataUrlImage(photo)) {
+      try { localPhoto = await compressDataUrl(photo, 1200, 0.82); } catch (e) { /* keep original if compression fails */ }
+    }
     var entry = {
       id:Date.now(),
       user:(profile && profile.name) || "Angler",
@@ -3092,7 +3106,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       spotDisplayName:spotDisplayName,
       notes:form.notes,
       date:form.date,
-      photo:photo,
+      photo:localPhoto,
       visibility:vis,
       likeCount:0,
     };
@@ -3111,7 +3125,11 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
           setCatches(function(list) {
             return list.map(function(c) {
               if (String(c.id) === String(entry.id)) {
-                return Object.assign({}, c, { photoUrl: result.photoUrl });
+                // Cloud copy exists now -- drop the local base64 rather than keeping both;
+                // resolveCatchPhotoUrl already prefers photoUrl over photo, so nothing needs it.
+                var updated = Object.assign({}, c, { photoUrl: result.photoUrl });
+                delete updated.photo;
+                return updated;
               }
               return c;
             });
@@ -4621,7 +4639,9 @@ export default function App() {
         }));
       });
     }).catch(function() {});
-    mergeLocalCatchesToCloud(memberId, JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")).catch(function() {});
+    var localCatchesForMerge = [];
+    try { localCatchesForMerge = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); } catch (e) {}
+    mergeLocalCatchesToCloud(memberId, localCatchesForMerge).catch(function() {});
     loadCatchesFromCloud(memberId).then(function(cloudCatches) {
       if (cloudCatches && cloudCatches.length) {
         try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
