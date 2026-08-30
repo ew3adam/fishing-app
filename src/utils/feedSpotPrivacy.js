@@ -33,15 +33,16 @@ export function formatFeedSpotName(spot, spotDisplayName) {
 /**
  * Pick a public spot name when saving a club catch.
  */
-export function buildSpotDisplayName(spot, knownWaterNames) {
+export function buildSpotDisplayName(spot) {
   var raw = trim(spot);
   if (!raw) return "RFC water";
-  if (looksLikePrivateAddress(raw)) {
-    if (knownWaterNames && knownWaterNames.length) {
-      return knownWaterNames[0];
-    }
-    return "RFC water";
-  }
+  // Previously fell back to an arbitrary "known spot" name (always the same one, the first
+  // entry of a caller-supplied list) instead of the generic label below -- misattributing the
+  // catch to a real, specific spot the member may never have visited, silently, with no warning
+  // shown to them. Match formatFeedSpotName's behavior (and this function's own other branches):
+  // when the entered text looks like a private address, fall back to a safe generic label, never
+  // a fabricated substitute.
+  if (looksLikePrivateAddress(raw)) return "RFC water";
   return raw;
 }
 

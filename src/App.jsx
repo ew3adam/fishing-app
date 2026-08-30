@@ -2436,7 +2436,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           return (
             <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
               <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
-              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{formatFeedSpotName(s.name, s.name)}</div>
               <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
@@ -3118,8 +3118,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     submittingRef.current = true;
     setSubmitting(true);
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
-    var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    var spotDisplayName = buildSpotDisplayName(form.spot);
     // Compress before this ever reaches localStorage -- a raw phone photo (4-8MB) as base64 can
     // single-handedly approach the ~5-10MB localStorage quota. Reuses the same compression already
     // used for the cloud upload (catchPhotoStorage.js), just applied to the local copy too.
