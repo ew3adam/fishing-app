@@ -8,7 +8,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: BUG-1 through BUG-5 have fixes up for review (PR #28, PR #29, PR #31); BUG-6 and BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: BUG-1 through BUG-6 have fixes up for review (PR #28, PR #29, PR #31, PR #32); only BUG-7 has no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
@@ -17,7 +17,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 | [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
 | [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
 | [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Fix up for review — [PR #31](https://github.com/ew3adam/fishing-app/pull/31) |
-| [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Open — not started (root cause already diagnosed in an earlier session, see `dev-session-log.md`) |
+| [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Fix up for review — [PR #32](https://github.com/ew3adam/fishing-app/pull/32) |
 | [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
 
 ### BUG-1 (P0) — Catch photos can exceed `localStorage` quota and break catch logging
@@ -60,7 +60,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** S.
 
 ### BUG-6 (P2) — Passwordless sign-in link domain depends on `window.location` at send-time
-**Status:** Open — not started. Root cause was already diagnosed (not fixed) in an earlier session — see `docs/dev-session-log.md`'s note on the `auth/unauthorized-continue-uri` troubleshooting.
+**Status:** Fix up for review — [PR #32](https://github.com/ew3adam/fishing-app/pull/32). Canonical URL decision: GitHub Pages (`https://ew3adam.github.io/fishing-app/`), per the user. Verified live against both `vite dev` and a real `vite preview` production build, capturing the actual Firebase `sendOobCode` request.
 **Impact:** already diagnosed this cycle as the mechanism behind the "invite email links to the wrong place" issue — the link a member gets depends on whatever URL happened to be open when *someone* triggered the send, not a fixed, correct production URL.
 **Root cause:** `sendSignInLink` (`authService.js:32`) builds `url: window.location.origin + window.location.pathname` live.
 **Fix direction:** hardcode (or env-configure) the canonical production URL for the continue-link instead of deriving it from the current page, reserving `window.location`-based behavior for local dev only.
