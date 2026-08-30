@@ -32,6 +32,14 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
     try { return JSON.parse(localStorage.getItem("rfc_feed_likes_v1") || "{}"); } catch (e) { return {}; }
   });
   var [likeError, setLikeError] = useState("");
+  // Guards toggleLike against a rapid double-tap on the same post: two click events fired back
+  // to back both read `likes` from the same pre-update state closure (React hasn't flushed the
+  // first tap's setLikes yet), so both would compute the same wasLiked and send the same +1/-1
+  // delta twice -- silently double-counting the shared likeCount in Firestore. A ref (mutated
+  // immediately, unlike state) is the actual guard; keyed per-post so liking two different posts
+  // in quick succession still both go through. Same root cause as the double-submit bug fixed in
+  // CatchTab.submitCatch (BUG-1, see docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md).
+  var likeInFlightRef = useRef({});
 
   function doLoad() {
     return loadClubFeedCatches()
@@ -67,6 +75,9 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
 
   function toggleLike(post) {
     var postId = String(post.id || post.memberId + "_" + post.date);
+    if (likeInFlightRef.current[postId]) return;
+    likeInFlightRef.current[postId] = true;
+
     var wasLiked = !!likes[postId];
     var nextLikes = Object.assign({}, likes);
     if (wasLiked) delete nextLikes[postId];
@@ -95,6 +106,8 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
           return Object.assign({}, p, { likeCount: Math.max(0, (p.likeCount || 0) + delta) });
         });
       });
+    }).finally(function() {
+      delete likeInFlightRef.current[postId];
     });
 
     setPosts(function(prev) {
