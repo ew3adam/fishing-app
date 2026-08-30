@@ -809,6 +809,23 @@ function fishingScore(wx) {
 }
 
 var HOME_TARGET_SPECIES_KEY = "rfc_home_target_species_v1";
+// FEATURE-2 / BUG-7 (docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md): a real text-size setting, not
+// reliant on OS/browser zoom (index.html sets user-scalable=no, which blocks pinch-zoom too).
+// App.jsx has ~480 inline fontSize:N declarations, ~155 of them 9-11px -- rewriting each to a
+// relative unit would be a large, high-conflict-risk refactor across the whole file. Applying
+// CSS `zoom` to the app's single root wrapper scales the entire rendered subtree (text, controls,
+// tap targets) exactly like a real browser zoom would, without touching any of those individual
+// styles.
+var TEXT_SCALE_KEY = "rfc_text_scale_v1";
+var TEXT_SCALE_OPTIONS = [
+  { id:"small", label:"Small", zoom:0.9 },
+  { id:"medium", label:"Medium", zoom:1 },
+  { id:"large", label:"Large", zoom:1.2 },
+];
+function textScaleZoom(id) {
+  var opt = TEXT_SCALE_OPTIONS.find(function(o) { return o.id === id; });
+  return opt ? opt.zoom : 1;
+}
 var HOME_WATER_SPOTS = LOCAL_SPOTS.map(function(s) {
   return { name:s.name, lat:s.lat, lng:s.lng, species:s.species || [], waterType:s.tag || "Water", tip:s.tip || "", parking:s.addr || "" };
 });
@@ -3703,7 +3720,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -4069,6 +4086,20 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
           })}
         </div>
         <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>More themes coming in a future update.</div>
+      </Card>
+
+      <Card T={T}>
+        <SecLabel text="Text Size" T={T} />
+        <div style={{ display:"flex", gap:8 }}>
+          {TEXT_SCALE_OPTIONS.map(function(opt) {
+            return (
+              <button key={opt.id} onClick={function() { setTextScale(opt.id); }} style={{ flex:1, background:textScale===opt.id ? th.green + "33" : "transparent", border:"1px solid " + (textScale===opt.id ? th.green : th.border), borderRadius:8, color:textScale===opt.id ? th.green : th.muted, padding:"8px 4px", cursor:"pointer", fontSize:11 }}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>Scales the whole app, not just this screen — handy if pinch-zoom is disabled on your phone.</div>
       </Card>
 
       <Card T={T} borderColor={th.blue + "44"}>
@@ -4591,6 +4622,13 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
   const [theme, setTheme] = useState("dark");
+  const [textScale, setTextScaleState] = useState(function() {
+    try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
+  });
+  function setTextScale(id) {
+    setTextScaleState(id);
+    try { localStorage.setItem(TEXT_SCALE_KEY, id); } catch (e) {}
+  }
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authMember, setAuthMember] = useState(null);
@@ -4800,7 +4838,7 @@ export default function App() {
   }, [profile, authMember ? authMember.id : null]);
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
+    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48, zoom:textScaleZoom(textScale) }}>
       <SaveToast toast={toast} />
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -4819,7 +4857,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
