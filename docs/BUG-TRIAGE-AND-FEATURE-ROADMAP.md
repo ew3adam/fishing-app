@@ -8,12 +8,12 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: none of BUG-1 through BUG-7 have a fix shipped yet.** The two PRs that exist so far in this line of work are process, not fixes — #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches the actual bug code below. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: BUG-1 and BUG-2 have fixes up for review in PR #28; BUG-3 through BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
-| [BUG-1](#bug-1-p0--catch-photos-can-exceed-localstorage-quota-and-break-catch-logging) | **P0** | Catch photos can exceed `localStorage` quota and break catch logging | `CatchTab`, `App.jsx` | Open — not started |
-| [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` | Open — not started |
+| [BUG-1](#bug-1-p0--catch-photos-can-exceed-localstorage-quota-and-break-catch-logging) | **P0** | Catch photos can exceed `localStorage` quota and break catch logging | `CatchTab`, `App.jsx` | Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28) |
+| [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` | Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28) |
 | [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Open — not started |
 | [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Open — not started |
 | [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Open — not started |
@@ -21,7 +21,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 | [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
 
 ### BUG-1 (P0) — Catch photos can exceed `localStorage` quota and break catch logging
-**Status:** Open — not started.
+**Status:** Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28). Verified live via Playwright: a ~5.81MB synthetic photo compressed to 333.7KB (17.8x smaller) before hitting `localStorage`.
 **Impact:** the core catch-logging feature can break itself from normal use, with no error message a member would understand.
 **Root cause:** `readImageFile` (`App.jsx` ~2915) stores the **full, uncompressed** photo as base64 directly into the `catches` array. That array is written to `localStorage` on every change (`App.jsx:2914`) with **no try/catch**. A modern phone photo (4–8MB) plus base64 overhead (~33%) can single-handedly approach the ~5–10MB `localStorage` quota most browsers enforce per origin. Two or three catches logged while signed out (nothing offloads to Firebase Storage) can throw `QuotaExceededError` inside a `useEffect`.
 **Compounding factor:** even after a photo successfully uploads to Firebase Storage, the local copy still keeps the raw base64 (`App.jsx:3110-3118` only *adds* `photoUrl`, never drops `photo`) — bloat accumulates for signed-in members too, just slower.
@@ -32,7 +32,7 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** S–M.
 
 ### BUG-2 (P1) — Corrupt local catch data can silently break post-sign-in sync
-**Status:** Open — not started.
+**Status:** Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28), shipped alongside BUG-1 as planned.
 **Impact:** if BUG-1 ever produces a partial/corrupt write, sign-in sync breaks with zero visible error.
 **Root cause:** `App.jsx:4624` — `JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")` runs unguarded inside the post-sign-in effect. A synchronous throw here also skips `loadCatchesFromCloud` on the next line, since both are in the same effect body.
 **Fix direction:** wrap in try/catch, default to `[]` on parse failure (same pattern already used elsewhere, e.g. `loadScoutHistory`).
