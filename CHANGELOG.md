@@ -99,6 +99,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   fallback could throw with nothing to catch it, leaving the forecast on "Fetching
   live conditions…" forever if both Open-Meteo and the fallback failed. Now guarded
   with its own try/catch plus a defensive `.catch()` at the call site.
+- **Scout: empty search silently did nothing** — tapping "Go" in the "Search a
+  location" card with an empty field now shows "Type a city, zip, or address first."
+  instead of no-oping with zero feedback. ([PR #23](https://github.com/ew3adam/fishing-app/pull/23), merged)
+
+### Fixed — full-codebase bug triage (in review, not yet merged)
+_See `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` for the full triage (7 bugs, ranked P0–P2)
+this line of work is drawn from._
+- **BUG-1 (P0) — catch photos could exceed `localStorage` quota and break catch
+  logging**: photos are now compressed before ever being written to `localStorage`
+  (not just before the Firebase Storage upload), the `rfc_catches_v1` write is
+  wrapped in try/catch with a toast on quota failure instead of failing silently,
+  and the local base64 copy is dropped once a cloud `photoUrl` exists.
+  ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+- **BUG-2 (P1) — corrupt local catch data could silently break post-sign-in sync**:
+  the unguarded `JSON.parse` on `rfc_catches_v1` in the post-sign-in effect is now
+  wrapped in try/catch, defaulting to `[]`. ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+- **BUG-3 (P1) — club feed and club-spot map did N sequential Firestore reads**:
+  `loadClubFeedCatches` and `loadClubSharedSpots` now issue all per-member reads via
+  `Promise.all` instead of a sequential loop. ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+- **BUG-4 (P1) — sign-in could fail for roster emails not stored lowercase**:
+  `findMemberByEmail` now falls back to a case-insensitive scan of active members
+  (reusing the existing email normalization) instead of guessing at alternate
+  casings, so a mixed-case CRM-imported email no longer blocks sign-in.
+  ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+- **Maps: pinch-zoom snap-back; pin placement switched to press-and-hold**
+  ([PR #24](https://github.com/ew3adam/fishing-app/pull/24), open — pending real-device testing before merge).
+- **Scout: results map re-centered on every render; default search radius set to 5mi**
+  ([PR #25](https://github.com/ew3adam/fishing-app/pull/25), open — pending real-device testing before merge).
+
+### Added — developer tooling (in review, not yet merged)
+- `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` — full-codebase bug triage (7 issues,
+  P0–P2) and feature-idea PRDs, written outside any single feature PR.
+  ([PR #26](https://github.com/ew3adam/fishing-app/pull/26), open)
+- `bug-fixes` review subagent + a `Stop` hook that gates new code against the triage
+  doc. ([PR #27](https://github.com/ew3adam/fishing-app/pull/27), open)
 
 ### Next
 - **Firebase Console (manual, one-time steps)**:
@@ -239,4 +274,4 @@ _Commits: `524b219` → `7b4ce5a`_
 
 ---
 
-_Last updated: 2026-07-08_
+_Last updated: 2026-08-30_
