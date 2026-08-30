@@ -8,14 +8,14 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 
 ## Part 1 — Bug triage
 
-**Status as of this update: BUG-1 and BUG-2 have fixes up for review in PR #28; BUG-3 through BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
+**Status as of this update: BUG-1 through BUG-4 have fixes up for review (PR #28, PR #29); BUG-5 through BUG-7 have no fix shipped yet.** #26 is this document itself, #27 is the `bug-fixes` review subagent/hook — neither touches bug code directly. (Separately, three *other*, directly-reported bugs not part of this triage — Scout's empty-search no-op, the map pinch-zoom snap-back, and the Scout results-map re-centering issue — have their own fixes in PR #23 (merged), #24 (open), and #25 (open); those aren't BUG-1..7 and aren't tracked in this table.)
 
 | ID | Severity | Title | Where | Status |
 |----|----------|-------|-------|--------|
 | [BUG-1](#bug-1-p0--catch-photos-can-exceed-localstorage-quota-and-break-catch-logging) | **P0** | Catch photos can exceed `localStorage` quota and break catch logging | `CatchTab`, `App.jsx` | Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28) |
 | [BUG-2](#bug-2-p1--corrupt-local-catch-data-can-silently-break-post-sign-in-sync) | **P1** | Corrupt local catch data can silently break post-sign-in sync | `App.jsx:4624` | Fix up for review — [PR #28](https://github.com/ew3adam/fishing-app/pull/28) |
-| [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Open — not started |
-| [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Open — not started |
+| [BUG-3](#bug-3-p1--club-feed-and-club-spot-map-do-n-sequential-firestore-reads) | **P1** | Club feed and club-spot map do N sequential Firestore reads | `fishingSyncService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
+| [BUG-4](#bug-4-p1--sign-in-can-fail-for-roster-emails-not-stored-lowercase) | **P1** | Sign-in can fail for roster emails not stored lowercase | `memberService.js` | Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29) |
 | [BUG-5](#bug-5-p1--csv-roster-import-breaks-on-quoted-fields-containing-commas) | **P1** | CSV roster import breaks on quoted fields containing commas | `rosterImport.js` | Open — not started |
 | [BUG-6](#bug-6-p2--passwordless-sign-in-link-domain-depends-on-window-location-at-send-time) | **P2** | Passwordless sign-in link domain depends on `window.location` at send-time | `authService.js` | Open — not started (root cause already diagnosed in an earlier session, see `dev-session-log.md`) |
 | [BUG-7](#bug-7-p2--accessibility-gaps-tiny-text-missing-alt-text) | **P2** | Accessibility gaps: tiny text, missing alt text | `App.jsx` (widespread) | Open — folded into FEATURE-2, not started |
@@ -39,14 +39,14 @@ Source: full-codebase review (`src/App.jsx`, all `src/services/*`, `firebase/*.r
 **Effort:** XS. Ship alongside BUG-1.
 
 ### BUG-3 (P1) — Club feed and club-spot map do N sequential Firestore reads
-**Status:** Open — not started.
+**Status:** Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29). Verified via a standalone logic simulation (real timing, no live Firestore available in this sandbox): 8 simulated member reads went from 404ms sequential to 52ms parallel.
 **Impact:** feed/map load time scales linearly with roster size; burns Firestore read quota; already noticeably slow at current roster size, will get worse as the club grows.
 **Root cause:** `loadClubFeedCatches` and `loadClubSharedSpots` (`fishingSyncService.js`) loop over every active member with `for` + `await` instead of `Promise.all` — fully sequential.
 **Fix direction:** parallelize with `Promise.all` (low-risk, same result shape). Longer-term (not this ticket): a Firestore `collectionGroup` query would remove the N-reads pattern entirely, but that's a rules/index redesign, not a quick fix.
 **Effort:** S.
 
 ### BUG-4 (P1) — Sign-in can fail for roster emails not stored lowercase
-**Status:** Open — not started.
+**Status:** Fix up for review — [PR #29](https://github.com/ew3adam/fishing-app/pull/29). Shipped without the cross-repo backfill originally planned below — see that PR for why a client-side case-insensitive fallback (reusing `mapMemberDoc`'s existing `normalizeEmail`) fixes this in-repo, no CRM change required. The backfill/enforce-lowercase-on-write idea is still worth doing in `rfc-firebase` for defense in depth.
 **Impact:** a member whose CRM-imported email has any uppercase character may be unable to sign in, with a confusing "not on the club list" error despite being a real active member.
 **Root cause:** `findMemberByEmail` (`memberService.js`) queries with a lowercased version of what the member *typed*; Firestore's `==` is case-sensitive, so if the stored `email` field isn't lowercase, the primary query misses and the fallback only helps if the member happens to type the exact original casing.
 **Fix direction:** normalize `email` to lowercase at the source — either a one-time backfill script against the `members` collection, or enforce lowercase on every CRM write path (that's in the sibling `rfc-firebase` repo, not this one — cross-repo ticket).
