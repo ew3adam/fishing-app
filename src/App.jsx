@@ -2418,7 +2418,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           return (
             <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
               <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
-              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{formatFeedSpotName(s.name, s.name)}</div>
               <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
@@ -3078,8 +3078,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
 
   function submitCatch() {
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
-    var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    var spotDisplayName = buildSpotDisplayName(form.spot);
     var entry = {
       id:Date.now(),
       user:(profile && profile.name) || "Angler",
