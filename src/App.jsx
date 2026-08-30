@@ -2865,6 +2865,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
   const [cloudSaving, setCloudSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Guarding re-entry with the `submitting` state alone isn't enough: two click events fired
+  // back to back (a real double-tap) can both read the same pre-update `submitting` value from
+  // the same render's closure before React flushes the first setSubmitting(true). A ref is
+  // mutated immediately and is shared across both calls, so it's the actual guard; the state
+  // above only drives the button's disabled/label UI.
+  const submittingRef = useRef(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
@@ -3084,6 +3091,15 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   }
 
   async function submitCatch() {
+    // Guard re-entry from the very first line -- the button's `disabled` prop can't protect
+    // against a double-tap that lands before this state update re-renders, and there's a real
+    // async gap (photo compression, below) between a tap and cloudSaving being set. Without
+    // this, two taps race into two concurrent submitCatch calls, each adding its own catch/cloud
+    // doc for the same catch (flagged by review on this PR). submittingRef is what actually
+    // blocks the second call; setSubmitting mirrors it into state for the button's UI.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
     var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
     var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
@@ -3140,9 +3156,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
         finishStep("Saved on this device — cloud sync failed. " + (err && err.message ? err.message : ""), "error");
       }).finally(function() {
         setCloudSaving(false);
+        setSubmitting(false);
+        submittingRef.current = false;
       });
     } else {
       finishStep("Saved on this device only. Sign in to back up to RFC cloud.", "info");
+      setSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
@@ -3606,7 +3626,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
               </Card>
-              <button onClick={submitCatch} disabled={cloudSaving} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:cloudSaving ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:cloudSaving ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)")}</button>
+              <button onClick={submitCatch} disabled={submitting} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:submitting ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:submitting ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (submitting ? "Saving…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"))}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
