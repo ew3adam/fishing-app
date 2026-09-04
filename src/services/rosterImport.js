@@ -71,18 +71,87 @@ export function validateRosterRows(rows) {
   return { ok: errors.length === 0, rows: normalized, errors: errors };
 }
 
-/** Parse simple CSV text (comma-separated, optional quotes). */
+/**
+ * RFC 4180-aware CSV tokenizer: parses full CSV text into an array of rows, each row an array
+ * of raw field strings. Handles quoted fields containing commas or embedded newlines, and a
+ * doubled `""` as an escaped quote inside a quoted field -- a bare `line.split(",")` (the old
+ * approach) shifts every column after the first quoted comma with no error surfaced (see BUG-5
+ * in docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md).
+ */
+function tokenizeCsv(text) {
+  var rows = [];
+  var row = [];
+  var field = "";
+  var inQuotes = false;
+  var s = String(text || "");
+  var i = 0;
+  var len = s.length;
+  while (i < len) {
+    var ch = s[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') {
+          field += '"';
+          i += 2;
+        } else {
+          inQuotes = false;
+          i++;
+        }
+      } else {
+        field += ch;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i++;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+      i++;
+    } else if (ch === "\r") {
+      i++; // swallow CR; LF (below) ends the row -- normalizes CRLF and bare CR
+    } else if (ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      i++;
+    } else {
+      field += ch;
+      i++;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  // Drop blank lines (a lone empty field), matching the old behavior of skipping empty lines.
+  return rows.filter(function(r) { return !(r.length === 1 && r[0].trim() === ""); });
+}
+
+/** Parse CSV text (RFC 4180: comma-separated, quoted fields may contain commas/newlines). */
 export function parseRosterCsv(text) {
-  var lines = String(text || "").split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+  var lines = tokenizeCsv(text);
   if (!lines.length) return [];
-  var header = lines[0].split(",").map(function(h) { return sanitizeText(h).toLowerCase(); });
+  var header = lines[0].map(function(h) { return sanitizeText(h).toLowerCase(); });
   var rows = [];
   var i;
   for (i = 1; i < lines.length; i++) {
-    var parts = lines[i].split(",").map(function(p) { return sanitizeText(p.replace(/^"|"$/g, "")); });
+    var parts = lines[i];
+    if (parts.length !== header.length) {
+      // Column count doesn't match the header -- most likely an unmatched quote somewhere
+      // upstream in the export. Surface an error instead of silently importing shifted data.
+      throw new Error(
+        "Row " + (i + 1) + " has " + parts.length + " column" + (parts.length === 1 ? "" : "s") +
+        ", expected " + header.length + " (matching the header row). Check for an unescaped or " +
+        "unmatched quote in that row."
+      );
+    }
     var obj = {};
     header.forEach(function(key, idx) {
-      var val = parts[idx] != null ? parts[idx] : "";
+      var val = sanitizeText(parts[idx] != null ? parts[idx] : "");
       if (key === "active") obj.active = val.toLowerCase() !== "false" && val !== "0";
       else if (key === "memberid" || key === "member_id") obj.memberId = val;
       else if (key === "firstname" || key === "first") obj.firstName = val;

@@ -3,12 +3,14 @@ import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, testFirestoreConnection } from "./services/fishingSyncService.js";
+import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
-import { buildSpotDisplayName, sanitizeSpotForForm } from "./utils/feedSpotPrivacy.js";
+import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
+import ScoutResultsMap from "./components/ScoutResultsMap.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
@@ -807,6 +809,23 @@ function fishingScore(wx) {
 }
 
 var HOME_TARGET_SPECIES_KEY = "rfc_home_target_species_v1";
+// FEATURE-2 / BUG-7 (docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md): a real text-size setting, not
+// reliant on OS/browser zoom (index.html sets user-scalable=no, which blocks pinch-zoom too).
+// App.jsx has ~480 inline fontSize:N declarations, ~155 of them 9-11px -- rewriting each to a
+// relative unit would be a large, high-conflict-risk refactor across the whole file. Applying
+// CSS `zoom` to the app's single root wrapper scales the entire rendered subtree (text, controls,
+// tap targets) exactly like a real browser zoom would, without touching any of those individual
+// styles.
+var TEXT_SCALE_KEY = "rfc_text_scale_v1";
+var TEXT_SCALE_OPTIONS = [
+  { id:"small", label:"Small", zoom:0.9 },
+  { id:"medium", label:"Medium", zoom:1 },
+  { id:"large", label:"Large", zoom:1.2 },
+];
+function textScaleZoom(id) {
+  var opt = TEXT_SCALE_OPTIONS.find(function(o) { return o.id === id; });
+  return opt ? opt.zoom : 1;
+}
 var HOME_WATER_SPOTS = LOCAL_SPOTS.map(function(s) {
   return { name:s.name, lat:s.lat, lng:s.lng, species:s.species || [], waterType:s.tag || "Water", tip:s.tip || "", parking:s.addr || "" };
 });
@@ -986,7 +1005,11 @@ function BFRDial({ score, color, T }) {
 
 async function loadWeather(lat, lng) {
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation_probability,surface_pressure&hourly=surface_pressure&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
+    // Note: precipitation_probability is an *hourly*-only Open-Meteo field — requesting it under
+    // `current` (as this used to) silently returns nothing, so precip always read 0%. Fetch it via
+    // `hourly` instead and look up the entry matching the current hour; `current.precipitation` gives
+    // real-time rain (mm) as a separate, non-forecast signal.
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation,surface_pressure&hourly=surface_pressure,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
@@ -995,6 +1018,12 @@ async function loadWeather(lat, lng) {
     if (d.hourly && d.hourly.surface_pressure && d.hourly.surface_pressure.length > 3) {
       pressurePrior = d.hourly.surface_pressure[Math.max(0, d.hourly.surface_pressure.length - 4)];
     }
+    var nowHourKey = c.time ? String(c.time).slice(0, 13) : null; // e.g. "2026-08-09T17" — same tz as hourly.time
+    var hourIdx = -1;
+    if (nowHourKey && d.hourly && d.hourly.time) {
+      hourIdx = d.hourly.time.findIndex(function(t) { return String(t).slice(0, 13) === nowHourKey; });
+    }
+    var precipProbPct = (hourIdx >= 0 && d.hourly.precipitation_probability) ? d.hourly.precipitation_probability[hourIdx] : 0;
     var sunrise = d.daily && d.daily.sunrise ? d.daily.sunrise[0] : null;
     var sunset = d.daily && d.daily.sunset ? d.daily.sunset[0] : null;
     return {
@@ -1007,29 +1036,63 @@ async function loadWeather(lat, lng) {
       sunrise: sunrise,
       sunset: sunset,
       code: c.weathercode,
-      precip: c.precipitation_probability || 0,
+      precip: precipProbPct || 0,
+      rainingNowMm: c.precipitation || 0,
       icon: WX_ICON[c.weathercode] || "🌡️",
       condition: WX_LABEL[c.weathercode] || "Unknown",
       lat: lat,
       lng: lng,
     };
   } catch(e) {
-    // Fallback: ask Claude for estimate
-    const now = new Date();
-    const mo = now.toLocaleString("default",{month:"long"});
-    const hr = now.getHours();
-    const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
-        messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
-      })
+    // Fallback: ask Claude for an estimate. This only works where api.anthropic.com is reachable
+    // without an API key (this app never sends one) — in a normal browser it 401s/CORS-fails, so
+    // this whole block must never throw: a failure here should mean "no weather", not a stuck app.
+    try {
+      const now = new Date();
+      const mo = now.toLocaleString("default",{month:"long"});
+      const hr = now.getHours();
+      const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:150,
+          messages:[{role:"user",content:"It is " + tod + " in " + mo + " near North Riverside IL. Give a realistic weather estimate. Respond ONLY with raw JSON, no markdown: {\"temp\":62,\"wind\":9,\"precip\":20,\"code\":2,\"icon\":\"⛅\",\"condition\":\"Partly Cloudy\"}"}]
+        })
+      });
+      const data = await res.json();
+      const txt = (data.content && data.content[0] && data.content[0].text) || "";
+      const m = txt.match(/\{[^}]+\}/);
+      return m ? JSON.parse(m[0]) : null;
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
+/**
+ * Active NWS severe-weather alerts (flood/storm/wind/etc.) for a point — safety info, not bite quality.
+ * Public weather.gov API, no key. Bite score never reflects this; the Home banner is what should.
+ */
+async function loadActiveWeatherAlerts(lat, lng) {
+  try {
+    const r = await fetch("https://api.weather.gov/alerts/active?point=" + lat + "," + lng, {
+      headers: { "Accept": "application/geo+json" },
     });
-    const data = await res.json();
-    const txt = (data.content && data.content[0] && data.content[0].text) || "";
-    const m = txt.match(/\{[^}]+\}/);
-    if (m) return JSON.parse(m[0]);
-    return null;
+    if (!r.ok) return [];
+    const d = await r.json();
+    return (d.features || []).map(function(f) {
+      var p = f.properties || {};
+      return {
+        id: f.id || p.id,
+        event: p.event || "Weather Alert",
+        headline: p.headline || p.event || "",
+        severity: p.severity || "Unknown",
+        urgency: p.urgency || "Unknown",
+        expires: p.expires || null,
+        senderName: p.senderName || "National Weather Service",
+      };
+    });
+  } catch (e) {
+    return []; // A failed alert check should never block the rest of Home from loading.
   }
 }
 
@@ -1063,6 +1126,126 @@ async function loadTackleImage(itemName) {
     const m = allText.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(\?\S*)?/i);
     return m ? m[0] : null;
   } catch(e) { return null; }
+}
+
+// ─── SCOUT: nearby water / access discovery (Overpass + Nominatim, no key) ────
+
+/** Compass bearing in degrees (0-360) from point 1 to point 2. */
+function bearingDeg(lat1, lng1, lat2, lng2) {
+  var r = Math.PI / 180;
+  var y = Math.sin((lng2 - lng1) * r) * Math.cos(lat2 * r);
+  var x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng2 - lng1) * r);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+/** Bucket a bearing into 8-way compass direction — same idiom as windCompass(). */
+function bearingCompass8(deg) {
+  if (deg == null || !isFinite(deg)) return null;
+  var dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+/** fetch() with a hard timeout — Overpass's own [timeout:] setting doesn't bound network stalls. */
+function fetchWithTimeout(url, options, ms) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, ms || 20000);
+  return fetch(url, Object.assign({}, options, { signal: controller.signal })).finally(function() {
+    clearTimeout(timer);
+  });
+}
+
+/** Best-effort public/private read from OSM tags. Never authoritative — always shown with a disclaimer. */
+function accessLabelFromOsmTags(tags) {
+  tags = tags || {};
+  if (tags.access === "private" || tags.access === "no") return "Private";
+  if (tags.access === "permit" || tags.access === "permissive") return "By permission";
+  if (tags.boundary === "protected_area" || tags.leisure === "nature_reserve") return "Public";
+  if (tags.operator && /forest preserve|park district|state park|county park|conservation district/i.test(tags.operator)) return "Public";
+  if (tags.access === "yes" || tags.access === "public") return "Public";
+  return "Unknown";
+}
+
+function overpassElementLatLng(el) {
+  if (el.lat != null && el.lon != null) return { lat: el.lat, lng: el.lon };
+  if (el.center && el.center.lat != null) return { lat: el.center.lat, lng: el.center.lon };
+  return null;
+}
+
+/** Named/typed water features from OpenStreetMap within radiusMi of lat/lng. No API key; capped result count. */
+async function loadNearbyWater(lat, lng, radiusMi) {
+  var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
+  var q = "[out:json][timeout:25];(" +
+    "node[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"waterway\"~\"^(river|stream|canal)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "node[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    ");out center tags 80;";
+  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(q),
+  }, 20000);
+  if (!r.ok) throw new Error("Overpass water query failed");
+  var data = await r.json();
+  var seen = {};
+  return (data.elements || []).map(function(el) {
+    var pos = overpassElementLatLng(el);
+    if (!pos) return null;
+    var tags = el.tags || {};
+    var name = tags.name || null;
+    if (!name) return null; // unnamed water is too noisy to surface (retention basins, ditches, etc.)
+    var key = name + "|" + pos.lat.toFixed(3) + "|" + pos.lng.toFixed(3);
+    if (seen[key]) return null;
+    seen[key] = true;
+    var type = tags.waterway ? (tags.waterway.charAt(0).toUpperCase() + tags.waterway.slice(1)) :
+      tags.water ? (tags.water.charAt(0).toUpperCase() + tags.water.slice(1)) : "Water";
+    return { id: "osm_" + (el.id || key), name: name, lat: pos.lat, lng: pos.lng, waterType: type, access: accessLabelFromOsmTags(tags), source: "osm" };
+  }).filter(Boolean);
+}
+
+/** Businesses/clubs that advertise fishing access (pay lakes, marinas, guide services) via their own published contact info. */
+async function loadNearbyFishingBusinesses(lat, lng, radiusMi) {
+  var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
+  var q = "[out:json][timeout:25];(" +
+    "node[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "way[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    "node[\"tourism\"][\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
+    ");out center tags 40;";
+  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(q),
+  }, 20000);
+  if (!r.ok) throw new Error("Overpass business query failed");
+  var data = await r.json();
+  return (data.elements || []).map(function(el) {
+    var pos = overpassElementLatLng(el);
+    if (!pos) return null;
+    var tags = el.tags || {};
+    var name = tags.name;
+    if (!name) return null;
+    return {
+      id: "biz_" + (el.id || name),
+      name: name,
+      lat: pos.lat,
+      lng: pos.lng,
+      phone: tags.phone || tags["contact:phone"] || null,
+      website: tags.website || tags["contact:website"] || null,
+      source: "business",
+    };
+  }).filter(Boolean);
+}
+
+/** Geocode a place name (city, address, landmark) via OSM Nominatim — single result, called on explicit search only. */
+async function geocodePlaceName(query) {
+  var q = String(query || "").trim();
+  if (!q) return null;
+  var r = await fetchWithTimeout("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q), {}, 15000);
+  if (!r.ok) throw new Error("Location search failed");
+  var results = await r.json();
+  if (!results || !results.length) return null;
+  return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), label: results[0].display_name };
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -1108,27 +1291,39 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   });
   const [nearestWater, setNearestWater] = useState(null);
   const [userGps, setUserGps] = useState(null);
+  const [weatherAlerts, setWeatherAlerts] = useState([]);
+  // True when geolocation failed/was denied and everything on this screen is centered on the
+  // North Riverside default instead of where the member actually is — must be surfaced, not silent.
+  const [usedDefaultLocation, setUsedDefaultLocation] = useState(false);
   const favSp = (profile && profile.favSpecies) || [];
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
-    function doLoad(la, ln) {
+    function doLoad(la, ln, isDefault) {
+      setUsedDefaultLocation(!!isDefault);
       setUserGps({ lat:la, lng:ln });
       loadWeather(la, ln).then(function(w) {
         setWx(w);
         setNearestWater(findNearestHomeWater(la, ln));
         setLoading(false);
         if (w) loadFishingTip(w.temp, w.wind, w.condition).then(setTip);
+      }).catch(function() {
+        // loadWeather already catches its own failures and resolves null/an estimate — this is
+        // a defensive backstop so a future change there can never leave loading stuck true forever.
+        setWx(null);
+        setLoading(false);
       });
+      // Safety, not bite quality — loaded independently so a slow/failed alert check never blocks the forecast.
+      loadActiveWeatherAlerts(la, ln).then(setWeatherAlerts);
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        function(pos) { doLoad(pos.coords.latitude, pos.coords.longitude); },
-        function() { doLoad(lat, lng); },
+        function(pos) { doLoad(pos.coords.latitude, pos.coords.longitude, false); },
+        function() { doLoad(lat, lng, true); },
         { timeout:6000 }
       );
-    } else { doLoad(lat, lng); }
+    } else { doLoad(lat, lng, true); }
   }, []);
 
   useEffect(function() {
@@ -1211,6 +1406,38 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           </div>
         </div>
       )}
+
+      {usedDefaultLocation && !loading ? (
+        <div style={{ background:th.red + "18", border:"1px solid " + th.red + "55", borderRadius:12, padding:"10px 14px", marginBottom:12 }}>
+          <div style={{ fontSize:12, color:th.red, fontWeight:700, marginBottom:2 }}>⚠️ Couldn't get your location</div>
+          <div style={{ fontSize:11, color:th.white, lineHeight:1.45, marginBottom:8 }}>
+            Everything below is for North Riverside, IL (default), not where you actually are. Enable location access for this site in your phone/browser Settings, then refresh.
+          </div>
+          <span style={{ fontSize:11, color:th.green, cursor:"pointer", fontWeight:700 }} onClick={load}>↻ Retry location</span>
+        </div>
+      ) : null}
+
+      {weatherAlerts.length > 0 ? (
+        <div style={{ background:th.red + "22", border:"1px solid " + th.red, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+          {weatherAlerts.map(function(a, i) {
+            return (
+              <div key={a.id || i} style={{ marginBottom:i < weatherAlerts.length - 1 ? 10 : 0 }}>
+                <div style={{ fontSize:13, color:th.red, fontWeight:800 }}>⚠️ {a.event} — {a.senderName}</div>
+                <div style={{ fontSize:11, color:th.white, marginTop:2, lineHeight:1.45 }}>{a.headline}</div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize:10, color:th.muted, marginTop:8, lineHeight:1.4 }}>
+            This is a safety alert, separate from the bite score below — a good bite score doesn't mean it's safe to be out. Check conditions before you go.
+          </div>
+        </div>
+      ) : null}
+      {wx && wx.rainingNowMm > 0.5 && weatherAlerts.length === 0 ? (
+        <div style={{ background:th.blue + "18", border:"1px solid " + th.blue + "55", borderRadius:12, padding:"10px 14px", marginBottom:12, fontSize:12, color:th.blue, fontWeight:700 }}>
+          🌧️ Actively raining at your location right now
+        </div>
+      ) : null}
+
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
         <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
         <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
@@ -1316,6 +1543,9 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
 
       <Card T={T} borderColor={rating ? rating.color : undefined}>
         <SecLabel text="Today's Conditions" T={T} />
+        <div style={{ fontSize:11, color:th.gold, marginBottom:10, lineHeight:1.45 }}>
+          ⚠️ This score is fishing conditions only — it doesn't check flood, storm, or other severe weather alerts. Check your phone's Weather app or weather.gov for active alerts before heading out.
+        </div>
         {loading ? (
           <div style={{ textAlign:"center", padding:"20px 0", color:th.muted }}>Fetching live conditions...</div>
         ) : wx ? (
@@ -1573,6 +1803,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [pickCenter, setPickCenter] = useState({ lat:41.84, lng:-87.83 });
   const [pickPin, setPickPin] = useState(null);
   const [pickName, setPickName] = useState("");
+  const [pickDefaultName, setPickDefaultName] = useState(""); // tracks whether pickName is still an unedited pre-fill
   const [pickShare, setPickShare] = useState(false);
   const [pickPinHome, setPickPinHome] = useState(false);
   const [pickBackTo, setPickBackTo] = useState("my");
@@ -1629,6 +1860,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setPickCenter({ lat:centerLat || 41.84, lng:centerLng || -87.83 });
     setPickPin(pin || null);
     setPickName(defaultName || "");
+    setPickDefaultName(defaultName || "");
     setPickShare(false);
     setPickBackTo(backTo || "my");
     setPrivView("pickmap");
@@ -1638,14 +1870,26 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     setSaveErr("");
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPrivView(pickBackTo === "main" ? "main" : "my");
+  }
+
+  /** Pin moved away from where a name was pre-filled for (e.g. tapped a Guide Spot, then repositioned
+   *  the pin to the real spot) — the old name no longer describes this location, so stop assuming it does. */
+  function handlePickMove(lat, lng) {
+    if (pickDefaultName && pickName === pickDefaultName && haversineMi(pickCenter.lat, pickCenter.lng, lat, lng) > 0.3) {
+      setPickName("");
+      setPickDefaultName("");
+    }
+    setPickPin({ lat:lat, lng:lng });
+    setSaveErr("");
   }
 
   function saveFromPickMap() {
     setSaveErr("");
     if (!pickPin) {
-      setSaveErr("Tap the map to drop a pin first.");
+      setSaveErr("Press and hold the map to drop a pin first.");
       return;
     }
     var draft = {
@@ -1669,6 +1913,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     }
     setPickPin(null);
     setPickName("");
+    setPickDefaultName("");
     setPickShare(false);
     setPickPinHome(false);
     setPrivView("my");
@@ -1874,20 +2119,25 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     return (
       <div>
         <OBtn label="← Back" onClick={closePickMap} color={th.green} style={{ margin:"12px 0 10px" }} />
-        <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>Tap the map to place a pin</div>
-        <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Pan and zoom, then tap where you fish. Pin stays in the app.</div>
+        <div style={{ fontSize:15, color:th.white, fontWeight:700, marginBottom:6 }}>Press and hold the map to place a pin</div>
+        <div style={{ fontSize:12, color:th.muted, marginBottom:8 }}>Pan and zoom freely, then press and hold where you fish — same as dropping a pin in Google Maps. Pin stays in the app.</div>
         <SpotMapPicker
           centerLat={pickCenter.lat}
           centerLng={pickCenter.lng}
           pinLat={pickPin ? pickPin.lat : null}
           pinLng={pickPin ? pickPin.lng : null}
-          onPick={function(lat, lng) { setPickPin({ lat:lat, lng:lng }); setSaveErr(""); }}
+          onPick={handlePickMove}
           height={300}
         />
         {pickPin ? (
           <div style={{ marginTop:12 }}>
             <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Spot name</div>
-            <input value={pickName} onChange={function(e) { setPickName(e.target.value); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            <input value={pickName} onChange={function(e) { setPickName(e.target.value); setPickDefaultName(""); }} placeholder="e.g. Busse south cove" style={pickInp} />
+            {pickDefaultName && pickName === pickDefaultName ? (
+              <div style={{ fontSize:11, color:th.gold, marginTop:-6, marginBottom:10 }}>
+                Pre-filled from "{pickDefaultName}" — check it still matches where your pin is, or edit it.
+              </div>
+            ) : null}
             <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Keep private or share?</div>
             <div style={{ display:"flex", gap:8, marginBottom:10 }}>
               <button type="button" onClick={function() { setPickShare(false); }} style={{ flex:1, background:!pickShare ? th.green + "33" : "transparent", border:"1px solid " + (!pickShare ? th.green : th.border), borderRadius:8, color:!pickShare ? th.green : th.muted, padding:"10px", cursor:"pointer", fontSize:12, fontWeight:!pickShare ? 700 : 400 }}>Private</button>
@@ -2186,7 +2436,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           return (
             <Card key={s.id + "_" + s.memberId} T={T} borderColor={th.green + "44"}>
               <div style={{ fontSize:10, color:th.green, marginBottom:4 }}>Spotted by {s.credit || "Member"}</div>
-              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{s.name}</div>
+              <div style={{ fontWeight:700, color:th.white, marginBottom:6 }}>{formatFeedSpotName(s.name, s.name)}</div>
               <SpotMapThumb lat={s.lat} lng={s.lng} height={160} zoom={15} />
               <div style={{ fontSize:11, color:th.muted, marginTop:6 }}>{(s.species_present || []).join(" · ")}</div>
             </Card>
@@ -2632,6 +2882,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
   const [cloudSaving, setCloudSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // Guarding re-entry with the `submitting` state alone isn't enough: two click events fired
+  // back to back (a real double-tap) can both read the same pre-update `submitting` value from
+  // the same render's closure before React flushes the first setSubmitting(true). A ref is
+  // mutated immediately and is shared across both calls, so it's the actual guard; the state
+  // above only drives the button's disabled/label UI.
+  const submittingRef = useRef(false);
   const [showCatchHint, setShowCatchHint] = useState(function() {
     try { return !localStorage.getItem(RFC_CATCH_HINT_KEY); } catch (e) { return true; }
   });
@@ -2679,7 +2936,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     var dt = exif.DateTimeOriginal || exif.CreateDate;
     if (dt) setF("date", new Date(dt).toLocaleDateString());
   }
-  useEffect(function() { localStorage.setItem("rfc_catches_v1", JSON.stringify(catches)); }, [catches]);
+  useEffect(function() {
+    try {
+      localStorage.setItem("rfc_catches_v1", JSON.stringify(catches));
+    } catch (e) {
+      if (onSaveToast) onSaveToast("Couldn't save your catch log on this device (storage full). Signed-in catches still synced to the cloud.", "error");
+    }
+  }, [catches]);
   function readImageFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -2844,10 +3107,25 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     e.target.value = "";
   }
 
-  function submitCatch() {
+  async function submitCatch() {
+    // Guard re-entry from the very first line -- the button's `disabled` prop can't protect
+    // against a double-tap that lands before this state update re-renders, and there's a real
+    // async gap (photo compression, below) between a tap and cloudSaving being set. Without
+    // this, two taps race into two concurrent submitCatch calls, each adding its own catch/cloud
+    // doc for the same catch (flagged by review on this PR). submittingRef is what actually
+    // blocks the second call; setSubmitting mirrors it into state for the button's UI.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     var vis = catchVisibility === "club" && authMember ? "club" : "private";
-    var knownNames = KNOWN_SPOTS.map(function(s) { return s.name; }).concat(SCOUT_SPOTS.map(function(s) { return s.name; }));
-    var spotDisplayName = buildSpotDisplayName(form.spot, knownNames);
+    var spotDisplayName = buildSpotDisplayName(form.spot);
+    // Compress before this ever reaches localStorage -- a raw phone photo (4-8MB) as base64 can
+    // single-handedly approach the ~5-10MB localStorage quota. Reuses the same compression already
+    // used for the cloud upload (catchPhotoStorage.js), just applied to the local copy too.
+    var localPhoto = photo;
+    if (isDataUrlImage(photo)) {
+      try { localPhoto = await compressDataUrl(photo, 1200, 0.82); } catch (e) { /* keep original if compression fails */ }
+    }
     var entry = {
       id:Date.now(),
       user:(profile && profile.name) || "Angler",
@@ -2860,7 +3138,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       spotDisplayName:spotDisplayName,
       notes:form.notes,
       date:form.date,
-      photo:photo,
+      photo:localPhoto,
       visibility:vis,
       likeCount:0,
     };
@@ -2879,7 +3157,11 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
           setCatches(function(list) {
             return list.map(function(c) {
               if (String(c.id) === String(entry.id)) {
-                return Object.assign({}, c, { photoUrl: result.photoUrl });
+                // Cloud copy exists now -- drop the local base64 rather than keeping both;
+                // resolveCatchPhotoUrl already prefers photoUrl over photo, so nothing needs it.
+                var updated = Object.assign({}, c, { photoUrl: result.photoUrl });
+                delete updated.photo;
+                return updated;
               }
               return c;
             });
@@ -2890,9 +3172,13 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
         finishStep("Saved on this device — cloud sync failed. " + (err && err.message ? err.message : ""), "error");
       }).finally(function() {
         setCloudSaving(false);
+        setSubmitting(false);
+        submittingRef.current = false;
       });
     } else {
       finishStep("Saved on this device only. Sign in to back up to RFC cloud.", "info");
+      setSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
@@ -3356,7 +3642,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
               </Card>
-              <button onClick={submitCatch} disabled={cloudSaving} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:cloudSaving ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:cloudSaving ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)")}</button>
+              <button onClick={submitCatch} disabled={submitting} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:submitting ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:submitting ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (submitting ? "Saving…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"))}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
@@ -3433,153 +3719,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
-function LoginPage({ T, authError, pendingLinkHref, onSignIn, onSendLink, onCompleteLink }) {
-  var th = THEMES[T];
-  var [mode, setMode] = useState("link");
-  var [email, setEmail] = useState("");
-  var [password, setPassword] = useState("");
-  var [busy, setBusy] = useState(false);
-  var [localError, setLocalError] = useState("");
-  var [sentEmail, setSentEmail] = useState("");
-  var [showPw, setShowPw] = useState(false);
-
-  function translateErr(err) {
-    var code = err && err.code ? err.code : "";
-    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") return "That email or password didn't work. Double-check what you typed and try again.";
-    if (code === "auth/too-many-requests") return "You've tried too many times. Wait a few minutes, then try again.";
-    if (code === "auth/user-disabled") return "Your account has been turned off. Ask the club president for help.";
-    if (code === "auth/network-request-failed") return "Can't connect to the internet. Check your Wi-Fi or cell signal, then try again.";
-    return (err && err.message) ? err.message : "Something went wrong. Try again.";
-  }
-
-  useEffect(function() {
-    if (!pendingLinkHref) return;
-    setMode("link-completing");
-    setBusy(true);
-    onCompleteLink("", pendingLinkHref).catch(function(err) {
-      if (err && err.needsEmail) {
-        setMode("link-confirm");
-      } else {
-        setLocalError(translateErr(err));
-        setMode("link");
-      }
-    }).finally(function() { setBusy(false); });
-  }, [pendingLinkHref]);
-
-  function doSendLink() {
-    setLocalError("");
-    if (!email) { setLocalError("Type your club email address first."); return; }
-    setBusy(true);
-    onSendLink(email).then(function() {
-      setSentEmail(email);
-      setMode("link-sent");
-    }).catch(function(err) {
-      setLocalError(translateErr(err));
-    }).finally(function() { setBusy(false); });
-  }
-
-  function doCompleteLink() {
-    setLocalError("");
-    if (!email) { setLocalError("Type your club email address first."); return; }
-    setBusy(true);
-    onCompleteLink(email, pendingLinkHref).catch(function(err) {
-      setLocalError(translateErr(err));
-    }).finally(function() { setBusy(false); });
-  }
-
-  function doPasswordSignIn() {
-    setLocalError("");
-    setBusy(true);
-    onSignIn(email, password).catch(function(err) {
-      setLocalError(translateErr(err));
-    }).finally(function() { setBusy(false); });
-  }
-
-  var iStyle = {
-    width:"100%", background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border,
-    borderRadius:10, padding:"13px 16px", color:th.white, fontSize:15,
-    boxSizing:"border-box", outline:"none", marginBottom:12,
-  };
-  var btnStyle = {
-    width:"100%", background:th.green, color:"#000", border:"none",
-    borderRadius:10, padding:"14px 0", cursor:busy ? "wait" : "pointer",
-    fontSize:15, fontWeight:700, opacity:busy ? 0.7 : 1, marginTop:4,
-  };
-  var errEl = (localError || authError) ? <div style={{ fontSize:13, color:th.red, marginBottom:10 }}>{localError || authError}</div> : null;
-
-  return (
-    <div style={{ minHeight:"100vh", background:th.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 24px 48px", boxSizing:"border-box", maxWidth:480, margin:"0 auto" }}>
-      <div style={{ textAlign:"center", marginBottom:32 }}>
-        <div style={{ fontSize:56, marginBottom:10 }}>🎣</div>
-        <div style={{ fontSize:26, fontWeight:800, color:th.white, letterSpacing:0.5 }}>RFC Fishing</div>
-        <div style={{ fontSize:13, color:th.muted, marginTop:4 }}>Riverside Fishing Club · Members only</div>
-      </div>
-
-      <div style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"28px 24px" }}>
-        {mode === "link-completing" ? (
-          <div style={{ textAlign:"center", padding:"16px 0" }}>
-            <div style={{ fontSize:32, marginBottom:14 }}>⏳</div>
-            <div style={{ fontSize:16, color:th.white, fontWeight:600 }}>Signing you in…</div>
-            <div style={{ fontSize:13, color:th.muted, marginTop:8 }}>Just a moment.</div>
-          </div>
-        ) : mode === "link-sent" ? (
-          <div>
-            <div style={{ fontSize:32, textAlign:"center", marginBottom:14 }}>📬</div>
-            <div style={{ fontSize:17, color:th.white, fontWeight:700, textAlign:"center", marginBottom:14 }}>Check your email!</div>
-            <div style={{ fontSize:14, color:th.white, lineHeight:1.7, marginBottom:12 }}>
-              We sent a sign-in link to <strong>{sentEmail}</strong>. Open your email app, find the message from Firebase, and tap the link — you'll be signed in automatically.
-            </div>
-            <div style={{ fontSize:12, color:th.muted, lineHeight:1.6, marginBottom:20 }}>Don't see it? Check your spam folder. The link works for 1 hour.</div>
-            <button type="button" onClick={function() { setMode("link"); setLocalError(""); setSentEmail(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:13, padding:0, textDecoration:"underline" }}>Start over</button>
-          </div>
-        ) : mode === "link-confirm" ? (
-          <div>
-            <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:10 }}>One more step</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:16, lineHeight:1.6 }}>Looks like you opened the sign-in link on a different device. Type your club email below to finish signing in.</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Your club email</div>
-            <input type="email" value={email} onChange={function(e) { setEmail(e.target.value.replace(/\s+/g,"").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            {errEl}
-            <button type="button" onClick={doCompleteLink} disabled={busy} style={btnStyle}>{busy ? "Signing in…" : "Finish signing in"}</button>
-          </div>
-        ) : mode === "password" ? (
-          <div>
-            <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>Sign in with password</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:16, lineHeight:1.6 }}>For members who previously set a password.</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Club email</div>
-            <input type="email" value={email} onChange={function(e) { setEmail(e.target.value.replace(/\s+/g,"").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Password</div>
-            <div style={{ position:"relative", marginBottom:12 }}>
-              <input type={showPw ? "text" : "password"} value={password} onChange={function(e) { setPassword(e.target.value); }} placeholder="Password" style={Object.assign({},iStyle,{marginBottom:0,paddingRight:60})} autoComplete="current-password" />
-              <button type="button" onClick={function() { setShowPw(function(v) { return !v; }); }} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:13 }}>{showPw ? "Hide" : "Show"}</button>
-            </div>
-            {errEl}
-            <button type="button" onClick={doPasswordSignIn} disabled={busy} style={btnStyle}>{busy ? "Signing in…" : "Sign In"}</button>
-            <div style={{ textAlign:"center", marginTop:16 }}>
-              <button type="button" onClick={function() { setMode("link"); setLocalError(""); setPassword(""); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:13 }}>Send me a sign-in link instead</button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div style={{ fontSize:17, color:th.white, fontWeight:700, marginBottom:6 }}>Welcome back</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:20, lineHeight:1.6 }}>Type your club email below. We'll send you a link — tap it and you're in. No password needed.</div>
-            <div style={{ fontSize:13, color:th.muted, marginBottom:6 }}>Your club email</div>
-            <input type="email" value={email} onChange={function(e) { setEmail(e.target.value.replace(/\s+/g,"").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" autoFocus />
-            {errEl}
-            <button type="button" onClick={doSendLink} disabled={busy} style={btnStyle}>{busy ? "Sending…" : "Send me a sign-in link"}</button>
-            <div style={{ textAlign:"center", marginTop:16 }}>
-              <button type="button" onClick={function() { setMode("password"); setLocalError(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12 }}>I have a password — sign in with password</button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginTop:20, fontSize:11, color:th.muted, textAlign:"center" }}>Not a member? Contact the club president to get added.</div>
-    </div>
-  );
-}
-
-function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots, authMember, onSignOut, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -3809,6 +3949,20 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
         <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>More themes coming in a future update.</div>
       </Card>
 
+      <Card T={T}>
+        <SecLabel text="Text Size" T={T} />
+        <div style={{ display:"flex", gap:8 }}>
+          {TEXT_SCALE_OPTIONS.map(function(opt) {
+            return (
+              <button key={opt.id} onClick={function() { setTextScale(opt.id); }} style={{ flex:1, background:textScale===opt.id ? th.green + "33" : "transparent", border:"1px solid " + (textScale===opt.id ? th.green : th.border), borderRadius:8, color:textScale===opt.id ? th.green : th.muted, padding:"8px 4px", cursor:"pointer", fontSize:11 }}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>Scales the whole app, not just this screen — handy if pinch-zoom is disabled on your phone.</div>
+      </Card>
+
       <Card T={T} borderColor={th.blue + "44"}>
         <SecLabel text="Download my data" T={T} />
         <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Export profile, catches, and scout history as a JSON backup file.</div>
@@ -3836,6 +3990,8 @@ function ProfileTab({ profile, setProfile, theme, setTheme, T, goMyPrivateSpots,
 }
 
 // ─── SCOUT TAB ────────────────────────────────────────────────────────────────
+var SCOUT_DIRS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
 function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var th = THEMES[T];
   var fileRef = useRef();
@@ -3849,19 +4005,144 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [history, setHistory] = useState(loadScoutHistory);
   var season = getSeason(new Date().getMonth());
 
-  useEffect(function() {
+  // Radius (miles) — user adjustable, defaults to a 10mi car-trip range.
+  var [radiusMi, setRadiusMi] = useState(5);
+  var [radiusDraft, setRadiusDraft] = useState("5");
+  function commitRadius(raw) {
+    var v = parseInt(raw, 10);
+    if (!isFinite(v) || v < 1) v = 1;
+    if (v > 50) v = 50;
+    setRadiusMi(v);
+    setRadiusDraft(String(v));
+  }
+
+  // Scout a location other than where you're standing (e.g. traveling out of state).
+  var [searchText, setSearchText] = useState("");
+  var [manualPos, setManualPos] = useState(null);
+  var [geoLoading, setGeoLoading] = useState(false);
+  var [geoError, setGeoError] = useState("");
+  function handleSearchLocation() {
+    if (!searchText.trim()) { setGeoError("Type a city, zip, or address first."); return; }
+    setGeoLoading(true);
+    setGeoError("");
+    geocodePlaceName(searchText).then(function(result) {
+      if (!result) { setGeoError("No match found. Try a city, zip, or address."); return; }
+      setManualPos({ lat: result.lat, lng: result.lng, label: result.label });
+    }).catch(function() {
+      setGeoError("Location search failed. Try again.");
+    }).finally(function() {
+      setGeoLoading(false);
+    });
+  }
+  function handleUseGps() {
+    setManualPos(null);
+    setSearchText("");
+    setGeoError("");
+    requestGps(); // force a fresh read, not just whatever userPos happened to be set to earlier
+  }
+
+  // Directions to exclude — e.g. "I never want to drive north of here."
+  var [excludedDirs, setExcludedDirs] = useState([]);
+  function toggleDir(d) {
+    setExcludedDirs(function(prev) {
+      return prev.indexOf(d) >= 0 ? prev.filter(function(x) { return x !== d; }) : prev.concat([d]);
+    });
+  }
+
+  // Nearby water (OpenStreetMap/Overpass), fishing businesses (Overpass), and club-shared member spots.
+  var [waterResults, setWaterResults] = useState([]);
+  var [waterLoading, setWaterLoading] = useState(false);
+  var [waterError, setWaterError] = useState("");
+  var [bizResults, setBizResults] = useState([]);
+  var [bizLoading, setBizLoading] = useState(false);
+  var [clubSpots, setClubSpots] = useState([]);
+  var [clubSpotsLoading, setClubSpotsLoading] = useState(false);
+
+  // gpsError stays null on real success. On any failure userPos silently keeps its North Riverside
+  // default (see useState above) — without this flag there's no way to tell "that's really where you
+  // are" from "GPS never worked and you're looking at the wrong town's spots."
+  var [gpsError, setGpsError] = useState(null);
+  function requestGps() {
     setGpsLoading(true);
-    if (!navigator.geolocation) { setGpsLoading(false); return; }
+    setGpsError(null);
+    if (!navigator.geolocation) { setGpsLoading(false); setGpsError("Your browser doesn't support location access."); return; }
     navigator.geolocation.getCurrentPosition(
-      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); },
-      function() { setGpsLoading(false); },
+      function(pos) { setUserPos({ lat:pos.coords.latitude, lng:pos.coords.longitude }); setGpsLoading(false); setGpsError(null); },
+      function(err) {
+        setGpsLoading(false);
+        var msg = err && err.code === 1 ? "Location access was denied — enable it for this site in your browser/phone Settings, then tap Retry."
+          : err && err.code === 3 ? "Location request timed out — tap Retry, or search a location below."
+          : "Couldn't get your location — tap Retry, or search a location below.";
+        setGpsError(msg);
+      },
       { timeout:8000, enableHighAccuracy:true }
     );
+  }
+  useEffect(function() { requestGps(); }, []);
+
+  // Club-shared spots — loaded once, filtered client-side alongside SCOUT_SPOTS below.
+  useEffect(function() {
+    var cancelled = false;
+    setClubSpotsLoading(true);
+    loadClubSharedSpots().then(function(spots) {
+      if (!cancelled) setClubSpots(spots || []);
+    }).catch(function() {
+      if (!cancelled) setClubSpots([]);
+    }).finally(function() {
+      if (!cancelled) setClubSpotsLoading(false);
+    });
+    return function() { cancelled = true; };
   }, []);
 
+  var activePos = manualPos || userPos;
+
+  // Overpass lookups — debounced, and only once we have a real position (live GPS or a searched location).
+  useEffect(function() {
+    if (gpsLoading && !manualPos) return;
+    var cancelled = false;
+    var t = setTimeout(function() {
+      setWaterLoading(true);
+      setWaterError("");
+      loadNearbyWater(activePos.lat, activePos.lng, radiusMi).then(function(list) {
+        if (!cancelled) setWaterResults(list);
+      }).catch(function() {
+        if (!cancelled) { setWaterResults([]); setWaterError("Could not load nearby water right now."); }
+      }).finally(function() {
+        if (!cancelled) setWaterLoading(false);
+      });
+      setBizLoading(true);
+      loadNearbyFishingBusinesses(activePos.lat, activePos.lng, radiusMi).then(function(list) {
+        if (!cancelled) setBizResults(list);
+      }).catch(function() {
+        if (!cancelled) setBizResults([]);
+      }).finally(function() {
+        if (!cancelled) setBizLoading(false);
+      });
+    }, 500);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [activePos.lat, activePos.lng, radiusMi, gpsLoading, manualPos]);
+
+  function passesDirection(lat, lng) {
+    if (!excludedDirs.length) return true;
+    var b = bearingCompass8(bearingDeg(activePos.lat, activePos.lng, lat, lng));
+    return excludedDirs.indexOf(b) < 0;
+  }
+
   var nearSpots = SCOUT_SPOTS.map(function(s) {
-    return Object.assign({}, s, { distMi: haversineMi(userPos.lat, userPos.lng, s.lat, s.lng) });
-  }).filter(function(s) { return s.distMi <= 10; }).sort(function(a, b) { return a.distMi - b.distMi; });
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearClubSpots = clubSpots.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng), displayName: formatFeedSpotName(s.name, s.name) });
+  }).filter(function(s) { return isFinite(s.distMi) && s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearWater = waterResults.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
+
+  var nearBiz = bizResults.map(function(s) {
+    return Object.assign({}, s, { distMi: haversineMi(activePos.lat, activePos.lng, s.lat, s.lng) });
+  }).filter(function(s) { return s.distMi <= radiusMi && passesDirection(s.lat, s.lng); }).sort(function(a, b) { return a.distMi - b.distMi; });
 
   function handleScoutPhoto(e) {
     var f = e.target.files && e.target.files[0];
@@ -3982,15 +4263,108 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
       ) : (
         <div>
           <div style={{ fontSize:18, color:th.white, fontWeight:800, marginBottom:4 }}>📍 Fishable Water Near You</div>
-          <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>Within 10 miles · sorted nearest first</div>
-          {gpsLoading ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
-          {!gpsLoading && nearSpots.length === 0 ? (
-            <Card T={T}><div style={{ fontSize:13, color:th.muted }}>No scout spots within 10 miles. Try Identify Spot with a photo.</div></Card>
+          <div style={{ fontSize:12, color:th.muted, marginBottom:12 }}>
+            Within {radiusMi} mi{excludedDirs.length ? " · excluding " + excludedDirs.join("/") : ""} · sorted nearest first
+          </div>
+
+          <Card T={T}>
+            <SecLabel text="Search a location" T={T} />
+            <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+              <input
+                type="text"
+                value={searchText}
+                onChange={function(e) { setSearchText(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === "Enter") handleSearchLocation(); }}
+                placeholder="City, zip, or address — e.g. scouting a trip"
+                style={{ flex:1, minWidth:0, background:th.bg, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12 }}
+              />
+              <button type="button" onClick={handleSearchLocation} disabled={geoLoading} style={{ background:th.blue, color:"#fff", border:"none", borderRadius:8, padding:"0 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                {geoLoading ? "…" : "Go"}
+              </button>
+            </div>
+
+            {/* Always-visible, explicit way to (re)search your current position — not just an
+                automatic one-time attempt on load. Also the way back from a manual search. */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6 }}>
+              <span style={{ fontSize:11, color:th.muted, lineHeight:1.4 }}>
+                {manualPos
+                  ? "Scouting: " + (manualPos.label ? manualPos.label.split(",").slice(0, 2).join(",") : (manualPos.lat.toFixed(3) + ", " + manualPos.lng.toFixed(3)))
+                  : gpsLoading ? "Getting your location…"
+                  : gpsError ? "⚠️ Location unavailable"
+                  : "📍 Using your current location"}
+              </span>
+              <button type="button" onClick={handleUseGps} disabled={gpsLoading} style={{ flexShrink:0, background:"transparent", border:"1px solid " + th.blue, color:th.blue, borderRadius:8, padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                {gpsLoading ? "…" : "📍 Use my location"}
+              </button>
+            </div>
+            {geoError ? <div style={{ fontSize:11, color:th.red, marginBottom:6 }}>{geoError}</div> : null}
+
+            <SecLabel text="Radius" T={T} />
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+              <input
+                type="number" min="1" max="50" value={radiusDraft}
+                onChange={function(e) { setRadiusDraft(e.target.value); }}
+                onBlur={function(e) { commitRadius(e.target.value); }}
+                style={{ width:70, background:th.bg, border:"1px solid " + th.border, borderRadius:8, padding:"8px 10px", color:th.white, fontSize:12 }}
+              />
+              <span style={{ fontSize:10, color:th.muted }}>miles (max 50)</span>
+            </div>
+
+            <SecLabel text="Don't show me this direction" T={T} />
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {SCOUT_DIRS_8.map(function(d) {
+                var off = excludedDirs.indexOf(d) >= 0;
+                return (
+                  <button key={d} type="button" onClick={function() { toggleDir(d); }}
+                    style={{ background: off ? th.red + "22" : "transparent", border:"1px solid " + (off ? th.red : th.border), color: off ? th.red : th.muted, borderRadius:20, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+
+          {waterLoading || bizLoading ? <div style={{ fontSize:11, color:th.muted, textAlign:"center", margin:"6px 0" }}>Searching OpenStreetMap for more water…</div> : null}
+          {waterError ? <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>⚠️ {waterError} (known spots below still work; this only affects live OpenStreetMap results)</div> : null}
+
+          <Card T={T} borderColor={th.gold + "55"}>
+            <div style={{ fontSize:13, color:th.gold, fontWeight:800, marginBottom:6 }}>🌾 Private land open by permission — IRAP</div>
+            <div style={{ fontSize:11, color:th.muted, lineHeight:1.5, marginBottom:8 }}>
+              Illinois DNR's Recreational Access Program leases private ponds, streams, and riverbank from landowners for public fishing (Apr 1–Sep 30). You register directly with IDNR — they broker access, not this app, and no landowner contact info is ever shown here.
+            </div>
+            <a href="https://dnr.illinois.gov/conservation/irap/fishing.html" target="_blank" rel="noopener noreferrer" style={{ display:"block", textAlign:"center", background:th.card, border:"1px solid " + th.gold, borderRadius:8, padding:10, color:th.gold, fontSize:12, fontWeight:700, textDecoration:"none" }}>
+              Find IRAP sites &amp; register →
+            </a>
+          </Card>
+
+          {gpsLoading && !manualPos ? <Card T={T}><div style={{ padding:16, color:th.muted, textAlign:"center" }}>Getting your location…</div></Card> : null}
+
+          {gpsError && !manualPos && !gpsLoading ? (
+            <Card T={T} borderColor={th.red + "88"}>
+              <div style={{ fontSize:12, color:th.red, fontWeight:700, marginBottom:6 }}>⚠️ Not using your real location</div>
+              <div style={{ fontSize:12, color:th.white, lineHeight:1.5, marginBottom:10 }}>{gpsError}</div>
+              <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Everything below is centered on a default spot (North Riverside, IL), not where you actually are.</div>
+              <button type="button" onClick={requestGps} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>↻ Retry location</button>
+            </Card>
           ) : null}
+
+          <Card T={T}>
+            <SecLabel text="Map view" T={T} />
+            <ScoutResultsMap
+              center={activePos}
+              mutedColor={th.muted}
+              height={260}
+              markers={nearSpots.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; })
+                .concat(nearClubSpots.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.displayName, distMi:s.distMi }; }))
+                .concat(nearWater.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; }))
+                .concat(nearBiz.map(function(s) { return { lat:s.lat, lng:s.lng, name:s.name, distMi:s.distMi }; }))}
+            />
+          </Card>
+
           {nearSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={idx} T={T} borderColor={th.blue + "33"}>
+              <Card key={"known_" + idx} T={T} borderColor={th.blue + "33"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
                   <Pill label={s.waterType} color={th.blue} />
@@ -4009,6 +4383,76 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
               </Card>
             );
           })}
+
+          {nearClubSpots.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"club_" + idx} T={T} borderColor={th.teal + "55"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.displayName}</div>
+                  <Pill label="Club spot" color={th.teal} />
+                </div>
+                <div style={{ fontSize:12, color:th.green, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · shared by {s.credit || "a club member"}</div>
+                {(s.species_present || []).length ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+                    {s.species_present.slice(0, 4).map(function(sp, i) { return <Pill key={i} label={sp} color={th.green} />; })}
+                  </div>
+                ) : null}
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {nearWater.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"osm_" + idx} T={T} borderColor={th.blue + "33"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <Pill label={s.waterType} color={th.blue} />
+                </div>
+                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · Unverified water</div>
+                <Pill label={"Access: " + s.access} color={s.access === "Private" ? th.red : s.access === "Public" ? th.green : th.muted} />
+                <div style={{ fontSize:10, color:th.muted, margin:"8px 0", lineHeight:1.5 }}>
+                  Found via OpenStreetMap, not an official access list. May be private property, restricted, or unsafe to reach. Verify before you go.
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {nearBiz.map(function(s, idx) {
+            var maps = mapsUrl(s.lat, s.lng);
+            return (
+              <Card key={"biz_" + idx} T={T} borderColor={th.orange + "55"}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                  <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
+                  <Pill label="Business" color={th.orange} />
+                </div>
+                <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · contact them directly for access &amp; hours</div>
+                {s.phone || s.website ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:12, marginBottom:6 }}>
+                    {s.phone ? <a href={"tel:" + s.phone} style={{ color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>📞 {s.phone}</a> : null}
+                    {s.website ? <a href={s.website} target="_blank" rel="noopener noreferrer" style={{ color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>🔗 Website</a> : null}
+                  </div>
+                ) : null}
+                <div style={{ display:"flex", gap:8 }}>
+                  <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
+                  <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
+                </div>
+              </Card>
+            );
+          })}
+
+          {!gpsLoading && !waterLoading && !bizLoading && !clubSpotsLoading && !nearSpots.length && !nearClubSpots.length && !nearWater.length && !nearBiz.length ? (
+            <Card T={T}><div style={{ fontSize:13, color:th.muted }}>Nothing found in range. Try a bigger radius or clear an excluded direction.</div></Card>
+          ) : null}
         </div>
       )}
 
@@ -4027,11 +4471,11 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
 // ─── NAV + APP ────────────────────────────────────────────────────────────────
 var NAV = [
   {id:"home",emoji:"🏠",label:"Home"},
+  {id:"scout",emoji:"🔍",label:"Scout"},
   {id:"fish",emoji:"🐟",label:"Species"},
   {id:"spots",emoji:"📍",label:"Spots"},
   {id:"catalogue",emoji:"📚",label:"Tackle"},
   {id:"catch",emoji:"📸",label:"Catch"},
-  {id:"scout",emoji:"🔍",label:"Scout"},
   {id:"learn",emoji:"📖",label:"Learn"},
 ];
 
@@ -4039,6 +4483,13 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
   const [theme, setTheme] = useState("dark");
+  const [textScale, setTextScaleState] = useState(function() {
+    try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
+  });
+  function setTextScale(id) {
+    setTextScaleState(id);
+    try { localStorage.setItem(TEXT_SCALE_KEY, id); } catch (e) {}
+  }
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authMember, setAuthMember] = useState(null);
@@ -4106,7 +4557,9 @@ export default function App() {
         }));
       });
     }).catch(function() {});
-    mergeLocalCatchesToCloud(memberId, JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]")).catch(function() {});
+    var localCatchesForMerge = [];
+    try { localCatchesForMerge = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); } catch (e) {}
+    mergeLocalCatchesToCloud(memberId, localCatchesForMerge).catch(function() {});
     loadCatchesFromCloud(memberId).then(function(cloudCatches) {
       if (cloudCatches && cloudCatches.length) {
         try { localStorage.setItem("rfc_catches_v1", JSON.stringify(cloudCatches)); } catch (e) {}
@@ -4255,17 +4708,9 @@ export default function App() {
     );
   }
 
-  if (!authUser) {
-    return (
-      <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto" }}>
-        <SaveToast toast={toast} />
-        <LoginPage T={theme} authError={authError} pendingLinkHref={pendingLinkHref} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} />
-      </div>
-    );
-  }
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
+    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48, zoom:textScaleZoom(textScale) }}>
       <SaveToast toast={toast} />
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -4284,7 +4729,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} T={theme} goMyPrivateSpots={goMyPrivateSpots} authMember={authMember} onSignOut={handleSignOut} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {

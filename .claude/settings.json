@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null || exit 0\nchanged=$( { git diff --name-only -- src; git diff --cached --name-only -- src; git ls-files --others --exclude-standard -- src; } 2>/dev/null | grep -E '\\.(js|jsx)$' | sort -u)\nif [ -z \"$changed\" ]; then exit 0; fi\nhash=$(echo \"$changed\" | shasum | cut -d' ' -f1)\nmarker=\".git/.bug-fixes-hook-hash\"\nlast=$(cat \"$marker\" 2>/dev/null || echo \"\")\nif [ \"$hash\" = \"$last\" ]; then exit 0; fi\necho \"$hash\" > \"$marker\"\nprintf '{\"decision\":\"block\",\"reason\":\"Uncommitted src/ changes have not been checked against docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md yet. Invoke the bug-fixes subagent (Agent tool, subagent_type: bug-fixes) to review the diff, then finish.\"}'\n",
+            "timeout": 15,
+            "statusMessage": "Checking new code against bug triage…"
+          }
+        ]
+      }
+    ]
+  }
+}

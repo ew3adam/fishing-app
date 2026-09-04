@@ -5,11 +5,14 @@ dist/
 # OS / editor
 .DS_Store
 
-# Cursor / Claude — local IDE state (rules in .cursor/rules/ are committed)
+# Cursor / Claude — local IDE state (rules/agents/hooks below are committed on purpose, shared team config)
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/agents/**
+!.claude/settings.json
 
 # Secrets & local env (never commit real keys)
 .env

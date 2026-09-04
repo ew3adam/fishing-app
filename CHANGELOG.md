@@ -55,6 +55,86 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   bait tips, and notes instead of the nearest generic water. Only one spot can be
   pinned at a time. Falls back to generic nearest water when no spot is pinned.
 
+### Added (continued)
+- **Severe weather disclaimer on Home**: "Today's Conditions" card now warns that the
+  fishing-conditions score doesn't check flood/storm/wind alerts, and points members to
+  their phone's Weather app or weather.gov before heading out.
+- **Scout tab overhaul**: adjustable search radius (1–50mi, was fixed at 10), a
+  location search field (scout a place you're not standing in), direction-exclude
+  chips, club-shared spots pulled into Scout's results, live named-water and
+  fishing-business lookups from OpenStreetMap/Overpass (with a best-effort
+  public/private access label and an "unverified" disclaimer), and an IRAP card
+  linking to Illinois DNR's official private-land fishing access program.
+- **NWS severe weather alert banner on Home**: pulls active alerts for the member's
+  location from the free NWS API and shows them above the Bite Forecast card,
+  explicitly separate from the bite-quality score (which has no way to know about
+  flood/storm conditions on its own).
+- **GPS-fallback notice on Home and Scout**: if location access is denied, times out,
+  or isn't supported, both tabs now show a clear warning that results are centered on
+  a default location (North Riverside, IL) instead of silently showing the wrong
+  spots with no explanation — plus a Retry button. The Scout "can't load live water"
+  message also moved from the bottom of a long results list to right under the
+  search controls, where it's actually visible.
+
+### Added (continued)
+- **Scout results map**: "Near Me" now shows a read-only overview map (blue dot =
+  you, red pins = every known/club/OSM/business result currently listed) above the
+  result cards, so a member can visually check a pin actually sits on water before
+  trusting the card — prompted by a reported bad `SCOUT_SPOTS` coordinate.
+
+### Changed
+- **Bottom nav order**: Scout moved from 6th to 2nd position, right after Home
+  (`Home, Scout, Species, Spots, Tackle, Catch, Learn`).
+
+### Fixed
+- **Home rain % stuck at 0%**: `loadWeather` was requesting Open-Meteo's
+  `precipitation_probability` under `current` params, but that field only exists
+  under `hourly` — rain chance silently always read 0%. Now reads the correct hourly
+  value for the current hour.
+- **Spots: stale pre-filled name**: tapping a Guide Spot to prefill a spot name, then
+  dragging the map pin more than ~0.3mi away, now clears the name (with a heads-up
+  hint while it's still unedited) instead of silently keeping a name that no longer
+  matches the pin.
+- **Home forecast could get stuck loading**: `loadWeather`'s Anthropic-estimate
+  fallback could throw with nothing to catch it, leaving the forecast on "Fetching
+  live conditions…" forever if both Open-Meteo and the fallback failed. Now guarded
+  with its own try/catch plus a defensive `.catch()` at the call site.
+- **Scout: empty search silently did nothing** — tapping "Go" in the "Search a
+  location" card with an empty field now shows "Type a city, zip, or address first."
+  instead of no-oping with zero feedback. ([PR #23](https://github.com/ew3adam/fishing-app/pull/23), merged)
+
+### Fixed — full-codebase bug triage (in review, not yet merged)
+_See `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` for the full triage (7 bugs, ranked P0–P2)
+this line of work is drawn from._
+- **BUG-1 (P0) — catch photos could exceed `localStorage` quota and break catch
+  logging**: photos are now compressed before ever being written to `localStorage`
+  (not just before the Firebase Storage upload), the `rfc_catches_v1` write is
+  wrapped in try/catch with a toast on quota failure instead of failing silently,
+  and the local base64 copy is dropped once a cloud `photoUrl` exists.
+  ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+- **BUG-2 (P1) — corrupt local catch data could silently break post-sign-in sync**:
+  the unguarded `JSON.parse` on `rfc_catches_v1` in the post-sign-in effect is now
+  wrapped in try/catch, defaulting to `[]`. ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+- **BUG-3 (P1) — club feed and club-spot map did N sequential Firestore reads**:
+  `loadClubFeedCatches` and `loadClubSharedSpots` now issue all per-member reads via
+  `Promise.all` instead of a sequential loop. ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+- **BUG-4 (P1) — sign-in could fail for roster emails not stored lowercase**:
+  `findMemberByEmail` now falls back to a case-insensitive scan of active members
+  (reusing the existing email normalization) instead of guessing at alternate
+  casings, so a mixed-case CRM-imported email no longer blocks sign-in.
+  ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+- **Maps: pinch-zoom snap-back; pin placement switched to press-and-hold**
+  ([PR #24](https://github.com/ew3adam/fishing-app/pull/24), open — pending real-device testing before merge).
+- **Scout: results map re-centered on every render; default search radius set to 5mi**
+  ([PR #25](https://github.com/ew3adam/fishing-app/pull/25), open — pending real-device testing before merge).
+
+### Added — developer tooling (in review, not yet merged)
+- `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` — full-codebase bug triage (7 issues,
+  P0–P2) and feature-idea PRDs, written outside any single feature PR.
+  ([PR #26](https://github.com/ew3adam/fishing-app/pull/26), open)
+- `bug-fixes` review subagent + a `Stop` hook that gates new code against the triage
+  doc. ([PR #27](https://github.com/ew3adam/fishing-app/pull/27), open)
+
 ### Next
 - **Firebase Console (manual, one-time steps)**:
   1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
@@ -198,4 +278,4 @@ _Commits: `524b219` → `7b4ce5a`_
 - **GitHub Pages**: https://ew3adam.github.io/fishing-app/
 - **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
 
-_Last updated: 2026-07-10_
+_Last updated: 2026-08-30_
