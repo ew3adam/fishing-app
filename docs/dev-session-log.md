@@ -1,12 +1,22 @@
 ---
-lastSessionAt: "2026-08-30T17:10:00-05:00"
+lastSessionAt: "2026-09-03T23:50:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-**This session: a full-codebase bug triage, followed by fixing all 7 triaged bugs plus one real-time-code-review-caught bug, one at a time, each in its own PR.** Also merged in the background: PR #23 (Scout empty-search fix) landed on `main` from a prior session, in between this log's last update and this one.
+**This session: rescued a large batch of uncommitted local changes and reconciled them with `origin/main`, which had diverged heavily (20+ new `claude/*` PR branches, plus PR #24 already merged straight to `main`) since this log's last update.**
+
+1. **Committed pending local work** (47 files — auth wiring, Scout/spot changes, doc updates) that had been sitting uncommitted with no record of when or why.
+2. **Pulled `origin/main`, hit real merge conflicts** in `App.jsx` and 6 other files. Root cause of the conflicts looking like whole-file rewrites: the local copy had CRLF line endings, remote had LF — normalized endings and re-ran the merge, which reduced it to 3 genuine conflicting hunks (all in `App.jsx`) plus clean auto-merges elsewhere.
+3. **Real product conflict, not just text**: the local branch had added a full-screen hard login wall (app unusable until sign-in); `origin/main` keeps the app open and puts sign-in inside the Profile tab only. **User's call: keep open browsing (the `origin/main` behavior)** — removed the local `LoginPage` gate/component entirely rather than trying to run both.
+4. **Caught a bug the merge itself introduced**: resolving the import-line conflict dropped `testFirestoreConnection` even though it's still called later in `App.jsx` — restored the import. Verified the whole file (and the other 6 merged files) still parses with `@babel/parser` before committing (this sandbox's `esbuild`/Vite build doesn't run here — wrong-platform binary in `node_modules`, pre-existing, not fixed this session).
+5. Pushed via the user's own terminal (`git push` → rejected, non-fast-forward → `git pull --no-rebase` → conflicts resolved as above → pushed clean). `origin/main` and local are now both at the merge commit.
+
+Also clarified for the user: Firebase auth (email link + password fallback + roster gate) was **already built** going into this session — nothing new was created. The `08-Authentication.md` SDS doc (GitHub OAuth + Cloudflare Workers + JWT) does not match what's actually implemented (Firebase Auth + Firestore) — flagged, not reconciled.
+
+### Prior session (2026-08-30): full-codebase bug triage
 
 1. **PR #23 — Scout empty-search fix** (merged, deployed). Tapping "Go" in Scout's "Search a location" card with an empty field now shows an error instead of silently no-op'ing.
 2. **PR #26 — Bug triage & feature roadmap** (open, draft). `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md`: 7 bugs (BUG-1 through BUG-7, P0–P2) from a full read of `App.jsx` + every `src/services/*` file + both Firestore/Storage rules, plus 7 feature PRDs and a phased roadmap. This is the source-of-truth doc the rest of this session's work was driven from — kept its `Status` column updated after every fix below.
@@ -64,9 +74,9 @@ Follow-up session on top of the PR #15/#17 work. Shipped and deployed PRs #19–
 
 ## Next
 
-- **Review and merge PRs #24 through #33** (9 open PRs, none merged) — this is the main thing blocking any of this session's work from actually reaching production. Suggested order: #24/#25 (oldest, map fixes) → #28/#29/#31/#32/#33 (the bug-triage fixes, roughly in BUG-N order) → #26/#27 (process/docs) → #30 (changelog, take out of draft first).
-- **Firebase Console, still outstanding across multiple sessions now**: Authentication → Sign-in method → enable **Email link (passwordless)**; Authentication → Settings → Authorized domains → add `ew3adam.github.io` (+ any Cloudflare domain actually used for testing). Blocks real member sign-in until done — confirm before inviting anyone else. (PR #32 fixes the *code* half of the related `auth/unauthorized-continue-uri` bug; this Console step is the other, separate half and still hasn't been confirmed done.)
-- **Confirm on a real device**: #24's Safari-specific pinch-zoom-lock fix and #25's map re-centering fix, plus this session's #28 (photo compression + double-tap guard), #31 (CSV import), #32 (sign-in link), and #33 (text-size setting) — all verified via Playwright/sandboxed dev server, none against a real phone yet.
+- **This log's PR list (#24–#33) is stale — reconcile before trusting it.** `origin/main` now has 20+ `claude/*` branches this log never mentions (e.g. `bug-8-9-spot-name-privacy`, `bug-10-clubfeed-like-race`, `home-severe-weather-disclaimer`, `scout-home-gps-fallback-notice`, `update-changelog`, two `claude-md-docs-*`), and PR #24 (pinch-zoom) already landed as a direct commit on `main` (`194be16`) rather than showing as a merged branch. Next session should run `gh pr list` (or check GitHub directly) rather than trusting the PR numbers/statuses recorded here.
+- **Firebase Console, still outstanding across multiple sessions now**: Authentication → Sign-in method → enable **Email link (passwordless)**; Authentication → Settings → Authorized domains → add `ew3adam.github.io` (+ any Cloudflare domain actually used for testing). Blocks real member sign-in until done — confirm before inviting anyone else.
+- **Confirm on a real device**: none of the recent fixes (photo compression, CSV import, sign-in link, text-size setting, map fixes) have been verified against a real phone yet — all sandbox/Playwright only.
 - **Confirm the test invite email actually works** once the Firebase Console step above is done: open the email sent to the user's own address, tap the sign-in link, verify it completes sign-in without the `auth/unauthorized-continue-uri` error.
 - See "Future scope" above before starting any modernization/backend-migration work, or any FEATURE-N item beyond FEATURE-2 — that's intentionally deferred, not a current task.
 
