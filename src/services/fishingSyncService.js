@@ -3,7 +3,7 @@
  * Path: members/{memberId}/fishingProfile/main
  *       members/{memberId}/fishingCatches/{catchId}
  */
-import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment, deleteDoc } from "firebase/firestore";
 import { getFirebaseDb } from "../lib/firebase.js";
 import { listActiveMembers } from "./memberService.js";
 import { uploadCatchPhoto, stripPhotoForFirestore, isDataUrlImage } from "./catchPhotoStorage.js";
@@ -164,4 +164,33 @@ export async function loadClubSharedSpots() {
   return spots.sort(function(a, b) {
     return String(a.name || "").localeCompare(String(b.name || ""));
   });
+}
+
+/**
+ * Write a test document to Firestore and immediately read it back.
+ * Writes to: members/{memberId}/fishingProfile/connectionTest
+ * Cleans up the doc after verifying the round-trip.
+ * Returns { ok, latencyMs, path, payload } on success; throws on failure.
+ */
+export async function testFirestoreConnection(memberId) {
+  if (!memberId) throw new Error("No memberId — sign in first.");
+  var db = getFirebaseDb();
+  var ref = doc(db, "members", memberId, "fishingProfile", "connectionTest");
+  var payload = {
+    testedAt: new Date().toISOString(),
+    source: "fishing-app",
+    status: "ok",
+  };
+  var t0 = Date.now();
+  await setDoc(ref, payload);
+  var snap = await getDoc(ref);
+  var latencyMs = Date.now() - t0;
+  if (!snap.exists()) throw new Error("Write succeeded but read-back failed — check Firestore rules.");
+  await deleteDoc(ref);
+  return {
+    ok: true,
+    latencyMs: latencyMs,
+    path: "members/" + memberId + "/fishingProfile/connectionTest",
+    payload: payload,
+  };
 }

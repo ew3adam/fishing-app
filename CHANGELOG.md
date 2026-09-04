@@ -194,4 +194,8 @@ _Commits: `524b219` → `7b4ce5a`_
 
 ---
 
-_Last updated: 2026-07-08_
+## Deployment URLs
+- **GitHub Pages**: https://ew3adam.github.io/fishing-app/
+- **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
+
+_Last updated: 2026-07-10_
