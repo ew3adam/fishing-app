@@ -1279,24 +1279,37 @@ function Pill({ label, color }) {
 // Note: the app deliberately allows open browsing while signed out (see
 // docs/dev-session-log.md, Sept 3 entry) — this is a promo card above the
 // still-fully-visible dashboard, not a login gate. Never make this block render.
-var WELCOME_BANNER_DISMISSED_KEY = "rfc_welcome_banner_dismissed_v1";
+// Visual v2 — modeled on a "Screen 1: Splash" mockup (Nike Run Club-style hero
+// layout: silhouette art > bottom-aligned title/tagline over a gradient fade >
+// dual CTAs), adapted to stay a non-blocking card in this slot rather than a
+// full-screen gate.
+var WELCOME_BANNER_DISMISSED_KEY = "rfc_welcome_banner_dismissed_v2";
+var WELCOME_ACCENT = "#6dd5c4";
 
 function WelcomeBanner({ setTab, onDismiss }) {
   return (
-    <div style={{ position:"relative", borderRadius:14, overflow:"hidden", marginBottom:14, background:"linear-gradient(160deg, #1c2a2e 0%, #0a1214 100%)" }}>
-      <svg viewBox="0 0 400 160" preserveAspectRatio="xMidYMid slice" style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0.1 }}>
-        <path d="M0 60 Q 50 48 100 60 T 200 60 T 300 60 T 400 60" fill="none" stroke="#ffffff" strokeWidth="2" />
-        <path d="M0 90 Q 50 78 100 90 T 200 90 T 300 90 T 400 90" fill="none" stroke="#ffffff" strokeWidth="2" />
-        <g transform="translate(320 45)" fill="none" stroke="#ffffff" strokeWidth="2.5">
-          <path d="M-40 0 C -40 -17 -11 -26 23 -11 C 40 -4 40 4 23 11 C -11 26 -40 17 -40 0 Z" />
-          <path d="M23 -11 L 43 -20 L 34 0 L 43 20 L 23 11" />
-        </g>
-      </svg>
-      <button type="button" onClick={onDismiss} aria-label="Dismiss" style={{ position:"absolute", top:8, right:8, background:"rgba(255,255,255,0.12)", border:"none", borderRadius:14, width:26, height:26, color:"#fff", cursor:"pointer", fontSize:13, lineHeight:1 }}>✕</button>
-      <div style={{ position:"relative", padding:"18px 16px 16px" }}>
-        <div style={{ fontSize:19, fontWeight:800, color:"#fff", marginBottom:4 }}>RFC Fishing</div>
+    <div style={{ position:"relative", borderRadius:16, overflow:"hidden", marginBottom:14, background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)" }}>
+      <button type="button" onClick={onDismiss} aria-label="Dismiss" style={{ position:"absolute", top:10, right:10, zIndex:2, background:"rgba(255,255,255,0.12)", border:"none", borderRadius:14, width:26, height:26, color:"#fff", cursor:"pointer", fontSize:13, lineHeight:1 }}>✕</button>
+
+      <div style={{ position:"relative", height:150 }}>
+        <svg viewBox="0 0 300 150" preserveAspectRatio="xMidYMid meet" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
+          <path d="M0 122 Q 40 112 80 122 T 160 122 T 240 122 T 300 122" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.18" strokeWidth="2" />
+          {/* bent rod, curving down to the fish's mouth */}
+          <path d="M220 16 C 175 26 120 52 82 86" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinecap="round" />
+          {/* fish silhouette on the line */}
+          <g transform="translate(112 95) scale(0.62)" fill={WELCOME_ACCENT} fillOpacity="0.18" stroke={WELCOME_ACCENT} strokeOpacity="0.65" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
+            <path d="M-70 0 C -70 -30 -20 -45 40 -20 C 70 -8 70 8 40 20 C -20 45 -70 30 -70 0 Z" />
+            <path d="M40 -20 L 75 -35 L 60 0 L 75 35 L 40 20" fill="none" />
+            <circle cx="-40" cy="-6" r="4" fill={WELCOME_ACCENT} fillOpacity="0.85" stroke="none" />
+          </g>
+        </svg>
+        <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 35%, #060b0c 96%)" }} />
+      </div>
+
+      <div style={{ position:"relative", padding:"0 16px 16px" }}>
+        <div style={{ fontSize:20, fontWeight:800, color:"#fff", marginBottom:5 }}>RFC <span style={{ color:WELCOME_ACCENT }}>Fishing</span></div>
         <div style={{ fontSize:12, color:"rgba(255,255,255,0.75)", marginBottom:14, lineHeight:1.5 }}>
-          Log your catches and track them with the club.
+          Every cast has a story. Log it, track it, share it with the club.
         </div>
         <div style={{ display:"flex", gap:10 }}>
           <button type="button" onClick={function() { setTab("me"); }} style={{ flex:1, background:"#fff", color:"#0a1214", border:"none", borderRadius:9, padding:"11px 0", fontSize:13, fontWeight:700, cursor:"pointer" }}>
