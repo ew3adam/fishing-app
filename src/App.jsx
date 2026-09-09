@@ -4734,6 +4734,10 @@ export default function App() {
   useEffect(function() {
     if (!isSignInLink(window.location.href)) return;
     setPendingLinkHref(window.location.href);
+    // Completion only runs from ProfileTab's own effect (it needs pendingLinkHref in scope
+    // there) — without switching tabs, opening the emailed link lands on Home and sign-in
+    // never actually completes.
+    setTab("me");
     if (window.history && window.history.replaceState) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
