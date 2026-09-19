@@ -27,10 +27,21 @@ service cloud.firestore {
             .hasOnly(['authUid', 'lastFishingAppLoginAt']);
     }
 
-    // Fishing profile (private spots, gear, prefs)
+    // Fishing profile (private spots, gear, prefs) — owner-only by default. Firestore rules
+    // are read-doc-level, not field-level, so a broad "any signed-in member can read" here
+    // would expose privateSpots regardless of each spot's shareClub flag (that used to be
+    // the case — filtering was client-side only). Anything meant to be club-visible lives in
+    // a separate clubShare doc instead (below), which the owner writes with only the
+    // already-shareClub:true subset — see fishingSyncService.js's saveFishingProfileToCloud.
     match /members/{memberId}/fishingProfile/{docId} {
-      allow read: if isSignedIn();
+      allow read: if isOwner(memberId);
       allow write: if isOwner(memberId);
+    }
+
+    // Club-visible spot subset — deliberately readable by any signed-in member; the owner
+    // is still the only writer, so a member can't spoof another member's shared spots.
+    match /members/{memberId}/fishingProfile/clubShare {
+      allow read: if isSignedIn();
     }
 
     // Catch log — owner writes; club catches readable by all signed-in members
