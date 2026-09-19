@@ -1287,7 +1287,7 @@ function Pill({ label, color }) {
 var WELCOME_SPLASH_SEEN_KEY = "rfc_welcome_splash_seen_v1";
 var WELCOME_ACCENT = "#6dd5c4";
 
-function WelcomeSplash({ onJoin, onSignIn, onSkip }) {
+function WelcomeSplash({ onSignIn, onSkip }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)", display:"flex", flexDirection:"column", zIndex:200 }}>
       <button type="button" onClick={onSkip} style={{ position:"absolute", top:16, right:16, zIndex:2, background:"rgba(255,255,255,0.1)", border:"none", borderRadius:20, padding:"7px 14px", color:"rgba(255,255,255,0.85)", cursor:"pointer", fontSize:12, fontWeight:700 }}>
@@ -1310,14 +1310,9 @@ function WelcomeSplash({ onJoin, onSignIn, onSkip }) {
         <div style={{ fontSize:14, color:"rgba(255,255,255,0.75)", marginBottom:28, lineHeight:1.5 }}>
           Log your catches and track them with the club.
         </div>
-        <div style={{ display:"flex", gap:12 }}>
-          <button type="button" onClick={onJoin} style={{ flex:1, background:"#fff", color:"#0a1214", border:"none", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-            Join us
-          </button>
-          <button type="button" onClick={onSignIn} style={{ flex:1, background:"transparent", color:"#fff", border:"1px solid #fff", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-            Sign in
-          </button>
-        </div>
+        <button type="button" onClick={onSignIn} style={{ width:"100%", background:"#fff", color:"#0a1214", border:"none", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+          Sign in
+        </button>
       </div>
     </div>
   );
@@ -1358,14 +1353,9 @@ function WelcomeBanner({ setTab, onDismiss }) {
         <div style={{ fontSize:12, color:"rgba(255,255,255,0.75)", marginBottom:14, lineHeight:1.5 }}>
           Every cast has a story. Log it, track it, share it with the club.
         </div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button type="button" onClick={function() { setTab("me"); }} style={{ flex:1, background:"#fff", color:"#0a1214", border:"none", borderRadius:9, padding:"11px 0", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-            Join us
-          </button>
-          <button type="button" onClick={function() { setTab("me"); }} style={{ flex:1, background:"transparent", color:"#fff", border:"1px solid #fff", borderRadius:9, padding:"11px 0", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-            Sign in
-          </button>
-        </div>
+        <button type="button" onClick={function() { setTab("me"); }} style={{ width:"100%", background:"#fff", color:"#0a1214", border:"none", borderRadius:9, padding:"11px 0", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+          Sign in
+        </button>
       </div>
     </div>
   );
@@ -5196,12 +5186,11 @@ export default function App() {
   }
 
   // First-ever visit, signed out: a true one-time full-page splash (not a repeating gate --
-  // open browsing stays intact after this, same as every later visit). "Skip" and the two CTAs
-  // all dismiss it for good on this device; only Join us/Sign in also navigate to Profile.
+  // open browsing stays intact after this, same as every later visit). Both Skip and Sign in
+  // dismiss it for good on this device; only Sign in also navigates to Profile.
   if (!authMember && !welcomeSplashSeen) {
     return (
       <WelcomeSplash
-        onJoin={function() { dismissWelcomeSplash(); setTab("me"); }}
         onSignIn={function() { dismissWelcomeSplash(); setTab("me"); }}
         onSkip={dismissWelcomeSplash}
       />
