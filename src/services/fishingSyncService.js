@@ -1,6 +1,8 @@
 /**
  * Fishing-app profile + catches stored under CRM member doc (cross-device sync).
  * Path: members/{memberId}/fishingProfile/main
+ *       members/{memberId}/fishingProfile/clubShare  (owner-written, club-readable subset —
+ *         see clubShareRef below; `main` itself is owner-read-only, privateSpots included)
  *       members/{memberId}/fishingCatches/{catchId}
  */
 import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment, deleteDoc } from "firebase/firestore";
@@ -10,6 +12,19 @@ import { uploadCatchPhoto, stripPhotoForFirestore, isDataUrlImage } from "./catc
 
 function profileRef(memberId) {
   return doc(getFirebaseDb(), "members", memberId, "fishingProfile", "main");
+}
+
+/**
+ * Club-visible spot subset — a separate doc so the Firestore rule for it can be
+ * genuinely public-to-signed-in-members without also exposing the rest of `main`
+ * (which used to be the case: any signed-in member could read the full profile,
+ * privateSpots included, regardless of each spot's shareClub flag — the UI filtered
+ * client-side, but the data itself was never actually private at the rules level).
+ * Only the owner writes this doc (enforced by rules), and only ever with spots that
+ * are already shareClub:true — never write raw privateSpots here.
+ */
+function clubShareRef(memberId) {
+  return doc(getFirebaseDb(), "members", memberId, "fishingProfile", "clubShare");
 }
 
 function catchesCol(memberId) {
@@ -53,7 +68,12 @@ export async function loadFishingProfileFromCloud(memberId, localProfile) {
 
 export async function saveFishingProfileToCloud(memberId, profile) {
   if (!memberId) return;
-  await setDoc(profileRef(memberId), pickSyncProfile(profile), { merge: true });
+  var synced = pickSyncProfile(profile);
+  await setDoc(profileRef(memberId), synced, { merge: true });
+  // Full replace (no merge) so a spot that gets un-shared is actually removed from the
+  // club-visible doc, not left behind by a merge that only adds/updates keys.
+  var shared = synced.privateSpots.filter(function(s) { return s && s.shareClub; });
+  await setDoc(clubShareRef(memberId), { spots: shared, updatedAt: synced.updatedAt });
 }
 
 /** Upload photo if needed, then write catch doc without base64. */
@@ -145,16 +165,19 @@ export async function loadClubFeedCatches() {
   });
 }
 
-/** All members' spots flagged shareClub — for club map. */
+/** All members' spots flagged shareClub — for club map. Reads the club-visible subset
+ * doc (clubShareRef), not the full profile — see that function's comment for why. */
 export async function loadClubSharedSpots() {
   var members = await listActiveMembers(120);
   // See loadClubFeedCatches above -- same N-reads-in-parallel treatment.
   var perMember = await Promise.all(members.map(async function(m) {
     try {
-      var snap = await getDoc(profileRef(m.id));
+      var snap = await getDoc(clubShareRef(m.id));
       if (!snap.exists()) return [];
-      var profile = snap.data() || {};
-      return (profile.privateSpots || []).filter(function(s) { return s && s.shareClub; }).map(function(s) {
+      var data = snap.data() || {};
+      // Defensive re-filter: the write side only ever puts shareClub:true spots here, but
+      // don't trust that invariant blindly on the read side too.
+      return (data.spots || []).filter(function(s) { return s && s.shareClub; }).map(function(s) {
         return Object.assign({}, s, {
           memberId: m.id,
           credit: m.displayName || m.id,
