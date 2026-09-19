@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
@@ -1276,6 +1276,53 @@ function Pill({ label, color }) {
   return <span style={{ background:color + "22", color:color, border:"1px solid " + color + "44", borderRadius:20, padding:"2px 8px", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>;
 }
 
+// ─── WELCOME SPLASH (first-ever visit only — full page, but a ONE-TIME thing) ─
+// Not a login gate: shown once per device (localStorage flag) on the very first signed-out
+// visit, then never again — every later visit (signed in or not) skips straight to the normal
+// app, same open-browsing behavior as the rest of it. Don't turn this into a repeating or
+// every-signed-out-visit gate; that's the exact hard-login-wall behavior that was deliberately
+// removed (docs/dev-session-log.md, Sept 3 entry) and reconfirmed non-blocking when
+// WelcomeBanner below was built. A "Skip" option is required for the same reason: even on the
+// first visit, browsing must stay reachable without signing in.
+var WELCOME_SPLASH_SEEN_KEY = "rfc_welcome_splash_seen_v1";
+var WELCOME_ACCENT = "#6dd5c4";
+
+function WelcomeSplash({ onJoin, onSignIn, onSkip }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)", display:"flex", flexDirection:"column", zIndex:200 }}>
+      <button type="button" onClick={onSkip} style={{ position:"absolute", top:16, right:16, zIndex:2, background:"rgba(255,255,255,0.1)", border:"none", borderRadius:20, padding:"7px 14px", color:"rgba(255,255,255,0.85)", cursor:"pointer", fontSize:12, fontWeight:700 }}>
+        Skip
+      </button>
+      <div style={{ position:"relative", flex:1 }}>
+        <svg viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
+          <path d="M0 320 Q 40 305 80 320 T 160 320 T 240 320 T 300 320" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.16" strokeWidth="2" />
+          <path d="M170 60 C 130 75 95 115 82 160" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
+          <g transform="translate(112 172) scale(0.9)" fill={WELCOME_ACCENT} fillOpacity="0.16" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
+            <path d="M-70 0 C -70 -30 -20 -45 40 -20 C 70 -8 70 8 40 20 C -20 45 -70 30 -70 0 Z" />
+            <path d="M40 -20 L 75 -35 L 60 0 L 75 35 L 40 20" fill="none" />
+            <circle cx="-40" cy="-6" r="4" fill={WELCOME_ACCENT} fillOpacity="0.85" stroke="none" />
+          </g>
+        </svg>
+        <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 40%, #060b0c 92%)" }} />
+      </div>
+      <div style={{ position:"relative", padding:"0 24px 44px", textAlign:"center" }}>
+        <div style={{ fontSize:30, fontWeight:800, color:"#fff", marginBottom:8 }}>Welcome to the RFC app</div>
+        <div style={{ fontSize:14, color:"rgba(255,255,255,0.75)", marginBottom:28, lineHeight:1.5 }}>
+          Log your catches and track them with the club.
+        </div>
+        <div style={{ display:"flex", gap:12 }}>
+          <button type="button" onClick={onJoin} style={{ flex:1, background:"#fff", color:"#0a1214", border:"none", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+            Join us
+          </button>
+          <button type="button" onClick={onSignIn} style={{ flex:1, background:"transparent", color:"#fff", border:"1px solid #fff", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+            Sign in
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── WELCOME BANNER (signed-out prompt — non-blocking, dismissible) ──────────
 // Note: the app deliberately allows open browsing while signed out (see
 // docs/dev-session-log.md, Sept 3 entry) — this is a promo card above the
@@ -1285,7 +1332,6 @@ function Pill({ label, color }) {
 // dual CTAs), adapted to stay a non-blocking card in this slot rather than a
 // full-screen gate.
 var WELCOME_BANNER_DISMISSED_KEY = "rfc_welcome_banner_dismissed_v2";
-var WELCOME_ACCENT = "#6dd5c4";
 
 function WelcomeBanner({ setTab, onDismiss }) {
   return (
@@ -3917,7 +3963,7 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, onChangePassword, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
@@ -3925,6 +3971,8 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
   const [rosterHealth, setRosterHealth] = useState(null);
   const [fsTestBusy, setFsTestBusy] = useState(false);
   const [fsTestResult, setFsTestResult] = useState(null);
+  const [changePwBusy, setChangePwBusy] = useState(false);
+  const [changePwResult, setChangePwResult] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
   const [signInEmail, setSignInEmail] = useState((profile && profile.email) || "");
   const [signInPassword, setSignInPassword] = useState("");
@@ -4096,6 +4144,18 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
             {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
             <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your catches and spots are saved to the cloud. You can open the app on any device and see the same data.</div>
             <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted, marginBottom:8 }}>Sign out</button>
+            <button type="button" disabled={changePwBusy} onClick={function() {
+              setChangePwResult(null);
+              setChangePwBusy(true);
+              onChangePassword(displayEmail).then(function() {
+                setChangePwResult({ ok:true, message:"✓ Check " + displayEmail + " for a link to set your password." });
+              }).catch(function(err) {
+                setChangePwResult({ ok:false, message:"✗ " + (err && err.message ? err.message : "Couldn't send the reset email.") });
+              }).finally(function() { setChangePwBusy(false); });
+            }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:changePwBusy ? "wait" : "pointer", fontSize:13, color:th.blue, marginBottom:8, opacity:changePwBusy ? 0.6 : 1 }}>
+              {changePwBusy ? "Sending…" : "Change your password"}
+            </button>
+            {changePwResult ? <div style={{ fontSize:11, color:changePwResult.ok ? th.green : th.red, marginBottom:8, lineHeight:1.4 }}>{changePwResult.message}</div> : null}
             <button type="button" disabled={fsTestBusy} onClick={function() {
               setFsTestResult(null);
               setFsTestBusy(true);
@@ -4235,23 +4295,61 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
 
       <Card T={T}>
         <SecLabel text="Your Info" T={T} />
-        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
-        <input value={form.name || ""} onChange={function(e) { setF("name", e.target.value); }} placeholder="First name or nickname" style={iStyle} />
-        <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
-        <input type="email" value={form.email || ""} onChange={function(e) { setF("email", e.target.value); }} placeholder="your@email.com" style={iStyle} />
-        <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
-        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-          {["Beginner","Intermediate","Experienced"].map(function(l) {
-            return (
-              <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
-                {l}
-              </button>
-            );
-          })}
-        </div>
-        <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
-          {saved ? "✓ Saved!" : "Save Profile"}
-        </button>
+        {authMember ? (
+          <div>
+            {/* Name/email are verified against the club's roster (kept in an offline master
+                spreadsheet, not this app) -- self-editing here would silently drift from that
+                source of truth, so changes go through a request instead of a direct edit. */}
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
+            <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.displayName || authMember.email}</div>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+            <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.email}</div>
+            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>
+              Name and email are verified against the club roster and can't be changed here.
+            </div>
+            <a
+              href={"mailto:RiversideFishingClubil@gmail.com?subject=" + encodeURIComponent("Profile change request — " + (authMember.displayName || authMember.email)) + "&body=" + encodeURIComponent("Member ID: " + authMember.id + "\nCurrent name: " + (authMember.displayName || "") + "\nCurrent email: " + (authMember.email || "") + "\n\nWhat would you like changed:\n")}
+              style={{ display:"block", boxSizing:"border-box", textAlign:"center", width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.blue, fontWeight:700, textDecoration:"none", marginBottom:16 }}
+            >
+              Request a change
+            </a>
+            <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
+            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+              {["Beginner","Intermediate","Experienced"].map(function(l) {
+                return (
+                  <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
+              {saved ? "✓ Saved!" : "Save Profile"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            {/* Not signed in yet -- this is local-only device data, not tied to the club roster,
+                so there's nothing to protect from drifting yet. Free to edit until sign-in. */}
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
+            <input value={form.name || ""} onChange={function(e) { setF("name", e.target.value); }} placeholder="First name or nickname" style={iStyle} />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+            <input type="email" value={form.email || ""} onChange={function(e) { setF("email", e.target.value); }} placeholder="your@email.com" style={iStyle} />
+            <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
+            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+              {["Beginner","Intermediate","Experienced"].map(function(l) {
+                return (
+                  <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
+              {saved ? "✓ Saved!" : "Save Profile"}
+            </button>
+          </div>
+        )}
       </Card>
 
       <button onClick={function() { setView("gear"); }} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:14, cursor:"pointer", textAlign:"left", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -4865,6 +4963,13 @@ export default function App() {
     try { localStorage.setItem(TEXT_SCALE_KEY, id); } catch (e) {}
   }
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
+  const [welcomeSplashSeen, setWelcomeSplashSeen] = useState(function() {
+    try { return localStorage.getItem(WELCOME_SPLASH_SEEN_KEY) === "1"; } catch (e) { return false; }
+  });
+  function dismissWelcomeSplash() {
+    setWelcomeSplashSeen(true);
+    try { localStorage.setItem(WELCOME_SPLASH_SEEN_KEY, "1"); } catch (e) {}
+  }
   const [authUser, setAuthUser] = useState(null);
   const [authMember, setAuthMember] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -4987,6 +5092,10 @@ export default function App() {
     return sendSignInLink(email);
   }, []);
 
+  var handleChangePassword = useCallback(function(email) {
+    return sendMemberPasswordReset(email);
+  }, []);
+
   var handleCompleteLink = useCallback(function(email, href) {
     var linkHref = href || pendingLinkHref;
     if (email) {
@@ -5086,6 +5195,18 @@ export default function App() {
     );
   }
 
+  // First-ever visit, signed out: a true one-time full-page splash (not a repeating gate --
+  // open browsing stays intact after this, same as every later visit). "Skip" and the two CTAs
+  // all dismiss it for good on this device; only Join us/Sign in also navigate to Profile.
+  if (!authMember && !welcomeSplashSeen) {
+    return (
+      <WelcomeSplash
+        onJoin={function() { dismissWelcomeSplash(); setTab("me"); }}
+        onSignIn={function() { dismissWelcomeSplash(); setTab("me"); }}
+        onSkip={dismissWelcomeSplash}
+      />
+    );
+  }
 
   return (
     <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48, zoom:textScaleZoom(textScale) }}>
@@ -5107,7 +5228,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} onChangePassword={handleChangePassword} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {

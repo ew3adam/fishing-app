@@ -8,6 +8,7 @@ import {
   isSignInWithEmailLink,
   signInWithEmailLink,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
@@ -127,6 +128,18 @@ export async function signInMemberEmail(email, password) {
 
 export async function signOutMember() {
   await signOut(getFirebaseAuth());
+}
+
+/**
+ * Self-service password set/change — Firebase's own hosted reset-password email flow.
+ * Works whether or not the member has ever set a password before (Firebase creates one on
+ * first use of the reset link), so this doubles as the only way to *set* a password at all;
+ * there is no separate sign-up/set-password flow in this app (see CLAUDE.md's auth section).
+ */
+export async function sendMemberPasswordReset(email) {
+  var normalized = normalizeEmail(email);
+  if (!normalized) throw new Error("Type a valid email address.");
+  await sendPasswordResetEmail(getFirebaseAuth(), normalized);
 }
 
 /**
