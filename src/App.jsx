@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, testFirestoreConnection } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
@@ -1009,7 +1009,7 @@ async function loadWeather(lat, lng) {
     // `current` (as this used to) silently returns nothing, so precip always read 0%. Fetch it via
     // `hourly` instead and look up the entry matching the current hour; `current.precipitation` gives
     // real-time rain (mm) as a separate, non-forecast signal.
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation,surface_pressure&hourly=surface_pressure,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lng + "&current=temperature_2m,relative_humidity_2m,windspeed_10m,wind_direction_10m,weathercode,precipitation,surface_pressure&hourly=surface_pressure,precipitation_probability&daily=sunrise,sunset&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=America%2FChicago");
     if (!r.ok) throw new Error("bad");
     const d = await r.json();
     const c = d.current;
@@ -1028,6 +1028,7 @@ async function loadWeather(lat, lng) {
     var sunset = d.daily && d.daily.sunset ? d.daily.sunset[0] : null;
     return {
       temp: Math.round(c.temperature_2m),
+      humidity: c.relative_humidity_2m != null ? Math.round(c.relative_humidity_2m) : null,
       wind: Math.round(c.windspeed_10m),
       windDir: c.wind_direction_10m,
       windCompass: windCompass(c.wind_direction_10m),
@@ -1353,6 +1354,32 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   const [usedDefaultLocation, setUsedDefaultLocation] = useState(false);
   const favSp = (profile && profile.favSpecies) || [];
 
+  // Home dashboard redesign (per shared mockup) — real data only, no fabricated stats.
+  const [myRecentCatch] = useState(function() {
+    try {
+      var list = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]");
+      return (list && list[0]) || null; // submitCatch prepends, so [0] is the newest
+    } catch (e) { return null; }
+  });
+  const [topClubCatch, setTopClubCatch] = useState(null);
+  const [topClubCatchLoading, setTopClubCatchLoading] = useState(false);
+  useEffect(function() {
+    if (!authMember) { setTopClubCatch(null); return; }
+    var cancelled = false;
+    setTopClubCatchLoading(true);
+    loadClubFeedCatches().then(function(rows) {
+      if (cancelled) return;
+      var withLength = (rows || []).filter(function(c) { return c && c.length && !isNaN(parseFloat(c.length)); });
+      withLength.sort(function(a, b) { return parseFloat(b.length) - parseFloat(a.length); });
+      setTopClubCatch(withLength[0] || null);
+    }).catch(function() {
+      if (!cancelled) setTopClubCatch(null);
+    }).finally(function() {
+      if (!cancelled) setTopClubCatchLoading(false);
+    });
+    return function() { cancelled = true; };
+  }, [authMember ? authMember.id : null]);
+
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
     var lat = 41.84, lng = -87.83;
@@ -1417,6 +1444,10 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var nearestPrivateSorted = userGps ? myPrivateSpots.filter(function(s) { return isFinite(s.lat) && isFinite(s.lng); }).map(function(s) {
     return { spot:s, dist:haversineMi(userGps.lat, userGps.lng, s.lat, s.lng) };
   }).sort(function(a, b) { return a.dist - b.dist; }) : [];
+  // "Nearby Hot Spots" row — real known water sorted by real distance, no fabricated ratings.
+  var topNearbySpots = userGps ? SCOUT_SPOTS.map(function(s) {
+    return { name:s.name, dist:haversineMi(userGps.lat, userGps.lng, s.lat, s.lng), species:s.species || [] };
+  }).sort(function(a, b) { return a.dist - b.dist; }).slice(0, 3) : [];
   var topSpeciesToday = nearSpot && nearSpot.species ? nearSpot.species.slice(0, 3).join(", ") : "Bass, Crappie, Catfish";
   var pinnedSpotDist = null;
   if (pinnedSpot && userGps && isFinite(pinnedSpot.lat) && isFinite(pinnedSpot.lng)) {
@@ -1463,6 +1494,116 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           </div>
         </div>
       )}
+
+      {/* Current-conditions card — mirrors the shared "home-screen" mockup's weather card,
+          using the app's own theme tokens rather than the mockup's hardcoded palette so it
+          doesn't clash when a member has a different theme selected. */}
+      {wx && !loading ? (
+        <div style={{ background:"linear-gradient(135deg, " + th.blue + " 0%, " + th.indigo + " 100%)", borderRadius:14, padding:"14px 16px", marginBottom:12, color:"#fff" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ fontSize:36, lineHeight:1 }}>{wx.icon}</div>
+              <div>
+                <div style={{ fontSize:30, fontWeight:800, lineHeight:1 }}>{wx.temp}°F</div>
+                <div style={{ fontSize:12, opacity:0.9, marginTop:2 }}>{wx.condition}</div>
+              </div>
+            </div>
+            <div style={{ fontSize:11, lineHeight:1.9, textAlign:"right", opacity:0.95 }}>
+              <div>Wind {wx.wind} mph</div>
+              {wx.humidity != null ? <div>Humidity {wx.humidity}%</div> : null}
+              <div>Pressure {wx.pressure} in</div>
+            </div>
+          </div>
+          {wx.sunrise || wx.sunset ? (
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, paddingTop:10, borderTop:"1px solid rgba(255,255,255,0.25)", fontSize:11, opacity:0.9 }}>
+              <span>Sunrise {wx.sunrise ? new Date(wx.sunrise).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "—"}</span>
+              <span>Sunset {wx.sunset ? new Date(wx.sunset).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "—"}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Nearby Hot Spots — real known water, sorted by real distance. No star ratings: this
+          app has no per-spot rating data, and the mockup's "Good/Excellent" badges would be
+          fabricated if shown here — species present is real info instead. */}
+      {topNearbySpots.length > 0 && !loading ? (
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Nearby Hot Spots</div>
+            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { setTab("scout"); }}>View All</span>
+          </div>
+          <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:2 }}>
+            {topNearbySpots.map(function(s, i) {
+              return (
+                <div key={i} style={{ flex:"0 0 140px", background:th.card, border:"1px solid " + th.border, borderRadius:12, overflow:"hidden" }}>
+                  <div style={{ height:64, background:"linear-gradient(135deg, " + th.teal + "44, " + th.blue + "44)", display:"flex", alignItems:"center", justifyContent:"center", position:"relative" }}>
+                    <span style={{ fontSize:22 }}>🌊</span>
+                    <span style={{ position:"absolute", bottom:4, left:6, background:"rgba(0,0,0,0.55)", color:"#fff", fontSize:10, fontWeight:700, borderRadius:6, padding:"2px 6px" }}>{s.dist.toFixed(1)} mi</span>
+                  </div>
+                  <div style={{ padding:"7px 8px" }}>
+                    <div style={{ fontSize:11, color:th.white, fontWeight:700, lineHeight:1.3, marginBottom:2 }}>{s.name}</div>
+                    <div style={{ fontSize:10, color:th.muted, lineHeight:1.3 }}>{s.species.slice(0, 2).join(", ") || "Mixed species"}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Recent Catch — the member's own most recent logged catch (local-first, same source
+          CatchTab reads from). Nothing shown if they haven't logged one yet. */}
+      {myRecentCatch ? (
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Recent Catch</div>
+            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { setTab("catch"); }}>View All</span>
+          </div>
+          <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:10, display:"flex", gap:10, alignItems:"center" }}>
+            {myRecentCatch.photo ? (
+              <img src={myRecentCatch.photo} alt={myRecentCatch.species || "Recent catch"} style={{ width:56, height:56, borderRadius:8, objectFit:"cover", flexShrink:0 }} />
+            ) : (
+              <div style={{ width:56, height:56, borderRadius:8, background:th.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>🐟</div>
+            )}
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:12, color:th.white, fontWeight:700 }}>{myRecentCatch.species || "Catch"}</div>
+              <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>
+                {[myRecentCatch.length ? myRecentCatch.length + " in" : null, myRecentCatch.estWeight ? myRecentCatch.estWeight + " lbs" : null].filter(Boolean).join(" · ")}
+              </div>
+              <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>{[myRecentCatch.spotDisplayName, myRecentCatch.date].filter(Boolean).join(" · ")}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Top Catch (Club Feed) — the single longest club/public catch currently in the feed,
+          across all members. Labeled "Top Catch" rather than "Monthly Leaderboard": this reads
+          the whole feed, not just this calendar month (catch dates are free-typed strings, not
+          a reliably sortable field), so "monthly" would overclaim precision the data doesn't have. */}
+      {authMember ? (
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Top Catch — Club Feed</div>
+            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { setHomeSection && setHomeSection("feed"); }}>View All</span>
+          </div>
+          <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:12 }}>
+            {topClubCatchLoading ? (
+              <div style={{ fontSize:12, color:th.muted }}>Loading…</div>
+            ) : topClubCatch ? (
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ fontSize:20 }}>🏆</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, color:th.white, fontWeight:700 }}>{topClubCatch.memberName}</div>
+                  <div style={{ fontSize:11, color:th.muted, marginTop:1 }}>{topClubCatch.species}</div>
+                </div>
+                <div style={{ fontSize:14, color:th.gold, fontWeight:800 }}>{topClubCatch.length} in</div>
+              </div>
+            ) : (
+              <div style={{ fontSize:12, color:th.muted }}>No club-shared catches yet.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {usedDefaultLocation && !loading ? (
         <div style={{ background:th.red + "18", border:"1px solid " + th.red + "55", borderRadius:12, padding:"10px 14px", marginBottom:12 }}>
