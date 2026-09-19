@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signInMemberOAuth, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
@@ -1276,86 +1276,205 @@ function Pill({ label, color }) {
   return <span style={{ background:color + "22", color:color, border:"1px solid " + color + "44", borderRadius:20, padding:"2px 8px", fontSize:10, fontFamily:"monospace", whiteSpace:"nowrap" }}>{label}</span>;
 }
 
-// ─── WELCOME SPLASH (first-ever visit only — full page, but a ONE-TIME thing) ─
-// Not a login gate: shown once per device (localStorage flag) on the very first signed-out
-// visit, then never again — every later visit (signed in or not) skips straight to the normal
-// app, same open-browsing behavior as the rest of it. Don't turn this into a repeating or
-// every-signed-out-visit gate; that's the exact hard-login-wall behavior that was deliberately
-// removed (docs/dev-session-log.md, Sept 3 entry) and reconfirmed non-blocking when
-// WelcomeBanner below was built. A "Skip" option is required for the same reason: even on the
-// first visit, browsing must stay reachable without signing in.
-var WELCOME_SPLASH_SEEN_KEY = "rfc_welcome_splash_seen_v1";
+// ─── WELCOME SPLASH (full login gate) ────────────────────────────────────────
+// User's explicit call (2026-09-19), reversing the earlier "keep open browsing" decision
+// (Sept 3 entry, docs/dev-session-log.md; reconfirmed twice more this same session when
+// WelcomeBanner and this same splash were first built non-blocking): "I don't want anyone
+// to have access until they login." This is now a hard gate — shown on every signed-out
+// load of every tab, not just once. WelcomeBanner (the old non-blocking card that used to
+// sit above Home's dashboard) is gone; nothing below this screen is reachable signed out.
 var WELCOME_ACCENT = "#6dd5c4";
 
-function WelcomeSplash({ onSignIn, onSkip }) {
-  return (
-    <div style={{ position:"fixed", inset:0, background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)", display:"flex", flexDirection:"column", zIndex:200 }}>
-      <button type="button" onClick={onSkip} style={{ position:"absolute", top:16, right:16, zIndex:2, background:"rgba(255,255,255,0.1)", border:"none", borderRadius:20, padding:"7px 14px", color:"rgba(255,255,255,0.85)", cursor:"pointer", fontSize:12, fontWeight:700 }}>
-        Skip
-      </button>
-      <div style={{ position:"relative", flex:1 }}>
-        <svg viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
-          <path d="M0 320 Q 40 305 80 320 T 160 320 T 240 320 T 300 320" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.16" strokeWidth="2" />
-          <path d="M170 60 C 130 75 95 115 82 160" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
-          <g transform="translate(112 172) scale(0.9)" fill={WELCOME_ACCENT} fillOpacity="0.16" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
-            <path d="M-70 0 C -70 -30 -20 -45 40 -20 C 70 -8 70 8 40 20 C -20 45 -70 30 -70 0 Z" />
-            <path d="M40 -20 L 75 -35 L 60 0 L 75 35 L 40 20" fill="none" />
-            <circle cx="-40" cy="-6" r="4" fill={WELCOME_ACCENT} fillOpacity="0.85" stroke="none" />
-          </g>
-        </svg>
-        <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 40%, #060b0c 92%)" }} />
-      </div>
-      <div style={{ position:"relative", padding:"0 24px 44px", textAlign:"center" }}>
-        <div style={{ fontSize:30, fontWeight:800, color:"#fff", marginBottom:8 }}>Welcome to the RFC app</div>
-        <div style={{ fontSize:14, color:"rgba(255,255,255,0.75)", marginBottom:28, lineHeight:1.5 }}>
-          Log your catches and track them with the club.
+/**
+ * Full sign-in form, restyled for the dark WelcomeSplash gate (fixed colors, not theme
+ * tokens -- the splash isn't theme-aware). Same state machine/handlers as the sign-in card
+ * that used to live in ProfileTab; extracted here because ProfileTab can now only ever be
+ * reached signed in (the gate owns 100% of the signed-out experience), and the gate needed
+ * an actual working sign-in form embedded in it, not just a button that goes nowhere useful.
+ */
+function SignInGateCard({ authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref }) {
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInBusy, setSignInBusy] = useState(false);
+  const [signInLocalError, setSignInLocalError] = useState("");
+  const [signInMode, setSignInMode] = useState("link");
+  const [showPassword, setShowPassword] = useState(false);
+  const [linkSentEmail, setLinkSentEmail] = useState("");
+  const [rosterHealth, setRosterHealth] = useState(null);
+
+  useEffect(function() {
+    checkRosterHealth().then(setRosterHealth);
+  }, []);
+
+  useEffect(function() {
+    if (!pendingLinkHref) return;
+    setSignInMode("link-completing");
+    setSignInBusy(true);
+    onCompleteLink("", pendingLinkHref).catch(function(err) {
+      if (err && err.needsEmail) {
+        setSignInMode("link-confirm");
+      } else {
+        setSignInLocalError(translateAuthError(err));
+        setSignInMode("link");
+      }
+    }).finally(function() { setSignInBusy(false); });
+  }, [pendingLinkHref]);
+
+  function translateAuthError(err) {
+    var code = err && err.code ? err.code : "";
+    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
+      return "That email or password didn't work. Double-check what you typed and try again.";
+    }
+    if (code === "auth/too-many-requests") {
+      return "You've tried too many times. Wait a few minutes, then try again. Or tap \"Forgot your password?\" below.";
+    }
+    if (code === "auth/user-disabled") {
+      return "Your account has been turned off. Ask the club president for help.";
+    }
+    if (code === "auth/network-request-failed") {
+      return "Can't connect to the internet. Check your Wi-Fi or cell signal, then try again.";
+    }
+    if (code === "auth/weak-password") {
+      return "Your password needs to be at least 10 characters long. Try making it longer.";
+    }
+    return (err && err.message) ? err.message : "Something went wrong. Try again.";
+  }
+
+  function handleSendLinkClick() {
+    setSignInLocalError("");
+    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
+    setSignInBusy(true);
+    onSendLink(signInEmail).then(function() {
+      setLinkSentEmail(signInEmail);
+      setSignInMode("link-sent");
+    }).catch(function(err) {
+      setSignInLocalError(translateAuthError(err));
+    }).finally(function() { setSignInBusy(false); });
+  }
+
+  function handleCompleteLinkClick() {
+    setSignInLocalError("");
+    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
+    setSignInBusy(true);
+    onCompleteLink(signInEmail, pendingLinkHref).catch(function(err) {
+      setSignInLocalError(translateAuthError(err));
+    }).finally(function() { setSignInBusy(false); });
+  }
+
+  function handlePasswordSignInClick() {
+    setSignInLocalError("");
+    setSignInBusy(true);
+    onSignIn(signInEmail, signInPassword).catch(function(err) {
+      setSignInLocalError(translateAuthError(err));
+    }).finally(function() { setSignInBusy(false); });
+  }
+
+  var iStyle = { width:"100%", background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:8, padding:"9px 12px", color:"#fff", fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
+  var pwInputStyle = Object.assign({}, iStyle, { marginBottom:0, paddingRight:44 });
+  var eyeBtnStyle = { position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", color:"rgba(255,255,255,0.7)", fontSize:12, padding:"0 2px", lineHeight:1 };
+  var primaryBtnStyle = { width:"100%", background:"#fff", color:"#0a1214", border:"none", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" };
+
+  if (signInMode === "link-completing") {
+    return <div style={{ fontSize:13, color:"rgba(255,255,255,0.75)" }}>Signing you in…</div>;
+  }
+  if (signInMode === "link-sent") {
+    return (
+      <div>
+        <div style={{ fontSize:13, color:"#fff", marginBottom:10, lineHeight:1.6 }}>
+          We sent a link to <strong>{linkSentEmail}</strong>.<br />Open your email, tap the link, and you'll be signed in automatically.
         </div>
-        <button type="button" onClick={onSignIn} style={{ width:"100%", background:"#fff", color:"#0a1214", border:"none", borderRadius:10, padding:"13px 0", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-          Sign in
+        <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", marginBottom:14, lineHeight:1.5 }}>
+          Don't see it? Check your spam folder. The link is good for 1 hour.
+        </div>
+        <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setLinkSentEmail(""); }} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.65)", cursor:"pointer", fontSize:12, padding:0 }}>
+          Start over
+        </button>
+      </div>
+    );
+  }
+  if (signInMode === "link-confirm") {
+    return (
+      <div>
+        <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", marginBottom:12, lineHeight:1.5 }}>
+          Looks like you opened the link on a different device. Just type your club email below and we'll finish signing you in.
+        </div>
+        <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", marginBottom:4 }}>Your club email</div>
+        <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+        {(signInLocalError || authError) ? <div style={{ fontSize:12, color:"#ff8a8a", marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+        <button type="button" onClick={handleCompleteLinkClick} disabled={signInBusy} style={Object.assign({}, primaryBtnStyle, { cursor:signInBusy ? "wait" : "pointer", opacity:signInBusy ? 0.7 : 1 })}>
+          {signInBusy ? "Signing in…" : "Sign me in"}
+        </button>
+      </div>
+    );
+  }
+  if (signInMode === "password") {
+    return (
+      <div>
+        <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", marginBottom:10, lineHeight:1.5 }}>Type the email address you gave the club and your password.</div>
+        <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", marginBottom:4 }}>Email</div>
+        <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+        <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", marginBottom:4 }}>Password</div>
+        <div style={{ position:"relative", marginBottom:10 }}>
+          <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
+          <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
+        </div>
+        {(signInLocalError || authError) ? <div style={{ fontSize:12, color:"#ff8a8a", marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+        <button type="button" onClick={handlePasswordSignInClick} disabled={signInBusy} style={Object.assign({}, primaryBtnStyle, { cursor:signInBusy ? "wait" : "pointer", opacity:signInBusy ? 0.7 : 1 })}>
+          {signInBusy ? "Signing in…" : "Sign In"}
+        </button>
+        <div style={{ textAlign:"center", marginTop:12 }}>
+          <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setSignInPassword(""); }} style={{ background:"transparent", border:"none", color:WELCOME_ACCENT, cursor:"pointer", fontSize:12, padding:0 }}>
+            Send me a sign-in link instead
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {rosterHealth && rosterHealth.message ? (
+        <div style={{ fontSize:11, color:rosterHealth.ok ? WELCOME_ACCENT : "#e0a030", marginBottom:10, lineHeight:1.5 }}>
+          {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
+        </div>
+      ) : null}
+      <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", marginBottom:4 }}>Your club email</div>
+      <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
+      {(signInLocalError || authError) ? <div style={{ fontSize:12, color:"#ff8a8a", marginBottom:8 }}>{signInLocalError || authError}</div> : null}
+      <button type="button" onClick={handleSendLinkClick} disabled={signInBusy} style={Object.assign({}, primaryBtnStyle, { cursor:signInBusy ? "wait" : "pointer", opacity:signInBusy ? 0.7 : 1 })}>
+        {signInBusy ? "Sending…" : "Send me a sign-in link"}
+      </button>
+      <div style={{ textAlign:"center", marginTop:12 }}>
+        <button type="button" onClick={function() { setSignInMode("password"); setSignInLocalError(""); }} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.65)", cursor:"pointer", fontSize:12, padding:0 }}>
+          I have a password — sign in with password
         </button>
       </div>
     </div>
   );
 }
 
-// ─── WELCOME BANNER (signed-out prompt — non-blocking, dismissible) ──────────
-// Note: the app deliberately allows open browsing while signed out (see
-// docs/dev-session-log.md, Sept 3 entry) — this is a promo card above the
-// still-fully-visible dashboard, not a login gate. Never make this block render.
-// Visual v2 — modeled on a "Screen 1: Splash" mockup (Nike Run Club-style hero
-// layout: silhouette art > bottom-aligned title/tagline over a gradient fade >
-// dual CTAs), adapted to stay a non-blocking card in this slot rather than a
-// full-screen gate.
-var WELCOME_BANNER_DISMISSED_KEY = "rfc_welcome_banner_dismissed_v2";
-
-function WelcomeBanner({ setTab, onDismiss }) {
+function WelcomeSplash({ authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref }) {
   return (
-    <div style={{ position:"relative", borderRadius:16, overflow:"hidden", marginBottom:14, background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)" }}>
-      <button type="button" onClick={onDismiss} aria-label="Dismiss" style={{ position:"absolute", top:10, right:10, zIndex:2, background:"rgba(255,255,255,0.12)", border:"none", borderRadius:14, width:26, height:26, color:"#fff", cursor:"pointer", fontSize:13, lineHeight:1 }}>✕</button>
-
-      <div style={{ position:"relative", height:150 }}>
-        <svg viewBox="0 0 300 150" preserveAspectRatio="xMidYMid meet" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
-          <path d="M0 122 Q 40 112 80 122 T 160 122 T 240 122 T 300 122" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.18" strokeWidth="2" />
-          {/* bent rod, curving down to the fish's mouth */}
-          <path d="M220 16 C 175 26 120 52 82 86" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinecap="round" />
-          {/* fish silhouette on the line */}
-          <g transform="translate(112 95) scale(0.62)" fill={WELCOME_ACCENT} fillOpacity="0.18" stroke={WELCOME_ACCENT} strokeOpacity="0.65" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
+    <div style={{ position:"fixed", inset:0, overflowY:"auto", background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)", display:"flex", flexDirection:"column", zIndex:200 }}>
+      <div style={{ position:"relative", height:220, flexShrink:0 }}>
+        <svg viewBox="0 0 300 220" preserveAspectRatio="xMidYMid slice" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
+          <path d="M0 175 Q 40 163 80 175 T 160 175 T 240 175 T 300 175" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.16" strokeWidth="2" />
+          <path d="M170 40 C 130 52 95 85 82 120" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
+          <g transform="translate(112 132) scale(0.75)" fill={WELCOME_ACCENT} fillOpacity="0.16" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
             <path d="M-70 0 C -70 -30 -20 -45 40 -20 C 70 -8 70 8 40 20 C -20 45 -70 30 -70 0 Z" />
             <path d="M40 -20 L 75 -35 L 60 0 L 75 35 L 40 20" fill="none" />
             <circle cx="-40" cy="-6" r="4" fill={WELCOME_ACCENT} fillOpacity="0.85" stroke="none" />
           </g>
         </svg>
-        <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 35%, #060b0c 96%)" }} />
+        <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 45%, #060b0c 95%)" }} />
       </div>
-
-      <div style={{ position:"relative", padding:"0 16px 16px" }}>
-        <div style={{ fontSize:20, fontWeight:800, color:"#fff", marginBottom:5 }}>RFC <span style={{ color:WELCOME_ACCENT }}>Fishing</span></div>
-        <div style={{ fontSize:12, color:"rgba(255,255,255,0.75)", marginBottom:14, lineHeight:1.5 }}>
-          Every cast has a story. Log it, track it, share it with the club.
+      <div style={{ position:"relative", padding:"0 24px 40px", textAlign:"center" }}>
+        <div style={{ fontSize:28, fontWeight:800, color:"#fff", marginBottom:8 }}>Welcome to the RFC app</div>
+        <div style={{ fontSize:14, color:"rgba(255,255,255,0.75)", marginBottom:24, lineHeight:1.5 }}>
+          Log your catches and track them with the club. Sign in below to get started.
         </div>
-        <button type="button" onClick={function() { setTab("me"); }} style={{ width:"100%", background:"#fff", color:"#0a1214", border:"none", borderRadius:9, padding:"11px 0", fontSize:13, fontWeight:700, cursor:"pointer" }}>
-          Sign in
-        </button>
+        <div style={{ textAlign:"left" }}>
+          <SignInGateCard authError={authError} onSignIn={onSignIn} onSendLink={onSendLink} onCompleteLink={onCompleteLink} pendingLinkHref={pendingLinkHref} />
+        </div>
       </div>
     </div>
   );
@@ -1367,13 +1486,6 @@ var HOME_SPECIES_PICKS = ["All Species", "Bass (Largemouth)", "Crappie", "Channe
 function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }) {
   const th = THEMES[T];
   const section = homeSection || "forecast";
-  const [welcomeDismissed, setWelcomeDismissed] = useState(function() {
-    try { return localStorage.getItem(WELCOME_BANNER_DISMISSED_KEY) === "1"; } catch (e) { return false; }
-  });
-  function dismissWelcomeBanner() {
-    setWelcomeDismissed(true);
-    try { localStorage.setItem(WELCOME_BANNER_DISMISSED_KEY, "1"); } catch (e) {}
-  }
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1511,7 +1623,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
 
   return (
     <div style={{ paddingBottom:8 }}>
-      {!authMember && !welcomeDismissed ? <WelcomeBanner setTab={setTab} onDismiss={dismissWelcomeBanner} /> : null}
       <div style={{ display:"flex", gap:8, margin:"12px 0 10px" }}>
         <OBtn label="Forecast" onClick={function() { setHomeSection && setHomeSection("forecast"); }} color={section === "forecast" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
         <OBtn label="Club Feed" onClick={function() { setHomeSection && setHomeSection("feed"); }} color={section === "feed" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
@@ -3953,50 +4064,23 @@ function LearnTab({ T }) {
 }
 
 // ─── PROFILE TAB ─────────────────────────────────────────────────────────────
-function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authUser, authMember, authLoading, authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref, onSignOut, onOAuthSignIn, onChangePassword, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+// ProfileTab is only ever reached signed in now -- the full login gate (WelcomeSplash, at
+// the top of App()'s render) blocks every tab, this one included, while !authMember. The
+// sign-in form itself lives in SignInGateCard, used by the gate, not here.
+function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authMember, onSignOut, onChangePassword, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
   const [form, setForm] = useState(normalizeProfile(profile));
   const [saved, setSaved] = useState(false);
-  const [rosterHealth, setRosterHealth] = useState(null);
   const [fsTestBusy, setFsTestBusy] = useState(false);
   const [fsTestResult, setFsTestResult] = useState(null);
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwResult, setChangePwResult] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
-  const [signInEmail, setSignInEmail] = useState((profile && profile.email) || "");
-  const [signInPassword, setSignInPassword] = useState("");
-  const [signInBusy, setSignInBusy] = useState(false);
-  const [signInLocalError, setSignInLocalError] = useState("");
-  const [signInMode, setSignInMode] = useState("link");
-  const [showPassword, setShowPassword] = useState(false);
-  const [linkSentEmail, setLinkSentEmail] = useState("");
 
   useEffect(function() {
     setForm(normalizeProfile(profile));
   }, [profile]);
-
-  useEffect(function() {
-    checkRosterHealth().then(setRosterHealth);
-  }, [authMember ? authMember.id : null]);
-
-  useEffect(function() {
-    if (authMember && authMember.email) setSignInEmail(authMember.email);
-  }, [authMember]);
-
-  useEffect(function() {
-    if (!pendingLinkHref || authUser) return;
-    setSignInMode("link-completing");
-    setSignInBusy(true);
-    onCompleteLink("", pendingLinkHref).catch(function(err) {
-      if (err && err.needsEmail) {
-        setSignInMode("link-confirm");
-      } else {
-        setSignInLocalError(translateAuthError(err));
-        setSignInMode("link");
-      }
-    }).finally(function() { setSignInBusy(false); });
-  }, [pendingLinkHref]);
 
   function setF(k, v) { setForm(function(f) { return Object.assign({}, f, { [k]: v }); }); }
   function setG(k, v) { setNewGear(function(g) { return Object.assign({}, g, { [k]: v }); }); }
@@ -4020,8 +4104,6 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
   function removeGear(i) { setF("gear", form.gear.filter(function(_, idx) { return idx !== i; })); }
 
   var iStyle = { width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 12px", color:th.white, fontSize:13, boxSizing:"border-box", outline:"none", marginBottom:10 };
-  var pwInputStyle = Object.assign({}, iStyle, { marginBottom:0, paddingRight:44 });
-  var eyeBtnStyle = { position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", color:th.muted, fontSize:12, padding:"0 2px", lineHeight:1 };
 
   if (view === "gear") {
     return (
@@ -4064,170 +4146,47 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
     );
   }
 
-  function translateAuthError(err) {
-    var code = err && err.code ? err.code : "";
-    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
-      return "That email or password didn't work. Double-check what you typed and try again.";
-    }
-    if (code === "auth/too-many-requests") {
-      return "You've tried too many times. Wait a few minutes, then try again. Or tap \"Forgot your password?\" below.";
-    }
-    if (code === "auth/user-disabled") {
-      return "Your account has been turned off. Ask the club president for help.";
-    }
-    if (code === "auth/network-request-failed") {
-      return "Can't connect to the internet. Check your Wi-Fi or cell signal, then try again.";
-    }
-    if (code === "auth/weak-password") {
-      return "Your password needs to be at least 10 characters long. Try making it longer.";
-    }
-    return (err && err.message) ? err.message : "Something went wrong. Try again.";
-  }
-
-  function handleSendLinkClick() {
-    setSignInLocalError("");
-    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
-    setSignInBusy(true);
-    onSendLink(signInEmail).then(function() {
-      setLinkSentEmail(signInEmail);
-      setSignInMode("link-sent");
-    }).catch(function(err) {
-      setSignInLocalError(translateAuthError(err));
-    }).finally(function() { setSignInBusy(false); });
-  }
-
-  function handleCompleteLinkClick() {
-    setSignInLocalError("");
-    if (!signInEmail) { setSignInLocalError("Type your email address first."); return; }
-    setSignInBusy(true);
-    onCompleteLink(signInEmail, pendingLinkHref).catch(function(err) {
-      setSignInLocalError(translateAuthError(err));
-    }).finally(function() { setSignInBusy(false); });
-  }
-
-  function handlePasswordSignInClick() {
-    setSignInLocalError("");
-    setSignInBusy(true);
-    onSignIn(signInEmail, signInPassword).catch(function(err) {
-      setSignInLocalError(translateAuthError(err));
-    }).finally(function() { setSignInBusy(false); });
-  }
-
-  var displayName = authMember ? (authMember.displayName || authMember.email) : (form.name || "Your Profile");
-  var displayEmail = authMember ? authMember.email : form.email;
+  var displayName = authMember.displayName || authMember.email;
+  var displayEmail = authMember.email;
 
   return (
     <div>
       <div style={{ textAlign:"center", padding:"16px 0 12px" }}>
-        <div style={{ fontSize:44 }}>{authUser ? "🎣" : "👤"}</div>
+        <div style={{ fontSize:44 }}>🎣</div>
         <div style={{ fontSize:18, color:th.white, fontWeight:700, marginTop:4 }}>{displayName}</div>
-        {authMember ? <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>Member ID: {authMember.id}</div> : null}
+        <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>Member ID: {authMember.id}</div>
       </div>
 
-      <Card T={T} borderColor={authUser ? th.green + "55" : th.orange + "55"}>
-        <SecLabel text={authUser ? "You're signed in!" : signInMode === "link-sent" ? "Check your email!" : signInMode === "link-confirm" ? "One more step" : signInMode === "password" ? "Sign in with password" : "Sign in to RFC Fishing"} T={T} />
-        {authLoading ? (
-          <div style={{ fontSize:13, color:th.muted }}>Checking sign-in…</div>
-        ) : authUser && authMember ? (
-          <div>
-            <div style={{ fontSize:13, color:th.white, marginBottom:4 }}>{displayEmail}</div>
-            {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your catches and spots are saved to the cloud. You can open the app on any device and see the same data.</div>
-            <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted, marginBottom:8 }}>Sign out</button>
-            <button type="button" disabled={changePwBusy} onClick={function() {
-              setChangePwResult(null);
-              setChangePwBusy(true);
-              onChangePassword(displayEmail).then(function() {
-                setChangePwResult({ ok:true, message:"✓ Check " + displayEmail + " for a link to set your password." });
-              }).catch(function(err) {
-                setChangePwResult({ ok:false, message:"✗ " + (err && err.message ? err.message : "Couldn't send the reset email.") });
-              }).finally(function() { setChangePwBusy(false); });
-            }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:changePwBusy ? "wait" : "pointer", fontSize:13, color:th.blue, marginBottom:8, opacity:changePwBusy ? 0.6 : 1 }}>
-              {changePwBusy ? "Sending…" : "Change your password"}
-            </button>
-            {changePwResult ? <div style={{ fontSize:11, color:changePwResult.ok ? th.green : th.red, marginBottom:8, lineHeight:1.4 }}>{changePwResult.message}</div> : null}
-            <button type="button" disabled={fsTestBusy} onClick={function() {
-              setFsTestResult(null);
-              setFsTestBusy(true);
-              testFirestoreConnection(authMember && authMember.id).then(function(r) {
-                setFsTestResult({ ok:true, message:"✓ Firestore connected — round-trip " + r.latencyMs + " ms" });
-              }).catch(function(err) {
-                setFsTestResult({ ok:false, message:"✗ " + (err && err.message ? err.message : "Connection failed") });
-              }).finally(function() { setFsTestBusy(false); });
-            }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"9px 0", cursor:fsTestBusy ? "wait" : "pointer", fontSize:12, color:th.muted, opacity:fsTestBusy ? 0.6 : 1 }}>
-              {fsTestBusy ? "Testing connection…" : "Test Firestore connection"}
-            </button>
-            {fsTestResult ? <div style={{ fontSize:12, color:fsTestResult.ok ? th.green : th.red, marginTop:6 }}>{fsTestResult.message}</div> : null}
-          </div>
-        ) : signInMode === "link-completing" ? (
-          <div style={{ fontSize:13, color:th.muted, paddingBottom:8 }}>Signing you in…</div>
-        ) : signInMode === "link-sent" ? (
-          <div>
-            <div style={{ fontSize:13, color:th.white, marginBottom:10, lineHeight:1.6 }}>
-              We sent a link to <strong>{linkSentEmail}</strong>.<br />Open your email, tap the link, and you'll be signed in automatically.
-            </div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:14, lineHeight:1.5 }}>
-              Don't see it? Check your spam folder. The link is good for 1 hour.
-            </div>
-            <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setLinkSentEmail(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
-              Start over
-            </button>
-          </div>
-        ) : signInMode === "link-confirm" ? (
-          <div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:12, lineHeight:1.5 }}>
-              Looks like you opened the link on a different device. Just type your club email below and we'll finish signing you in.
-            </div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Your club email</div>
-            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
-            <button type="button" onClick={handleCompleteLinkClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Signing in…" : "Sign me in"}
-            </button>
-          </div>
-        ) : signInMode === "password" ? (
-          <div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Type the email address you gave the club and your password.</div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
-            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Password</div>
-            <div style={{ position:"relative", marginBottom:10 }}>
-              <input type={showPassword ? "text" : "password"} value={signInPassword} onChange={function(e) { setSignInPassword(e.target.value); }} placeholder="Password" style={pwInputStyle} autoComplete="current-password" />
-              <button type="button" onClick={function() { setShowPassword(function(v) { return !v; }); }} style={eyeBtnStyle}>{showPassword ? "Hide" : "Show"}</button>
-            </div>
-            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
-            <button type="button" onClick={handlePasswordSignInClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Signing in…" : "Sign In"}
-            </button>
-            <div style={{ textAlign:"center", marginTop:12 }}>
-              <button type="button" onClick={function() { setSignInMode("link"); setSignInLocalError(""); setSignInPassword(""); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:12, padding:0 }}>
-                Send me a sign-in link instead
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            {rosterHealth && rosterHealth.message ? (
-              <div style={{ fontSize:11, color:rosterHealth.ok ? th.green : th.orange, marginBottom:10, lineHeight:1.5 }}>
-                {rosterHealth.ok ? "✓ " : "⚠ "}{rosterHealth.message}
-              </div>
-            ) : null}
-            <div style={{ fontSize:11, color:th.muted, marginBottom:12, lineHeight:1.6 }}>
-              Type your club email address below. We'll send you a link — tap it and you're in. No password needed.
-            </div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Your club email</div>
-            <input type="email" value={signInEmail} onChange={function(e) { setSignInEmail(e.target.value.replace(/\s+/g, "").toLowerCase()); }} placeholder="you@email.com" style={iStyle} autoComplete="email" />
-            {(signInLocalError || authError) ? <div style={{ fontSize:12, color:th.red, marginBottom:8 }}>{signInLocalError || authError}</div> : null}
-            <button type="button" onClick={handleSendLinkClick} disabled={signInBusy} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:signInBusy ? "wait" : "pointer", fontSize:14, fontWeight:700, opacity:signInBusy ? 0.7 : 1 }}>
-              {signInBusy ? "Sending…" : "Send me a sign-in link"}
-            </button>
-            <div style={{ textAlign:"center", marginTop:12 }}>
-              <button type="button" onClick={function() { setSignInMode("password"); setSignInLocalError(""); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:12, padding:0 }}>
-                I have a password — sign in with password
-              </button>
-            </div>
-          </div>
-        )}
+      <Card T={T} borderColor={th.green + "55"}>
+        <SecLabel text="You're signed in!" T={T} />
+        <div style={{ fontSize:13, color:th.white, marginBottom:4 }}>{displayEmail}</div>
+        {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
+        <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your catches and spots are saved to the cloud. You can open the app on any device and see the same data.</div>
+        <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted, marginBottom:8 }}>Sign out</button>
+        <button type="button" disabled={changePwBusy} onClick={function() {
+          setChangePwResult(null);
+          setChangePwBusy(true);
+          onChangePassword(displayEmail).then(function() {
+            setChangePwResult({ ok:true, message:"✓ Check " + displayEmail + " for a link to set your password." });
+          }).catch(function(err) {
+            setChangePwResult({ ok:false, message:"✗ " + (err && err.message ? err.message : "Couldn't send the reset email.") });
+          }).finally(function() { setChangePwBusy(false); });
+        }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:changePwBusy ? "wait" : "pointer", fontSize:13, color:th.blue, marginBottom:8, opacity:changePwBusy ? 0.6 : 1 }}>
+          {changePwBusy ? "Sending…" : "Change your password"}
+        </button>
+        {changePwResult ? <div style={{ fontSize:11, color:changePwResult.ok ? th.green : th.red, marginBottom:8, lineHeight:1.4 }}>{changePwResult.message}</div> : null}
+        <button type="button" disabled={fsTestBusy} onClick={function() {
+          setFsTestResult(null);
+          setFsTestBusy(true);
+          testFirestoreConnection(authMember.id).then(function(r) {
+            setFsTestResult({ ok:true, message:"✓ Firestore connected — round-trip " + r.latencyMs + " ms" });
+          }).catch(function(err) {
+            setFsTestResult({ ok:false, message:"✗ " + (err && err.message ? err.message : "Connection failed") });
+          }).finally(function() { setFsTestBusy(false); });
+        }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"9px 0", cursor:fsTestBusy ? "wait" : "pointer", fontSize:12, color:th.muted, opacity:fsTestBusy ? 0.6 : 1 }}>
+          {fsTestBusy ? "Testing connection…" : "Test Firestore connection"}
+        </button>
+        {fsTestResult ? <div style={{ fontSize:12, color:fsTestResult.ok ? th.green : th.red, marginTop:6 }}>{fsTestResult.message}</div> : null}
       </Card>
 
       <Card T={T} borderColor={th.gold + "44"}>
@@ -4247,99 +4206,61 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
             e.target.value = "";
           }} />
         </label>
-        {!authUser && (localRoster || []).length ? (
-          <div style={{ maxHeight:160, overflowY:"auto", marginTop:10 }}>
-            {(localRoster || []).map(function(m) {
+      </Card>
+
+      <Card T={T} borderColor={th.blue + "44"}>
+        <SecLabel text={"Club members (" + (clubMembersLoading ? "…" : String((clubMembers || []).length)) + ")"} T={T} />
+        {clubMembersLoading ? (
+          <div style={{ fontSize:12, color:th.muted }}>Loading roster…</div>
+        ) : (clubMembers || []).length ? (
+          <div style={{ maxHeight:200, overflowY:"auto" }}>
+            {(clubMembers || []).map(function(m) {
               return (
-                <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid " + th.border, fontSize:11 }}>
-                  <span style={{ color:th.white }}>{m.name}</span>
-                  <span style={{ color:th.muted }}>{m.email || m.id}</span>
+                <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid " + th.border, fontSize:12 }}>
+                  <span style={{ color:th.white }}>{m.displayName || m.id}</span>
+                  <span style={{ color:th.muted, fontSize:10 }}>{m.id}</span>
                 </div>
               );
             })}
           </div>
-        ) : null}
+        ) : (
+          <div style={{ fontSize:12, color:th.muted }}>No members loaded — check Firestore rules or roster import.</div>
+        )}
       </Card>
-
-      {authUser ? (
-        <Card T={T} borderColor={th.blue + "44"}>
-          <SecLabel text={"Club members (" + (clubMembersLoading ? "…" : String((clubMembers || []).length)) + ")"} T={T} />
-          {clubMembersLoading ? (
-            <div style={{ fontSize:12, color:th.muted }}>Loading roster…</div>
-          ) : (clubMembers || []).length ? (
-            <div style={{ maxHeight:200, overflowY:"auto" }}>
-              {(clubMembers || []).map(function(m) {
-                return (
-                  <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid " + th.border, fontSize:12 }}>
-                    <span style={{ color:th.white }}>{m.displayName || m.id}</span>
-                    <span style={{ color:th.muted, fontSize:10 }}>{m.id}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={{ fontSize:12, color:th.muted }}>No members loaded — check Firestore rules or roster import.</div>
-          )}
-        </Card>
-      ) : null}
 
       <Card T={T}>
         <SecLabel text="Your Info" T={T} />
-        {authMember ? (
-          <div>
-            {/* Name/email are verified against the club's roster (kept in an offline master
-                spreadsheet, not this app) -- self-editing here would silently drift from that
-                source of truth, so changes go through a request instead of a direct edit. */}
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
-            <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.displayName || authMember.email}</div>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
-            <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.email}</div>
-            <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>
-              Name and email are verified against the club roster and can't be changed here.
-            </div>
-            <a
-              href={"mailto:RiversideFishingClubil@gmail.com?subject=" + encodeURIComponent("Profile change request — " + (authMember.displayName || authMember.email)) + "&body=" + encodeURIComponent("Member ID: " + authMember.id + "\nCurrent name: " + (authMember.displayName || "") + "\nCurrent email: " + (authMember.email || "") + "\n\nWhat would you like changed:\n")}
-              style={{ display:"block", boxSizing:"border-box", textAlign:"center", width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.blue, fontWeight:700, textDecoration:"none", marginBottom:16 }}
-            >
-              Request a change
-            </a>
-            <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
-            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-              {["Beginner","Intermediate","Experienced"].map(function(l) {
-                return (
-                  <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
-                    {l}
-                  </button>
-                );
-              })}
-            </div>
-            <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
-              {saved ? "✓ Saved!" : "Save Profile"}
-            </button>
+        <div>
+          {/* Name/email are verified against the club's roster (kept in an offline master
+              spreadsheet, not this app) -- self-editing here would silently drift from that
+              source of truth, so changes go through a request instead of a direct edit. */}
+          <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
+          <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.displayName || authMember.email}</div>
+          <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
+          <div style={{ fontSize:13, color:th.white, marginBottom:10 }}>{authMember.email}</div>
+          <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>
+            Name and email are verified against the club roster and can't be changed here.
           </div>
-        ) : (
-          <div>
-            {/* Not signed in yet -- this is local-only device data, not tied to the club roster,
-                so there's nothing to protect from drifting yet. Free to edit until sign-in. */}
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Name</div>
-            <input value={form.name || ""} onChange={function(e) { setF("name", e.target.value); }} placeholder="First name or nickname" style={iStyle} />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Email</div>
-            <input type="email" value={form.email || ""} onChange={function(e) { setF("email", e.target.value); }} placeholder="your@email.com" style={iStyle} />
-            <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
-            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-              {["Beginner","Intermediate","Experienced"].map(function(l) {
-                return (
-                  <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
-                    {l}
-                  </button>
-                );
-              })}
-            </div>
-            <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
-              {saved ? "✓ Saved!" : "Save Profile"}
-            </button>
+          <a
+            href={"mailto:RiversideFishingClubil@gmail.com?subject=" + encodeURIComponent("Profile change request — " + (authMember.displayName || authMember.email)) + "&body=" + encodeURIComponent("Member ID: " + authMember.id + "\nCurrent name: " + (authMember.displayName || "") + "\nCurrent email: " + (authMember.email || "") + "\n\nWhat would you like changed:\n")}
+            style={{ display:"block", boxSizing:"border-box", textAlign:"center", width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.blue, fontWeight:700, textDecoration:"none", marginBottom:16 }}
+          >
+            Request a change
+          </a>
+          <div style={{ fontSize:12, color:th.muted, marginBottom:6 }}>Experience Level</div>
+          <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+            {["Beginner","Intermediate","Experienced"].map(function(l) {
+              return (
+                <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
+                  {l}
+                </button>
+              );
+            })}
           </div>
-        )}
+          <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
+            {saved ? "✓ Saved!" : "Save Profile"}
+          </button>
+        </div>
       </Card>
 
       <button onClick={function() { setView("gear"); }} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:14, cursor:"pointer", textAlign:"left", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -4953,13 +4874,6 @@ export default function App() {
     try { localStorage.setItem(TEXT_SCALE_KEY, id); } catch (e) {}
   }
   const [spotsOpenSection, setSpotsOpenSection] = useState(null);
-  const [welcomeSplashSeen, setWelcomeSplashSeen] = useState(function() {
-    try { return localStorage.getItem(WELCOME_SPLASH_SEEN_KEY) === "1"; } catch (e) { return false; }
-  });
-  function dismissWelcomeSplash() {
-    setWelcomeSplashSeen(true);
-    try { localStorage.setItem(WELCOME_SPLASH_SEEN_KEY, "1"); } catch (e) {}
-  }
   const [authUser, setAuthUser] = useState(null);
   const [authMember, setAuthMember] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -5007,9 +4921,10 @@ export default function App() {
   useEffect(function() {
     if (!isSignInLink(window.location.href)) return;
     setPendingLinkHref(window.location.href);
-    // Completion only runs from ProfileTab's own effect (it needs pendingLinkHref in scope
-    // there) — without switching tabs, opening the emailed link lands on Home and sign-in
-    // never actually completes.
+    // Completion itself runs inside SignInGateCard (the sign-in form embedded in the
+    // WelcomeSplash gate), which needs pendingLinkHref in scope. Setting tab="me" here just
+    // means a member who was already signed in when they clicked the link lands on Profile
+    // afterward instead of Home -- while signed out the gate ignores tab entirely anyway.
     setTab("me");
     if (window.history && window.history.replaceState) {
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -5116,10 +5031,6 @@ export default function App() {
     });
   }, []);
 
-  var handleOAuthSignIn = useCallback(function(providerId) {
-    return signInMemberOAuth(providerId);
-  }, []);
-
   var handleLoadSeedRoster = useCallback(function() {
     setRosterImportError("");
     setRosterImportBusy(true);
@@ -5185,14 +5096,17 @@ export default function App() {
     );
   }
 
-  // First-ever visit, signed out: a true one-time full-page splash (not a repeating gate --
-  // open browsing stays intact after this, same as every later visit). Both Skip and Sign in
-  // dismiss it for good on this device; only Sign in also navigates to Profile.
-  if (!authMember && !welcomeSplashSeen) {
+  // Full login gate (user's explicit call, 2026-09-19) -- nothing past this point is reachable
+  // signed out. The gate embeds the real sign-in form (SignInGateCard) directly; it keeps
+  // re-rendering on every signed-out load until authMember is set by a successful sign-in.
+  if (!authMember) {
     return (
       <WelcomeSplash
-        onSignIn={function() { dismissWelcomeSplash(); setTab("me"); }}
-        onSkip={dismissWelcomeSplash}
+        authError={authError}
+        onSignIn={handleSignIn}
+        onSendLink={handleSendLink}
+        onCompleteLink={handleCompleteLink}
+        pendingLinkHref={pendingLinkHref}
       />
     );
   }
@@ -5217,7 +5131,7 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authUser={authUser} authMember={authMember} authLoading={authLoading} authError={authError} onSignIn={handleSignIn} onSendLink={handleSendLink} onCompleteLink={handleCompleteLink} pendingLinkHref={pendingLinkHref} onSignOut={handleSignOut} onOAuthSignIn={handleOAuthSignIn} onChangePassword={handleChangePassword} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authMember={authMember} onSignOut={handleSignOut} onChangePassword={handleChangePassword} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
