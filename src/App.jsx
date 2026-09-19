@@ -3850,20 +3850,41 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                   AI identifying fish...
                 </div>
               ) : null}
-              {aiResult && !aiLoading ? (
-                <Card T={T} borderColor={th.green + "44"}>
-                  <div style={{ fontSize:11, color:th.green, fontFamily:"monospace", marginBottom:4 }}>AI RESULT — {aiResult.confidence}% CONFIDENT</div>
-                  <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:4 }}>{aiResult.species}</div>
-                  <div style={{ fontSize:12, color:th.muted, marginBottom:10 }}>{aiResult.notes}</div>
-                  <button onClick={function() { setF("species", matchSpeciesName(aiResult.species)); setStep(4); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:7, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Use "{matchSpeciesName(aiResult.species)}"</button>
-                </Card>
-              ) : null}
+              {aiResult && !aiLoading ? (function() {
+                var matchedName = matchSpeciesName(aiResult.species);
+                var matchedSp = SPECIES.find(function(s) { return s.name === matchedName; });
+                var selected = form.species === matchedName;
+                var confidence = Math.max(0, Math.min(100, parseInt(aiResult.confidence, 10) || 0));
+                return (
+                  <Card T={T} borderColor={th.green + "44"}>
+                    <SecLabel text="AI Recognition Results" T={T} />
+                    <button type="button" onClick={function() { setF("species", matchedName); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"8px 4px", background:selected ? th.green + "22" : "transparent", border:"none", borderRadius:8, cursor:"pointer", textAlign:"left" }}>
+                      <span style={{ position:"relative", flexShrink:0 }}>
+                        <span style={{ display:"flex", alignItems:"center", justifyContent:"center", width:44, height:44, borderRadius:8, background:th.card, border:"1px solid " + th.border, fontSize:22 }}>
+                          {(matchedSp && matchedSp.emoji) || "🐟"}
+                        </span>
+                        {selected ? <span style={{ position:"absolute", top:-4, right:-4, width:16, height:16, borderRadius:"50%", background:th.green, color:"#000", fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>✓</span> : null}
+                      </span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>{matchedName}</div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ flex:1, height:5, borderRadius:3, background:th.border, overflow:"hidden" }}>
+                            <div style={{ width:confidence + "%", height:"100%", background:th.green, borderRadius:3 }} />
+                          </div>
+                          <div style={{ fontSize:11, color:th.muted, flexShrink:0 }}>{confidence}%</div>
+                        </div>
+                      </div>
+                    </button>
+                    {aiResult.notes ? <div style={{ fontSize:12, color:th.muted, marginTop:8 }}>{aiResult.notes}</div> : null}
+                  </Card>
+                );
+              })() : null}
               {!aiResult && !aiLoading ? (
                 <Card T={T} borderColor={th.orange + "44"}>
                   <div style={{ fontSize:13, color:th.orange }}>AI unavailable — pick species below</div>
                 </Card>
               ) : null}
-              <div style={{ fontSize:12, color:th.muted, margin:"12px 0 6px" }}>Search species:</div>
+              <div style={{ fontSize:12, color:th.muted, margin:"12px 0 6px" }}>{aiResult && !aiLoading ? "Can't find what you're looking for? Search below:" : "Search species:"}</div>
               <input value={speciesSearch} onChange={function(e) { setSpeciesSearch(e.target.value); }} placeholder="e.g. Bass, Trout..." style={inputStyle} />
               <div style={{ maxHeight:240, overflowY:"auto", marginBottom:12, border:"1px solid " + th.border, borderRadius:8 }}>
                 {SPECIES.filter(function(sp) { return !speciesSearch || sp.name.toLowerCase().includes(speciesSearch.toLowerCase()); }).map(function(sp) {
