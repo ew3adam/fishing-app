@@ -7,6 +7,7 @@ var THEMES = {
   dark:      { card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a" },
   light:     { card:"rgba(255,255,255,0.9)",  border:"#c0d4c0", green:"#2a7a2a", gold:"#a07010", white:"#1a2a1a", muted:"#5a7a5a" },
   bluesteel: { card:"rgba(255,255,255,0.06)", border:"#1a3050", green:"#40c0e0", gold:"#e0c040", white:"#e8f0f8", muted:"#6080a0" },
+  beige:     { card:"#ffffff", border:"#e3dcc9", green:"#5b7a52", gold:"#a67c3d", white:"#2b2620", muted:"#8a8172" },
 };
 
 function memberFirstName(name) {
