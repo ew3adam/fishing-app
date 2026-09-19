@@ -49,10 +49,26 @@ Real-world trigger for the PR #15/#17 work (kept for history, prior session): wh
 
 ## Future scope
 
-**Visual/UX modernization pass — now explicitly picked back up (2026-09-09), in progress.** User is driving this incrementally from their own mockups (Nike Run Club-style onboarding pattern adapted to fishing): "Screen 1: Splash" shipped as the PR #39 `WelcomeBanner` restyle above. "Screen 2: Main page" ("the key one," per the user) is the next piece — not yet shared in enough detail to scope or build. Go slow, one screen at a time, per the user's own framing ("slowly we are working towards the big project") — don't jump ahead to screens not yet discussed.
+### The long-term north star: "RFC Fishing Platform" (Google Drive spec set)
 
-Still deferred, **not** picked back up — don't start without explicit sign-off:
-- Migrating off Firebase to a database/backend with no cost at this app's scale.
+**User's explicit words (2026-09-19): "The goal is to have the production app as in the Google Drive... but not today. I wanna build it piece by piece but in the future to get to a self-contained beautiful app."**
+
+The user shared a Google Drive folder (`https://drive.google.com/drive/folders/1HBkOu31YcpeMeCRcP_24JteN1YaJHsik`) containing a full "RFC Fishing Platform" spec set — `00-Project-Overview.md` through `22-Coding-Standards.md` plus `99-Roadmap.md` (~18 docs), Version 0.1–1.0, **Status: Planning**. It describes a considerably bigger product than what exists today: Scout, AI catch/species/measurement recognition (interactive ruler overlay), tournaments, leaderboards, awards, club officer/admin roles, offline-first sync, future multi-club support — **and a different backend than what's live**: React + **TypeScript** on **Cloudflare Workers + D1 + R2**, not this repo's actual Firebase Auth/Firestore/Storage stack. This is the *confirmed long-term destination*, not a current task — the user was explicit it's not happening today, and to get there incrementally, one piece at a time.
+
+**Don't confuse this with the two docs already in this repo**, which describe *current reality*, not the Drive folder's aspiration:
+- `docs/RFC-PLATFORM-PRD.md` — how the CRM + Fishing App actually share Firebase today.
+- `docs/RFC-MASTER-PLAN.md` — the actual engineering plan this app has been built from (Firebase-based, matches what's live).
+
+`CLAUDE.md` already flagged this exact mismatch once, narrowly, for auth (`08-Authentication.md`'s GitHub OAuth + Cloudflare Workers + JWT doesn't match the real Firebase Auth implementation) — the Drive folder is that same mismatch at full platform scale.
+
+**What this means for future sessions:**
+- Treat the Drive spec as aspirational reference, never as something to implement wholesale or all at once. A request like "implement the platform docs" needs the same scope-narrowing this session did (confirmed down to "just the home-screen.png mockup, on the current Firebase stack") — don't skip that step.
+- The actual build pattern so far, and the one to keep following: one concrete piece at a time, each shipped on the **current** Firebase/JS stack, each confirmed against a real mockup/image rather than the prose spec. Shipped this session: `WelcomeBanner`/"Screen 1: Splash" (PR #39), Home dashboard redesign/`home-screen.png` (PR #43). **Next**, per the user's earlier "Screen 2: Main page" mention, is presumably more of the same — but don't build ahead of what's actually been shared.
+- A real migration off Firebase to match the Drive spec's Cloudflare Workers/D1/R2 backend is a separate, much later decision — see "Still deferred" below. Nothing about "the goal is X eventually" is authorization to start that now.
+
+### Still deferred, **not** picked back up — don't start without explicit sign-off
+
+- Migrating off Firebase to a database/backend with no cost at this app's scale (whether that ends up being the Drive spec's Cloudflare stack or something else).
 - **Hard requirement carried into that migration**: the app must be able to send email from *within* itself (e.g. a self-serve "invite a member" flow), not rely on a human manually sending email outside the app. Whatever backend is chosen needs to support outbound email — a static client-only site can't do this on its own; options to weigh when this is picked up: a small serverless function, a Firebase Extension (e.g. Trigger Email), or a full backend if one exists in the new stack.
 - **FEATURE-7 (voice/minimal-typing catch logging)** is explicitly blocked on this migration too — see `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md`, sequenced last for exactly that reason (the app's AI-feature calls have no working keyed backend today).
 
