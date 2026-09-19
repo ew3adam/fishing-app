@@ -1,12 +1,25 @@
 ---
-lastSessionAt: "2026-09-03T23:50:00-05:00"
+lastSessionAt: "2026-09-09T18:45:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-**This session: rescued a large batch of uncommitted local changes and reconciled them with `origin/main`, which had diverged heavily (20+ new `claude/*` PR branches, plus PR #24 already merged straight to `main`) since this log's last update.**
+**This session: built a signed-out welcome prompt for Home, and in the process found + fixed two real auth regressions the Sept 3 reconciliation merge (`fa2684d`) had silently introduced — confirmed working live on production by the user from their own phone.**
+
+1. **PR #37 — non-blocking `WelcomeBanner` for signed-out visitors** (merged, deployed). `HomeTab` now shows a dismissible card (dark gradient, decorative fish illustration, "Join us"/"Sign in" buttons → `setTab("me")`) above the dashboard when `!authMember`. Deliberately **not** a gate — the dashboard stays fully visible/browsable underneath, preserving the Sept 3 "keep open browsing" decision (see that entry below). Dismissal remembered per-device via `localStorage`.
+2. **Found while building #37: `ProfileTab`'s entire sign-in form was gone.** The Sept 3 merge dropped it even though `App()` still wired up `onSignIn`/`onSendLink`/`onCompleteLink`/`authUser` as props for it — since that merge, the Profile tab just showed a blank "Your Account" card regardless of auth state, so **no one could actually sign in on the deployed app**. Restored the pre-merge sign-in UI (email-link primary, password fallback, `signInMode` state machine) from commit `194be16`, reconciled with what shipped since (Test Firestore connection button). Also restored the `authUser`-gated visibility on the Club Members roster card, dropped in the same merge. Shipped in the same PR #37 after confirming the fix's scope with the user.
+3. **PR #38 — sign-in email link now actually completes sign-in** (merged, deployed). Second regression from the same Sept 3 merge, caught when the user tested the real email-link flow live: opening the emailed link set `pendingLinkHref` in `App()` state, but link completion only runs from an effect **inside `ProfileTab`**, which needs to be mounted to fire — and nothing switched `tab` to `"me"` after detecting the link, so the app silently stranded the user on Home. Restored the `setTab("me")` call (also present pre-merge, also dropped).
+4. **Verified live on production** (`ew3adam.github.io`, canonical) via the user's own phone, after this sandbox turned out unable to reach either deploy domain directly (`curl`/`WebFetch` both `EGRESS_BLOCKED` — a hard sandbox network-policy limit, not fixable from here): "You're signed in!", real email, live cloud-sync timestamp, 81-member club roster loaded. Full email-link round trip confirmed working end to end.
+5. **PR #39 — restyled `WelcomeBanner` to match a "Screen 1: Splash" mockup** the user shared (Nike Run Club-style onboarding layout: silhouette hero art → gradient fade → bottom-aligned title/tagline/CTAs, adapted to fishing). New fish-on-the-line teal silhouette, "RFC **Fishing**" wordmark with teal accent, new tagline ("Every cast has a story..."). **Still the same non-blocking card** — confirmed with the user this stays a small visual iteration, not a full-screen splash/gate, since that's a materially bigger (and previously-reversed) product decision if they want it later. Merged and deployed; **not yet re-confirmed live by the user as of this save** (last thing sent before "save state").
+6. User explicitly picked the deferred "visual/UX modernization pass" back up this session ("Yes. Let's do it. Slowly we are working towards the big project") — see updated Future scope below. They also referenced a **"Screen 2: Main page"** mockup as "the key one," not yet shared/discussed in enough detail to build.
+
+**Open thread, not yet resolved**: two regressions from the Sept 3 merge (`fa2684d`) have now been found and fixed by accident (while building unrelated things), not by a systematic audit. There could be others. Worth a deliberate pass comparing pre-merge (`194be16`) vs. current `App.jsx` if anything else looks silently broken.
+
+### Prior session (2026-09-03): reconciliation merge
+
+**Rescued a large batch of uncommitted local changes and reconciled them with `origin/main`, which had diverged heavily (20+ new `claude/*` PR branches, plus PR #24 already merged straight to `main`) since this log's last update.**
 
 1. **Committed pending local work** (47 files — auth wiring, Scout/spot changes, doc updates) that had been sitting uncommitted with no record of when or why.
 2. **Pulled `origin/main`, hit real merge conflicts** in `App.jsx` and 6 other files. Root cause of the conflicts looking like whole-file rewrites: the local copy had CRLF line endings, remote had LF — normalized endings and re-ran the merge, which reduced it to 3 genuine conflicting hunks (all in `App.jsx`) plus clean auto-merges elsewhere.
@@ -34,10 +47,11 @@ Also clarified for the user: Firebase auth (email link + password fallback + ros
 
 Real-world trigger for the PR #15/#17 work (kept for history, prior session): while testing the severe-weather disclaimer, the live app showed "GREAT DAY 85/100" during an active NWS Flood Watch for the user's area — confirmed the gap PR #15's alert banner was built to close was real, not theoretical.
 
-## Future scope (stated intent, not started)
+## Future scope
 
-The user has flagged a larger plan for later, **after current functionality is solid** — don't start any of this without it being explicitly picked back up:
-- A visual/UX modernization pass (different feel from the current theme system).
+**Visual/UX modernization pass — now explicitly picked back up (2026-09-09), in progress.** User is driving this incrementally from their own mockups (Nike Run Club-style onboarding pattern adapted to fishing): "Screen 1: Splash" shipped as the PR #39 `WelcomeBanner` restyle above. "Screen 2: Main page" ("the key one," per the user) is the next piece — not yet shared in enough detail to scope or build. Go slow, one screen at a time, per the user's own framing ("slowly we are working towards the big project") — don't jump ahead to screens not yet discussed.
+
+Still deferred, **not** picked back up — don't start without explicit sign-off:
 - Migrating off Firebase to a database/backend with no cost at this app's scale.
 - **Hard requirement carried into that migration**: the app must be able to send email from *within* itself (e.g. a self-serve "invite a member" flow), not rely on a human manually sending email outside the app. Whatever backend is chosen needs to support outbound email — a static client-only site can't do this on its own; options to weigh when this is picked up: a small serverless function, a Firebase Extension (e.g. Trigger Email), or a full backend if one exists in the new stack.
 - **FEATURE-7 (voice/minimal-typing catch logging)** is explicitly blocked on this migration too — see `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md`, sequenced last for exactly that reason (the app's AI-feature calls have no working keyed backend today).
@@ -74,11 +88,13 @@ Follow-up session on top of the PR #15/#17 work. Shipped and deployed PRs #19–
 
 ## Next
 
-- **This log's PR list (#24–#33) is stale — reconcile before trusting it.** `origin/main` now has 20+ `claude/*` branches this log never mentions (e.g. `bug-8-9-spot-name-privacy`, `bug-10-clubfeed-like-race`, `home-severe-weather-disclaimer`, `scout-home-gps-fallback-notice`, `update-changelog`, two `claude-md-docs-*`), and PR #24 (pinch-zoom) already landed as a direct commit on `main` (`194be16`) rather than showing as a merged branch. Next session should run `gh pr list` (or check GitHub directly) rather than trusting the PR numbers/statuses recorded here.
-- **Firebase Console, still outstanding across multiple sessions now**: Authentication → Sign-in method → enable **Email link (passwordless)**; Authentication → Settings → Authorized domains → add `ew3adam.github.io` (+ any Cloudflare domain actually used for testing). Blocks real member sign-in until done — confirm before inviting anyone else.
-- **Confirm on a real device**: none of the recent fixes (photo compression, CSV import, sign-in link, text-size setting, map fixes) have been verified against a real phone yet — all sandbox/Playwright only.
-- **Confirm the test invite email actually works** once the Firebase Console step above is done: open the email sent to the user's own address, tap the sign-in link, verify it completes sign-in without the `auth/unauthorized-continue-uri` error.
-- See "Future scope" above before starting any modernization/backend-migration work, or any FEATURE-N item beyond FEATURE-2 — that's intentionally deferred, not a current task.
+- **Confirm PR #39's restyled `WelcomeBanner` renders correctly live** — merged and deployed to both `ew3adam.github.io` and Cloudflare Pages this session, but the user hadn't re-checked it live as of "save state." First thing to verify next session if not already confirmed.
+- **"Screen 2: Main page"** — the user called this "the key one" of their modernization mockups. Get the actual design (screenshot/description) before building anything; nothing about its scope is known yet.
+- **Sweep for more Sept 3 merge (`fa2684d`) regressions.** Two found by accident so far (ProfileTab sign-in form, sign-in-link tab-switch) — both were silent (no error, just missing behavior), so more may exist unnoticed. Consider a deliberate diff of `194be16` (last commit before that merge) against current `App.jsx` if anything else seems to have quietly stopped working.
+- **Firebase Console email-link/authorized-domains item is now confirmed done** — the user completed a real email-link sign-in live on `ew3adam.github.io` this session (roster loaded, cloud sync working), so whatever Console config that needed is in place. No longer an open item.
+- **Still not confirmed on a real device**: the earlier (2026-08-30/09-03) batch of fixes — photo compression, CSV import, text-size setting, map pinch-zoom/pin-placement — remain sandbox/Playwright-only. Lower priority than the items above, but still open.
+- This sandbox **cannot reach `ew3adam.github.io` or `*.pages.dev` directly** (`curl`/`WebFetch` → `EGRESS_BLOCKED`, an org network-policy limit on this environment, not a bug) — live-production checks need the user's own device/screenshots, not a from-here Playwright run against the real URL. Local `npm run preview` + headless Chromium still works fine for pre-deploy verification of the same build artifact.
+- See "Future scope" above before starting FEATURE-N work (beyond FEATURE-2) or the Firebase backend migration — those are still deferred; the visual modernization pass is the one active exception.
 
 ## Save state
 
