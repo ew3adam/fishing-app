@@ -20,6 +20,12 @@ const THEMES = {
   dark:      { bg:"#0d1a0d", card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", dim:"#3a6a3a", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a", blue:"#5a9fd4", red:"#e05050", orange:"#e09030", teal:"#4ab8a0", indigo:"#5a6fd4", nav:"rgba(13,26,13,0.97)" },
   light:     { bg:"#f0f4f0", card:"rgba(255,255,255,0.9)", border:"#c0d4c0", green:"#2a7a2a", dim:"#7ab87a", gold:"#a07010", white:"#1a2a1a", muted:"#5a7a5a", blue:"#2a5fa0", red:"#c03030", orange:"#b06010", teal:"#1a8070", indigo:"#3a4fb0", nav:"rgba(240,244,240,0.97)" },
   bluesteel: { bg:"#0d1520", card:"rgba(255,255,255,0.06)", border:"#1a3050", green:"#40c0e0", dim:"#1a5070", gold:"#e0c040", white:"#e8f0f8", muted:"#6080a0", blue:"#60a0e0", red:"#e05050", orange:"#e09030", teal:"#40d0c0", indigo:"#8080e0", nav:"rgba(13,21,32,0.97)" },
+  // Default theme as of 2026-09-19, per direct request: "the neon green is something that I
+  // like, but it's not professional so go in a white beige theme." Keeps green as the accent
+  // (the user said they like it) but swaps the neon dark-mode green for a muted sage/forest
+  // tone against warm ivory/beige surfaces instead of the saturated green-tinted "light"
+  // theme above, which is unchanged and still available in the picker.
+  beige:     { bg:"#f7f3ec", card:"#ffffff", border:"#e3dcc9", green:"#5b7a52", dim:"#9ab08f", gold:"#a67c3d", white:"#2b2620", muted:"#8a8172", blue:"#3f6a92", red:"#a8433a", orange:"#b3743a", teal:"#3a7d70", indigo:"#4a5480", nav:"rgba(247,243,236,0.97)" },
 };
 
 // ─── KNOWN SPOTS (reverse-geocode EXIF + Scout tab) ──────────────────────────
@@ -4296,10 +4302,10 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
 
       <Card T={T}>
         <SecLabel text="App Theme" T={T} />
-        <div style={{ display:"flex", gap:8 }}>
-          {[{id:"dark",label:"🌙 Dark"},{id:"light",label:"☀️ Light"},{id:"bluesteel",label:"🌊 Blue Steel"}].map(function(t) {
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+          {[{id:"dark",label:"🌙 Dark"},{id:"light",label:"☀️ Light"},{id:"bluesteel",label:"🌊 Blue Steel"},{id:"beige",label:"🤍 Beige"}].map(function(t) {
             return (
-              <button key={t.id} onClick={function() { setTheme(t.id); }} style={{ flex:1, background:theme===t.id ? th.green + "33" : "transparent", border:"1px solid " + (theme===t.id ? th.green : th.border), borderRadius:8, color:theme===t.id ? th.green : th.muted, padding:"8px 4px", cursor:"pointer", fontSize:11 }}>
+              <button key={t.id} onClick={function() { setTheme(t.id); }} style={{ flex:"1 1 40%", background:theme===t.id ? th.green + "33" : "transparent", border:"1px solid " + (theme===t.id ? th.green : th.border), borderRadius:8, color:theme===t.id ? th.green : th.muted, padding:"8px 4px", cursor:"pointer", fontSize:11 }}>
                 {t.label}
               </button>
             );
@@ -4865,7 +4871,7 @@ var NAV = [
 export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("beige");
   const [textScale, setTextScaleState] = useState(function() {
     try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
   });
@@ -4930,6 +4936,13 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
+
+  useEffect(function() {
+    // index.css hardcodes a dark body background (only ever matched the old dark-by-default
+    // theme) -- sync it to the selected theme so scroll-bounce/overscroll on light-background
+    // themes (beige, light) doesn't flash the old dark green underneath.
+    document.body.style.background = th.bg;
+  }, [th.bg]);
 
   useEffect(function() {
     if (!authUser || !authMember) return;
