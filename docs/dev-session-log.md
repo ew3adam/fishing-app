@@ -111,6 +111,7 @@ Follow-up session on top of the PR #15/#17 work. Shipped and deployed PRs #19–
 - **Still not confirmed on a real device**: the earlier (2026-08-30/09-03) batch of fixes — photo compression, CSV import, text-size setting, map pinch-zoom/pin-placement — remain sandbox/Playwright-only. Lower priority than the items above, but still open.
 - This sandbox **cannot reach `ew3adam.github.io` or `*.pages.dev` directly** (`curl`/`WebFetch` → `EGRESS_BLOCKED`, an org network-policy limit on this environment, not a bug) — live-production checks need the user's own device/screenshots, not a from-here Playwright run against the real URL. Local `npm run preview` + headless Chromium still works fine for pre-deploy verification of the same build artifact.
 - See "Future scope" above before starting FEATURE-N work (beyond FEATURE-2) or the Firebase backend migration — those are still deferred; the visual modernization pass is the one active exception.
+- **Possible future addition, not started**: a member bio/"About me" field. Confirmed via a full search of `normalizeProfile`'s field list that no such field exists anywhere today. If added, it's self-editable (a pure preference field, no club-roster/identity implication) — unlike Name/Email, which PR #44 locked to read-only + "Request a change" since those are verified against an offline master spreadsheet. User was just checking current state this time, not asking for it yet.
 
 ## Save state
 
