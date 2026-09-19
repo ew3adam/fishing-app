@@ -4243,10 +4243,19 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
       setGeoLoading(false);
     });
   }
+  // Confirmation toast after an explicit "Use my location" tap — armed only by that tap (not the
+  // silent auto-load on mount), and only fires once the GPS fix AND the water/business search that
+  // follows it have both actually run and finished (searchStartedRef guards against firing on the
+  // brief window before the debounced search effect below sets loading true).
+  var searchArmedRef = useRef(false);
+  var searchStartedRef = useRef(false);
+  var [searchCompleteMsg, setSearchCompleteMsg] = useState(false);
   function handleUseGps() {
     setManualPos(null);
     setSearchText("");
     setGeoError("");
+    searchArmedRef.current = true;
+    searchStartedRef.current = false;
     requestGps(); // force a fresh read, not just whatever userPos happened to be set to earlier
   }
 
@@ -4330,6 +4339,20 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
     }, 500);
     return function() { cancelled = true; clearTimeout(t); };
   }, [activePos.lat, activePos.lng, radiusMi, gpsLoading, manualPos]);
+
+  useEffect(function() {
+    if (waterLoading || bizLoading) {
+      if (searchArmedRef.current) searchStartedRef.current = true;
+      return;
+    }
+    if (searchArmedRef.current && searchStartedRef.current && !gpsLoading) {
+      searchArmedRef.current = false;
+      searchStartedRef.current = false;
+      setSearchCompleteMsg(true);
+      var t = setTimeout(function() { setSearchCompleteMsg(false); }, 3000);
+      return function() { clearTimeout(t); };
+    }
+  }, [waterLoading, bizLoading, gpsLoading]);
 
   function passesDirection(lat, lng) {
     if (!excludedDirs.length) return true;
@@ -4507,6 +4530,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
               </button>
             </div>
             {geoError ? <div style={{ fontSize:11, color:th.red, marginBottom:6 }}>{geoError}</div> : null}
+            {searchCompleteMsg ? <div style={{ fontSize:11, color:th.green, marginBottom:6 }}>✓ Search complete — see spots below</div> : null}
 
             <SecLabel text="Radius" T={T} />
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
