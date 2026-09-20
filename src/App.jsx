@@ -76,6 +76,8 @@ var SPECIES_ALIASES = {
   "silver salmon": "Coho Salmon",
   steelhead: "Steelhead",
   "brown line": "Brown Trout",
+  musky: "Muskellunge",
+  muskie: "Muskellunge",
 };
 
 var GLOSSARY = {
@@ -109,6 +111,15 @@ function matchSpeciesName(name) {
 function speciesAlsoKnownAs(speciesName) {
   var keys = Object.keys(SPECIES_ALIASES).filter(function(k) { return SPECIES_ALIASES[k] === speciesName; });
   return keys.length ? keys.slice(0, 3).join(", ") : "";
+}
+
+/** Matches a species search query against its name or common nicknames (e.g. "musky" -> Muskellunge). */
+function speciesMatchesSearch(sp, query) {
+  if (!query) return true;
+  var q = query.toLowerCase();
+  if (sp.name.toLowerCase().includes(q)) return true;
+  var akas = speciesAlsoKnownAs(sp.name);
+  return !!akas && akas.toLowerCase().includes(q);
 }
 
 function findCatalogueForRig(rigName) {
@@ -400,7 +411,7 @@ const SPECIES = [
     hookSet:"Load the rod then lift — blues bulldoze.",
     tips:"Filleted correctly they eat well. Trophy fish may be regulation-protected — measure fast and release giants."
   },
-  { id:"bullhead", name:"Bullhead", emoji:"🐂", season:"Spring–Fall", bestTime:"Evening & mud-bottom days", habitat:"Farm ponds, river cuts, sluggish bays", level:"Kid Friendly",
+  { id:"bullhead", name:"Bullhead", emoji:"🐟", season:"Spring–Fall", bestTime:"Evening & mud-bottom days", habitat:"Farm ponds, river cuts, sluggish bays", level:"Kid Friendly",
     rigs:[{name:"Split Shot + Hook",setup:"Small hook, worm on mud line — wait for pull"}],
     bait:["Nightcrawlers","Stink baits","Corn"],
     line:{main:"8–10 lb mono",leader:"Not needed"},
@@ -3632,7 +3643,11 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               <div style={{ fontSize:48, marginBottom:12 }}>📸</div>
               <div style={{ fontSize:18, color:th.white, fontWeight:700, marginBottom:8 }}>Log a Catch</div>
               <div style={{ fontSize:13, color:th.muted, marginBottom:24 }}>Start with a photo or log without one</div>
-              <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
+              {/* No `capture` attr -- that forces the camera straight open on mobile and skips
+                  the OS picker's "Photo Library" option entirely (reported: tapping this only
+                  opened the camera, never the gallery). Plain accept="image/*" lets the browser
+                  show its normal photo-source picker (camera + library) instead. */}
+              <input type="file" accept="image/*" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
                 <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Use Photo</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
@@ -3924,7 +3939,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               <div style={{ fontSize:12, color:th.muted, margin:"12px 0 6px" }}>{aiResult && !aiLoading ? "Can't find what you're looking for? Search below:" : "Search species:"}</div>
               <input value={speciesSearch} onChange={function(e) { setSpeciesSearch(e.target.value); }} placeholder="e.g. Bass, Trout..." style={inputStyle} />
               <div style={{ maxHeight:240, overflowY:"auto", marginBottom:12, border:"1px solid " + th.border, borderRadius:8 }}>
-                {SPECIES.filter(function(sp) { return !speciesSearch || sp.name.toLowerCase().includes(speciesSearch.toLowerCase()); }).map(function(sp) {
+                {SPECIES.filter(function(sp) { return speciesMatchesSearch(sp, speciesSearch); }).map(function(sp) {
                   var selected = form.species === sp.name;
                   return (
                     <button key={sp.id} onClick={function() { setF("species", sp.name); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 12px", background:selected ? th.green + "22" : "transparent", border:"none", borderBottom:"1px solid " + th.border, cursor:"pointer", textAlign:"left" }}>
