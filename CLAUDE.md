@@ -8,6 +8,7 @@ A React fishing app for RFC (Riverside Fishing Club, North Riverside IL). Member
 ## Startup Protocol
 At the start of every session:
 1. Run `git fetch` and check if local branch is behind remote — if so, pull automatically.
+   - Exception: if behind origin AND there are local changes, STOP and ask Adam before pulling.
 2. Report: current branch, uncommitted changes, and a one-line summary of where we left off (see `docs/dev-session-log.md`).
 
 ## Tech Stack
