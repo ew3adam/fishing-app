@@ -3230,6 +3230,12 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const [rulerBoxH, setRulerBoxH] = useState(360);
   const [spotMetaSource, setSpotMetaSource] = useState("");
   const [showAdvancedMeasure, setShowAdvancedMeasure] = useState(false);
+  // Default measurement UX (2026-09-19, per direct feedback that the marker-dragging ruler
+  // overlay was too confusing): a plain editable length number, pre-filled from the AI's photo
+  // estimate when available. The full ruler/reference-object system below is still there --
+  // usePreciseMeasure just gates whether it's shown, opt-in via a link instead of the default.
+  const [usePreciseMeasure, setUsePreciseMeasure] = useState(false);
+  const [simpleLengthInches, setSimpleLengthInches] = useState("");
   const [customSpecies, setCustomSpecies] = useState("");
   const [catchVisibility, setCatchVisibility] = useState("private");
   const [cloudSaving, setCloudSaving] = useState(false);
@@ -3332,6 +3338,8 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       setRefEndPct(34);
       setMouthPct(10);
       setTailPct(90);
+      setUsePreciseMeasure(false);
+      setSimpleLengthInches("");
       setStep(2);
       // If multiple images are uploaded together, treat extras as reference shots.
       if (files.length > 1) {
@@ -3358,6 +3366,8 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
           try {
             var res = JSON.parse(m[0]);
             setAiResult(res);
+            var lengthMatch = res.length && String(res.length).match(/[\d.]+/);
+            if (lengthMatch) setSimpleLengthInches(lengthMatch[0]);
             var matchedSpecies = matchSpeciesName(res.species);
             if (matchedSpecies) {
               setForm(function(f) { return Object.assign({}, f, { species:matchedSpecies }); });
@@ -3554,9 +3564,15 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
 
   // Carry measured length + recognized species into the details form — skip re-entry.
   function continueFromMeasurement() {
-    var len = measurementOption === "5_none" && aiResult && aiResult.length
-      ? aiResult.length
-      : formatCatchLengthInches(measuredInches);
+    var len;
+    if (!usePreciseMeasure) {
+      var n = parseFloat(simpleLengthInches);
+      len = isFinite(n) && n > 0 ? formatCatchLengthInches(n) : (aiResult && aiResult.length) || "";
+    } else {
+      len = measurementOption === "5_none" && aiResult && aiResult.length
+        ? aiResult.length
+        : formatCatchLengthInches(measuredInches);
+    }
     if (len) setF("length", len);
     var sp = form.species || (aiResult && matchSpeciesName(aiResult.species)) || "";
     if (sp) setF("species", sp);
@@ -3626,9 +3642,30 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
 
           {step === 2 && (
             <div>
-              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>AI Fish Analysis</div>
-              {photo ? (
+              <div style={{ fontSize:16, color:th.white, fontWeight:700, marginBottom:12 }}>Fish Length</div>
+              {photo && !usePreciseMeasure ? (
                 <div style={{ marginBottom:12 }}>
+                  <div style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000" }}>
+                    {aiLoading && <div style={{ position:"absolute", inset:0, zIndex:9, background:"rgba(0,0,0,0.55)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}><div style={{ fontSize:22 }}>🤖</div><div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>AI estimating length…</div></div>}
+                    <img src={photo} alt="catch" style={{ width:"100%", maxHeight:320, objectFit:"contain", display:"block" }} />
+                  </div>
+                  <button onClick={rotatePhoto} style={{ width:"100%", marginTop:8, background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:14, fontWeight:600, letterSpacing:"0.02em" }}>↻ Rotate Photo</button>
+                  <Card T={T} borderColor={th.green + "44"} style={{ marginTop:10 }}>
+                    <SecLabel text="Length" T={T} />
+                    <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
+                      {aiResult && aiResult.length ? "Pre-filled from the AI's photo estimate — adjust if you measured it yourself." : "Enter the length you measured."}
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                      <input type="number" min="0" step="0.1" inputMode="decimal" value={simpleLengthInches} onChange={function(e) { setSimpleLengthInches(e.target.value); }} placeholder="0.0" style={Object.assign({}, inputStyle, { marginBottom:0, fontSize:20, fontWeight:700 })} />
+                      <span style={{ fontSize:14, color:th.muted }}>inches</span>
+                    </div>
+                    <button type="button" onClick={function() { setUsePreciseMeasure(true); }} style={{ background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, padding:0, textDecoration:"underline" }}>Measure precisely from photo instead →</button>
+                  </Card>
+                </div>
+              ) : null}
+              {photo && usePreciseMeasure ? (
+                <div style={{ marginBottom:12 }}>
+                  <button type="button" onClick={function() { setUsePreciseMeasure(false); }} style={{ background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:12, padding:0, marginBottom:10, textDecoration:"underline" }}>← Use quick entry instead</button>
                   <div ref={photoContainerRef} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid " + th.border, background:"#000" }}>
                     <div
                       ref={photoAreaRef}
@@ -4032,7 +4069,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               onReset={function() {
                 setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null);
                 setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies("");
-                setCatchVisibility("private");
+                setCatchVisibility("private"); setUsePreciseMeasure(false); setSimpleLengthInches("");
                 setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
               }}
             />
