@@ -29,6 +29,7 @@ The Mac and T7 paths only exist on Adam's Mac. On other platforms they do not ex
    - If there are no changes, say "nothing to commit" and go to step 4.
    - Never commit ftp_config.json, .env files, or any file with passwords or keys.
    - If docs/dev-session-log.md exists, add a short dated entry at the END of the file. Only append. Do not edit old entries.
+   - Run `npm run scan:pii`. If it reports any finding, STOP. Show the findings. Do not commit or push.
    - Run `git add -A`, then commit with the message `Save state YYYY-MM-DD`. Use today's date. Adam can give a custom message.
 
 3. Push
