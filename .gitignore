@@ -19,3 +19,7 @@ dist/
 .env.*
 !.env.example
 src/config/authProviders.local.js
+!.claude/commands/
+!.claude/commands/**
+!.claude/commands/
+!.claude/commands/**
