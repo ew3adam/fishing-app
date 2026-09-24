@@ -12,6 +12,7 @@ import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
 import ScoutResultsMap from "./components/ScoutResultsMap.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
+import { BAIT_SHOPS } from "./data/baitShops.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
 
@@ -1146,6 +1147,179 @@ async function loadTackleImage(itemName) {
   } catch(e) { return null; }
 }
 
+// ─── LAKE MICHIGAN BUOY SHORE REPORT ──────────────────────────────────────────
+// Real-time shore-fishing status built from public NOAA NDBC buoy readings, per RFC's own
+// buoy-instructions doc (2026-09-24). Pulled directly from NOAA's ERDDAP server
+// (coastwatch.pfeg.noaa.gov), which serves the same public NDBC dataset limno.io itself
+// displays, as CORS-enabled JSON -- this app has no server (CLAUDE.md), so every data source
+// here has to be a direct, cross-origin-fetchable browser call, same as loadWeather/
+// loadActiveWeatherAlerts above. Cited as "NOAA NDBC" in the UI (not "limno.io"): the code
+// calls NOAA directly, not limno.io's site, so that's the honest source to name.
+var BUOY_STATIONS = [
+  { id:"45186", label:"Waukegan", area:"North shore IL" },
+  { id:"45187", label:"Winthrop Harbor", area:"IL/WI border" },
+  { id:"45174", label:"Wilmette", area:"Montrose / 31st Harbor area" },
+  { id:"45198", label:"Navy Pier", area:"Burnham / 31st / 87th St area" },
+  { id:"45170", label:"South Haven, MI", area:"East basin — storm warning buoy" },
+];
+var ERDDAP_BUOY_URL = "https://coastwatch.pfeg.noaa.gov/erddap/tabledap/cwwcNDBCMet.json";
+var HARBOR_DAMPENING = 1 / 3; // "Inside harbors = roughly 1/3 of main lake wave height" (RFC rule)
+// Shore spots the buoy status is actually meaningful for -- open Lake Michigan shoreline only.
+// Deliberately leaves out river/inland spots (Des Plaines River, Palos FP lakes): Lake Michigan
+// wave data doesn't describe an inland water body's conditions, and claiming it did would be
+// fabricating a connection that isn't real. `dampen:true` is only set on the two locations RFC's
+// own rule explicitly names as harbors ("31st/87th St harbors") plus Burnham, which is a harbor
+// by name -- everywhere else uses the open-lake reading as-is rather than guessing a shelter factor.
+var BUOY_SHORE_LOCATIONS = [
+  { name:"Montrose rocks", refStation:"45174", dampen:false },
+  { name:"31st St wall", refStation:"45198", dampen:true },
+  { name:"87th St Slip bank", refStation:"45198", dampen:true },
+  { name:"Steelworkers Park", refStation:"45198", dampen:false },
+  { name:"Burnham Harbor wall", refStation:"45198", dampen:true },
+];
+// Daily bait rotation reuses this app's own already-curated per-species bait/tip data (SPECIES
+// below) rather than inventing new fishing advice -- just resurfaces real content on a rotation,
+// scoped to species actually caught from Lake Michigan piers/harbors (the shore spots above).
+var BUOY_ROTATION_SPECIES_IDS = ["perch", "catfish", "coho", "chinook", "steelhead", "smallmouth"];
+
+function msToMph(ms) { return ms == null || !isFinite(ms) ? null : ms * 2.23694; }
+function metersToFt(m) { return m == null || !isFinite(m) ? null : m * 3.28084; }
+function cToFTemp(c) { return c == null || !isFinite(c) ? null : (c * 9) / 5 + 32; }
+function degToCompass(deg) {
+  if (deg == null || !isFinite(deg)) return "";
+  var dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+/** Fetch the latest reading for each RFC buoy from NOAA's ERDDAP server (last 6 hours, newest wins). */
+async function fetchBuoyReadings() {
+  var ids = BUOY_STATIONS.map(function(s) { return s.id; }).join("|");
+  var fields = "station,time,wd,wspd,wvht,wtmp";
+  var stationConstraint = "station=~" + encodeURIComponent("\"(" + ids + ")\"");
+  var timeConstraint = "time" + encodeURIComponent(">=") + "now-6hours";
+  var url = ERDDAP_BUOY_URL + "?" + fields + "&" + stationConstraint + "&" + timeConstraint;
+  var res = await fetch(url);
+  if (!res.ok) throw new Error("ERDDAP request failed: " + res.status);
+  var data = await res.json();
+  var rows = (data && data.table && data.table.rows) || [];
+  var cols = (data && data.table && data.table.columnNames) || [];
+  var idx = {};
+  cols.forEach(function(c, i) { idx[c] = i; });
+  var latestByStation = {};
+  rows.forEach(function(row) {
+    var station = row[idx.station];
+    var time = row[idx.time];
+    if (!station || !time) return;
+    var prev = latestByStation[station];
+    if (!prev || time > prev.time) {
+      latestByStation[station] = {
+        station: station,
+        time: time,
+        windDirDeg: row[idx.wd],
+        windCompass: degToCompass(row[idx.wd]),
+        windMph: msToMph(row[idx.wspd]),
+        waveFt: metersToFt(row[idx.wvht]),
+        waterF: cToFTemp(row[idx.wtmp]),
+      };
+    }
+  });
+  return latestByStation;
+}
+
+/** 🟢/🟡/🔴 band for a single reading. Proposed defaults pending RFC's own exact numbers. */
+function buoyBand(waveFt, windMph) {
+  var w = waveFt == null ? 0 : waveFt;
+  var wind = windMph == null ? 0 : windMph;
+  if (w < 1) return "green"; // RFC rule: any buoy under 1ft is an automatic green
+  if (w <= 1.5 && wind <= 15) return "green";
+  if (w <= 3 && wind <= 25) return "yellow";
+  return "red";
+}
+
+var BUOY_BAND_LABEL = { green:"🟢 Green — good shore conditions", yellow:"🟡 Yellow — fishable, use caution", red:"🔴 Red — unsafe shore conditions" };
+var BUOY_BAND_ORDER = { green:0, yellow:1, red:2 };
+
+function phraseForShoreWave(waveFt) {
+  if (waveFt == null) return "Conditions unknown";
+  if (waveFt < 1) return "Calm — easy footing";
+  if (waveFt < 2) return "Light chop — some spray on exposed rocks";
+  if (waveFt < 3.5) return "Choppy — slippery rocks, watch your footing";
+  return "Rough — wave wash-over risk, use caution";
+}
+
+/** Builds the full shore report: overall status, per-buoy readings, special-case notes, shore spots. */
+function buildBuoyReport(latestByStation) {
+  var navyPier = latestByStation["45198"];
+  var wilmette = latestByStation["45174"];
+  var mainReadings = [navyPier, wilmette].filter(Boolean);
+  if (!mainReadings.length) return null;
+
+  var status = "green";
+  mainReadings.forEach(function(r) {
+    var band = buoyBand(r.waveFt, r.windMph);
+    if (BUOY_BAND_ORDER[band] > BUOY_BAND_ORDER[status]) status = band;
+  });
+  // RFC rule: if every buoy we actually got a reading for is under 1ft, force green regardless
+  // of forecast/wind (a real "calm lake, don't overthink it" override).
+  var allReadings = Object.keys(latestByStation).map(function(k) { return latestByStation[k]; });
+  var allUnderOneFt = allReadings.length > 0 && allReadings.every(function(r) { return r.waveFt != null && r.waveFt < 1; });
+  if (allUnderOneFt) status = "green";
+
+  var notes = [];
+  var southHaven = latestByStation["45170"];
+  if (southHaven && southHaven.waveFt != null && southHaven.waveFt > 4) {
+    var dir = southHaven.windCompass;
+    if (["E","ENE","NE","ESE"].indexOf(dir) >= 0) {
+      notes.push("Storm energy crossing lake — Chicago waves may build in 4–6 hrs (South Haven: " + dir + " wind, " + southHaven.waveFt.toFixed(1) + " ft waves).");
+    }
+  }
+  var waukegan = latestByStation["45186"];
+  if (waukegan && navyPier && waukegan.waveFt != null && navyPier.waveFt != null && waukegan.waveFt - navyPier.waveFt >= 2) {
+    notes.push("North shore rougher than Chicago (Waukegan " + waukegan.waveFt.toFixed(1) + " ft vs. Navy Pier " + navyPier.waveFt.toFixed(1) + " ft).");
+  }
+
+  var shoreConditions = BUOY_SHORE_LOCATIONS.map(function(loc) {
+    var ref = latestByStation[loc.refStation];
+    var waveFt = ref && ref.waveFt != null ? (loc.dampen ? ref.waveFt * HARBOR_DAMPENING : ref.waveFt) : null;
+    return { name: loc.name, waveFt: waveFt, phrase: phraseForShoreWave(waveFt) };
+  });
+
+  var stations = BUOY_STATIONS.map(function(s) {
+    var r = latestByStation[s.id];
+    return Object.assign({ id: s.id, label: s.label, area: s.area }, r || {});
+  });
+
+  return {
+    status: status,
+    statusLabel: BUOY_BAND_LABEL[status],
+    notes: notes,
+    shoreConditions: shoreConditions,
+    stations: stations,
+    generatedAt: new Date(),
+  };
+}
+
+/** Loads the full buoy shore report; never throws -- resolves null on any failure so a bad
+ *  network call can never break the rest of Home (same defensive pattern as loadWeather). */
+async function loadBuoyShoreReport() {
+  try {
+    var latestByStation = await fetchBuoyReadings();
+    return buildBuoyReport(latestByStation);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Today's bait rotation item -- reuses real per-species bait/tip content, stable all day. */
+function todaysBaitRotation(date) {
+  var d = date || new Date();
+  var dayIndex = Math.floor(d.getTime() / 86400000); // days since epoch -- stable all day, changes daily
+  var speciesId = BUOY_ROTATION_SPECIES_IDS[dayIndex % BUOY_ROTATION_SPECIES_IDS.length];
+  var sp = SPECIES.find(function(s) { return s.id === speciesId; });
+  if (!sp || !sp.bait || !sp.bait.length) return null;
+  return { species: sp.name, bait: sp.bait[0], tip: sp.tips || "" };
+}
+
 // ─── SCOUT: nearby water / access discovery (Overpass + Nominatim, no key) ────
 
 /** Compass bearing in degrees (0-360) from point 1 to point 2. */
@@ -1528,6 +1702,20 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   });
   const [topClubCatch, setTopClubCatch] = useState(null);
   const [topClubCatchLoading, setTopClubCatchLoading] = useState(false);
+  // Lake Michigan buoy shore report -- fixed set of 5 buoys, not GPS-dependent, so it loads
+  // independently of the location-based weather fetch below.
+  const [buoyReport, setBuoyReport] = useState(null);
+  const [buoyReportLoading, setBuoyReportLoading] = useState(true);
+  const [showBuoyDetail, setShowBuoyDetail] = useState(false);
+  useEffect(function() {
+    var cancelled = false;
+    loadBuoyShoreReport().then(function(report) {
+      if (!cancelled) setBuoyReport(report);
+    }).finally(function() {
+      if (!cancelled) setBuoyReportLoading(false);
+    });
+    return function() { cancelled = true; };
+  }, []);
   useEffect(function() {
     if (!authMember) { setTopClubCatch(null); return; }
     var cancelled = false;
@@ -1585,6 +1773,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
     try { localStorage.setItem(HOME_TARGET_SPECIES_KEY, sp); } catch (e) {}
   }
 
+  var todaysBait = todaysBaitRotation();
   var rating = fishingScore(wx);
   var moonInfo = getMoonInfo();
   var bfr = calcBFR(wx, moonInfo);
@@ -1684,6 +1873,77 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
               <span>Sunset {wx.sunset ? new Date(wx.sunset).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "—"}</span>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* Lake Michigan Shore Report — real NOAA NDBC buoy readings translated into a shore-
+          fishing status, per RFC's own buoy-instructions doc. Silently omitted on failure/no
+          data, same pattern as the weather card above (no separate "unavailable" message). */}
+      {buoyReport && !buoyReportLoading ? (
+        <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:14, padding:"14px 14px 12px", marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+            <div>
+              <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:4 }}>Lake Michigan Shore Report</div>
+              <div style={{ fontSize:15, color:th.white, fontWeight:700 }}>{buoyReport.statusLabel}</div>
+            </div>
+          </div>
+          {buoyReport.notes.length > 0 ? (
+            <div style={{ marginBottom:8 }}>
+              {buoyReport.notes.map(function(n, i) {
+                return <div key={i} style={{ fontSize:12, color:th.orange, lineHeight:1.45, marginBottom:4 }}>⚠️ {n}</div>;
+              })}
+            </div>
+          ) : null}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:10 }}>
+            {buoyReport.shoreConditions.map(function(sc, i) {
+              return (
+                <div key={i} style={{ flex:"1 1 45%", minWidth:130, background:th.bg, borderRadius:8, padding:"8px 10px" }}>
+                  <div style={{ fontSize:11, color:th.white, fontWeight:700 }}>{sc.name}</div>
+                  <div style={{ fontSize:10, color:th.muted, marginTop:2, lineHeight:1.35 }}>{sc.phrase}</div>
+                </div>
+              );
+            })}
+          </div>
+          {todaysBait ? (
+            <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginBottom:8 }}>
+              <div style={{ fontSize:10, color:th.muted, textTransform:"uppercase", letterSpacing:0.8, marginBottom:2 }}>Today's rotation</div>
+              <div style={{ fontSize:12, color:th.white }}><b>{todaysBait.bait}</b> for {todaysBait.species}</div>
+            </div>
+          ) : null}
+          <button type="button" onClick={function() { setShowBuoyDetail(function(v) { return !v; }); }} style={{ background:"transparent", border:"none", color:th.blue, cursor:"pointer", fontSize:11, fontWeight:700, padding:0, marginBottom:showBuoyDetail ? 8 : 0 }}>
+            {showBuoyDetail ? "Hide buoy readings ▾" : "Show buoy readings ▸"}
+          </button>
+          {showBuoyDetail ? (
+            <div style={{ marginBottom:8 }}>
+              {buoyReport.stations.map(function(s) {
+                return (
+                  <div key={s.id} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid " + th.border, fontSize:11 }}>
+                    <span style={{ color:th.white, fontWeight:600 }}>{s.label} <span style={{ color:th.muted, fontWeight:400 }}>({s.id})</span></span>
+                    <span style={{ color:th.muted, textAlign:"right" }}>
+                      {s.waveFt != null ? s.waveFt.toFixed(1) + " ft" : "—"}
+                      {" · "}{s.windMph != null ? Math.round(s.windMph) + " mph " + s.windCompass : "—"}
+                      {" · "}{s.waterF != null ? Math.round(s.waterF) + "°F" : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+              {BAIT_SHOPS.length > 0 ? (
+                <div style={{ marginTop:8 }}>
+                  <div style={{ fontSize:10, color:th.muted, textTransform:"uppercase", letterSpacing:0.8, marginBottom:4 }}>Verified bait shops</div>
+                  {BAIT_SHOPS.map(function(shop, i) {
+                    return (
+                      <div key={i} style={{ fontSize:11, color:th.white, marginBottom:2 }}>
+                        {shop.name} <span style={{ color:th.muted }}>— {shop.location}{shop.note ? " · " + shop.note : ""}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div style={{ fontSize:9, color:th.muted, lineHeight:1.4 }}>
+            Source: NOAA NDBC buoys 45186/45187/45174/45198/45170 · updated {buoyReport.generatedAt.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })}
+          </div>
         </div>
       ) : null}
 
