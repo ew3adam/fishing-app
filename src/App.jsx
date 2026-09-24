@@ -1191,15 +1191,23 @@ function degToCompass(deg) {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
-/** Fetch the latest reading for each RFC buoy from NOAA's ERDDAP server (last 6 hours, newest wins). */
+/** Fetch the latest reading for each RFC buoy from NOAA's ERDDAP server (last 24 hours, newest
+ *  wins). Window widened from an earlier 6-hour attempt that silently returned nothing on a real
+ *  phone -- ERDDAP returns HTTP 404 (not 200 + empty rows) for a query that matches zero rows, so
+ *  a too-narrow window looks identical to a broken query from here; 24h gives real margin against
+ *  a buoy's normal reporting gaps without meaningfully changing "current" for a shore report. */
 async function fetchBuoyReadings() {
   var ids = BUOY_STATIONS.map(function(s) { return s.id; }).join("|");
   var fields = "station,time,wd,wspd,wvht,wtmp";
   var stationConstraint = "station=~" + encodeURIComponent("\"(" + ids + ")\"");
-  var timeConstraint = "time" + encodeURIComponent(">=") + "now-6hours";
+  var timeConstraint = "time" + encodeURIComponent(">=") + "now-24hours";
   var url = ERDDAP_BUOY_URL + "?" + fields + "&" + stationConstraint + "&" + timeConstraint;
   var res = await fetch(url);
-  if (!res.ok) throw new Error("ERDDAP request failed: " + res.status);
+  if (!res.ok) {
+    var bodyText = "";
+    try { bodyText = (await res.text()).slice(0, 300); } catch (e2) {}
+    throw new Error("ERDDAP request failed: " + res.status + (bodyText ? " — " + bodyText : ""));
+  }
   var data = await res.json();
   var rows = (data && data.table && data.table.rows) || [];
   var cols = (data && data.table && data.table.columnNames) || [];
@@ -1299,14 +1307,18 @@ function buildBuoyReport(latestByStation) {
   };
 }
 
-/** Loads the full buoy shore report; never throws -- resolves null on any failure so a bad
- *  network call can never break the rest of Home (same defensive pattern as loadWeather). */
+/** Loads the full buoy shore report; never throws -- resolves { report, error } so a bad network
+ *  call can never break the rest of Home (same defensive pattern as loadWeather), but the actual
+ *  failure reason still reaches the UI instead of the card just silently not appearing -- that
+ *  silence is exactly what made a real-device "it's not showing" report undebuggable. */
 async function loadBuoyShoreReport() {
   try {
     var latestByStation = await fetchBuoyReadings();
-    return buildBuoyReport(latestByStation);
+    var report = buildBuoyReport(latestByStation);
+    if (!report) return { report: null, error: "No current reading from Navy Pier or Wilmette buoys." };
+    return { report: report, error: null };
   } catch (e) {
-    return null;
+    return { report: null, error: (e && e.message) || "Unknown error" };
   }
 }
 
@@ -1705,12 +1717,15 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   // Lake Michigan buoy shore report -- fixed set of 5 buoys, not GPS-dependent, so it loads
   // independently of the location-based weather fetch below.
   const [buoyReport, setBuoyReport] = useState(null);
+  const [buoyReportError, setBuoyReportError] = useState(null);
   const [buoyReportLoading, setBuoyReportLoading] = useState(true);
   const [showBuoyDetail, setShowBuoyDetail] = useState(false);
   useEffect(function() {
     var cancelled = false;
-    loadBuoyShoreReport().then(function(report) {
-      if (!cancelled) setBuoyReport(report);
+    loadBuoyShoreReport().then(function(result) {
+      if (cancelled) return;
+      setBuoyReport(result.report);
+      setBuoyReportError(result.error);
     }).finally(function() {
       if (!cancelled) setBuoyReportLoading(false);
     });
@@ -1877,8 +1892,15 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
       ) : null}
 
       {/* Lake Michigan Shore Report — real NOAA NDBC buoy readings translated into a shore-
-          fishing status, per RFC's own buoy-instructions doc. Silently omitted on failure/no
-          data, same pattern as the weather card above (no separate "unavailable" message). */}
+          fishing status, per RFC's own buoy-instructions doc. Unlike the weather card above,
+          a failure here shows visibly (with the actual error) rather than silently vanishing —
+          that silence is what made a real "it's not showing on my phone" report undebuggable. */}
+      {!buoyReportLoading && !buoyReport && buoyReportError ? (
+        <div style={{ background:th.orange + "18", border:"1px solid " + th.orange + "55", borderRadius:12, padding:"10px 14px", marginBottom:12 }}>
+          <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:2 }}>⚠️ Lake Michigan buoy data unavailable</div>
+          <div style={{ fontSize:11, color:th.white, lineHeight:1.45 }}>{buoyReportError}</div>
+        </div>
+      ) : null}
       {buoyReport && !buoyReportLoading ? (
         <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:14, padding:"14px 14px 12px", marginBottom:12 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
