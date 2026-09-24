@@ -1162,7 +1162,12 @@ var BUOY_STATIONS = [
   { id:"45198", label:"Navy Pier", area:"Burnham / 31st / 87th St area" },
   { id:"45170", label:"South Haven, MI", area:"East basin — storm warning buoy" },
 ];
-var ERDDAP_BUOY_URL = "https://coastwatch.pfeg.noaa.gov/erddap/tabledap/cwwcNDBCMet.json";
+// Cloudflare Worker that proxies NOAA NDBC's buoy data server-side (see cloudflare/
+// buoy-proxy-worker.js + docs/BUOY-PROXY-DEPLOY.md). Direct browser fetches to NDBC/ERDDAP were
+// tried first and failed live on a real device ("Load failed") -- neither sends CORS headers, and
+// this app has no server of its own to bypass that from (CLAUDE.md: client-side only). Replace
+// the placeholder below with the real *.workers.dev URL once the Worker is deployed.
+var BUOY_PROXY_URL = "https://rfc-buoy-proxy.YOUR-SUBDOMAIN.workers.dev";
 var HARBOR_DAMPENING = 1 / 3; // "Inside harbors = roughly 1/3 of main lake wave height" (RFC rule)
 // Shore spots the buoy status is actually meaningful for -- open Lake Michigan shoreline only.
 // Deliberately leaves out river/inland spots (Des Plaines River, Palos FP lakes): Lake Michigan
@@ -1191,45 +1196,32 @@ function degToCompass(deg) {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
-/** Fetch the latest reading for each RFC buoy from NOAA's ERDDAP server (last 24 hours, newest
- *  wins). Window widened from an earlier 6-hour attempt that silently returned nothing on a real
- *  phone -- ERDDAP returns HTTP 404 (not 200 + empty rows) for a query that matches zero rows, so
- *  a too-narrow window looks identical to a broken query from here; 24h gives real margin against
- *  a buoy's normal reporting gaps without meaningfully changing "current" for a shore report. */
+/** Fetch the latest reading for each RFC buoy via the Cloudflare Worker proxy (see above). */
 async function fetchBuoyReadings() {
-  var ids = BUOY_STATIONS.map(function(s) { return s.id; }).join("|");
-  var fields = "station,time,wd,wspd,wvht,wtmp";
-  var stationConstraint = "station=~" + encodeURIComponent("\"(" + ids + ")\"");
-  var timeConstraint = "time" + encodeURIComponent(">=") + "now-24hours";
-  var url = ERDDAP_BUOY_URL + "?" + fields + "&" + stationConstraint + "&" + timeConstraint;
-  var res = await fetch(url);
+  if (BUOY_PROXY_URL.indexOf("YOUR-SUBDOMAIN") >= 0) {
+    throw new Error("Buoy proxy not deployed yet — see docs/BUOY-PROXY-DEPLOY.md");
+  }
+  var res = await fetch(BUOY_PROXY_URL);
   if (!res.ok) {
     var bodyText = "";
     try { bodyText = (await res.text()).slice(0, 300); } catch (e2) {}
-    throw new Error("ERDDAP request failed: " + res.status + (bodyText ? " — " + bodyText : ""));
+    throw new Error("Buoy proxy request failed: " + res.status + (bodyText ? " — " + bodyText : ""));
   }
   var data = await res.json();
-  var rows = (data && data.table && data.table.rows) || [];
-  var cols = (data && data.table && data.table.columnNames) || [];
-  var idx = {};
-  cols.forEach(function(c, i) { idx[c] = i; });
+  var stations = (data && data.stations) || {};
   var latestByStation = {};
-  rows.forEach(function(row) {
-    var station = row[idx.station];
-    var time = row[idx.time];
-    if (!station || !time) return;
-    var prev = latestByStation[station];
-    if (!prev || time > prev.time) {
-      latestByStation[station] = {
-        station: station,
-        time: time,
-        windDirDeg: row[idx.wd],
-        windCompass: degToCompass(row[idx.wd]),
-        windMph: msToMph(row[idx.wspd]),
-        waveFt: metersToFt(row[idx.wvht]),
-        waterF: cToFTemp(row[idx.wtmp]),
-      };
-    }
+  Object.keys(stations).forEach(function(id) {
+    var s = stations[id];
+    if (!s || !s.time) return;
+    latestByStation[id] = {
+      station: id,
+      time: s.time,
+      windDirDeg: s.windDirDeg,
+      windCompass: degToCompass(s.windDirDeg),
+      windMph: msToMph(s.windMs),
+      waveFt: metersToFt(s.waveM),
+      waterF: cToFTemp(s.waterC),
+    };
   });
   return latestByStation;
 }
