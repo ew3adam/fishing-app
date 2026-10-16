@@ -235,25 +235,33 @@ this line of work is drawn from. All merged._
   this changelog in the same commit/PR as the code change they describe, not as a
   separate pass. ([PR #56](https://github.com/ew3adam/fishing-app/pull/56), merged)
 
+### Removed
+- **`src/FishingApp.jsx`** — unused/orphaned duplicate of the app, never imported by
+  `main.jsx`. Confirmed dead by a `grep` across the repo before removal; the user
+  explicitly signed off on deleting it (previously left alone per `CLAUDE.md`'s
+  require-confirmation gotcha, now resolved).
+
+### Decided (2026-10-16) — no longer open
+- **Buoy wave/wind thresholds**: the 🟢/🟡/🔴 defaults proposed in PR #51 are now the
+  permanent thresholds (user's call) rather than a placeholder awaiting real RFC
+  numbers — adjust later if they prove wrong in practice.
+- **Real-device confirmation** for PRs #44, #46–#50, #54, #55: headless-browser/
+  sandbox verification accepted as sufficient (user's call) — not reopening these
+  pending a phone check.
+
 ### Next
 - **Firebase Console (manual, one-time steps)**:
   1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
   2. Authentication → Settings → Authorized domains → Add `ew3adam.github.io`
 - Email/Password provider can stay enabled as fallback.
 - Admin panel: list members + `authUid` link status (who has signed in vs. not yet)
-- **⚠️ Run `firebase deploy --only firestore:rules,storage --project rfc-management`**
-  to actually enforce PR #42's privacy rule (merged in code since; not yet confirmed
-  live in Firestore).
-- **⚠️ Deploy `cloudflare/buoy-proxy-worker.js`** per `docs/BUOY-PROXY-DEPLOY.md` and
+- **Run `firebase deploy --only firestore:rules,storage --project rfc-management`**
+  to actually enforce PR #42's privacy rule (merged in code; not yet live in
+  Firestore) — needs the user's own Firebase CLI access, no sandboxed session has it.
+- **Deploy `cloudflare/buoy-proxy-worker.js`** per `docs/BUOY-PROXY-DEPLOY.md` and
   send back its real `*.workers.dev` URL to replace the `BUOY_PROXY_URL` placeholder
-  in `src/App.jsx` (PR #53).
-- **⚠️ Supply RFC's real buoy wave/wind thresholds** for the 🟢/🟡/🔴 shore-fishing
-  status (PR #51 shipped with proposed placeholder defaults, asked for twice, not
-  yet received).
-- **⚠️ Real-device confirmation** still outstanding for PRs #44, #46, #47, #48, #49,
-  #50, #54, #55 — all verified only via headless-browser/sandbox testing so far.
-- **src/FishingApp.jsx** is still unreferenced dead code (confirmed again while
-  closing stale PR #9) — removal needs the user's explicit go-ahead per `CLAUDE.md`.
+  in `src/App.jsx` (PR #53) — same reason, needs the user's own Cloudflare account.
+  **User has confirmed they'll run both of these deploys themselves.**
 
 ---
 

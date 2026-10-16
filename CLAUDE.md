@@ -46,7 +46,6 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 ### Entry point and the monolith
 `src/main.jsx` renders `src/App.jsx` — that's the entire app. `App.jsx` (~4300 lines) owns all tabs, all state, and all UI as one file; keep changes there unless the user explicitly asks to split it (see `docs/refactoring-policy.md` for the "leave it cleaner than you found it" rule that otherwise applies).
 
-**Gotcha:** `src/FishingApp.jsx` (~2400 lines) is a separate, unrelated file that looks like an alternate copy of the app but is **not imported anywhere** — `main.jsx` only ever renders `App.jsx`. Don't edit `FishingApp.jsx` expecting it to affect the running app; confirm with the user before touching or removing it.
 
 ### Tabs (`NAV` array in `App.jsx`, ~line 4528)
 `Home` → `Scout` → `Species` → `Spots` → `Tackle` (`catalogue`) → `Catch` → `Learn`, plus `Profile` reached via a header avatar button (not in `NAV`). Each tab is its own top-level function component inside `App.jsx` (e.g. `HomeTab`, `SpotsTab`, `CatchTab`, `ProfileTab`, `ScoutTab`) — search for `function XxxTab(` to jump to one.
@@ -86,7 +85,6 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | File | Purpose |
 |------|---------|
 | `src/App.jsx` | The app — all tabs, state, and UI logic (see Architecture above) |
-| `src/FishingApp.jsx` | Unused/orphaned duplicate — not imported by `main.jsx`, do not assume edits here matter |
 | `src/lib/firebase.js` | Firebase init (env-var overrides via `VITE_FIREBASE_*`) |
 | `src/services/fishingSyncService.js` | Firestore sync for catches, fishing profiles, club feed, club spot map |
 | `src/services/authService.js` | Auth (email link + password fallback + OAuth placeholders), roster gate, cloud profile pull/push |
