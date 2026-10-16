@@ -8,6 +8,20 @@ CORS never applies) and re-serves it as CORS-friendly JSON the app *can* fetch.
 
 Worker source: `cloudflare/buoy-proxy-worker.js` (not part of the app's build — deployed separately).
 
+## Deploy via CLI instead (if you have/want a Cloudflare API token)
+
+`cloudflare/wrangler.toml` is ready to go (validated with `wrangler deploy --dry-run` — uploads
+clean, no bindings needed). From `cloudflare/`:
+
+```
+CLOUDFLARE_API_TOKEN=<token with Workers Edit permission> \
+CLOUDFLARE_ACCOUNT_ID=<your account ID> \
+npx wrangler deploy
+```
+
+This deploys straight to your account under the name `rfc-buoy-proxy` and prints the live URL —
+no dashboard steps needed. Revoke the token afterward if it was only created for this.
+
 ## Deploy (dashboard only, no CLI needed)
 
 1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create**.
