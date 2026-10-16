@@ -1,12 +1,12 @@
 ---
-lastSessionAt: "2026-10-16T09:10:00-05:00"
+lastSessionAt: "2026-10-16T11:20:00-05:00"
 ---
 
 # Dev session log (fishing-app)
 
 ## Where we left off
 
-**Continuation of the same 2026-09-09 session (resumed 2026-09-19, carried through 2026-09-24, resumed again 2026-10-16 in a fresh container). Sixteen more PRs shipped and deployed since the last full save state (#40–#55): Scout UX, production hardening, a real Firestore privacy fix, the Home dashboard rebuild, a full login-gate rewrite, a new default "beige" theme, an AI-species-recognition restyle, a simplified Catch measurement flow, three concrete bug fixes, a Lake Michigan buoy shore report (and its real-device CORS fix), time-of-day bait tactics + more regs links, and real MidwestOutdoors tactical tips (plus fixes for several broken article URLs discovered along the way). Two items still need a human to actually finish them — see the ⚠️s below.**
+**Continuation of the same 2026-09-09 session (resumed 2026-09-19, carried through 2026-09-24, resumed again 2026-10-16 in a fresh container). Seventeen more PRs shipped and deployed since the last full save state (#40–#56): Scout UX, production hardening, a real Firestore privacy fix, the Home dashboard rebuild, a full login-gate rewrite, a new default "beige" theme, an AI-species-recognition restyle, a simplified Catch measurement flow, three concrete bug fixes, a Lake Michigan buoy shore report (and its real-device CORS fix), time-of-day bait tactics + more regs links, real MidwestOutdoors tactical tips (plus fixes for several broken article URLs), and a "keep docs current" standing policy. All 13 open PRs this repo had (the 12 pre-session stragglers plus #55) are now resolved — merged or closed as superseded, see below. Two items still need a human to actually finish them — see the ⚠️s below.**
 
 1. **PR #40 — Scout "search complete" confirmation** (merged, deployed). Green "✓ Search complete" toast after "Use my location" finishes its GPS+search cycle. Re-implemented from scratch here rather than chased down from another Claude session's unreachable local clone (that session had no push access and this one couldn't locate/reach its work).
 2. **PR #41 — production hardening** (merged, deployed). Added a top-level React error boundary (`src/components/ErrorBoundary.jsx`) — previously any uncaught render error white-screened the whole app with no recovery; verified by actually triggering a real error and confirming the fallback UI. Also patched the one real `npm audit` finding on a runtime dependency (`firebase` 12.14.0 → 12.19.0, in-range bump, resolves a `protobufjs` vuln via `@firebase/firestore`).
@@ -36,7 +36,20 @@ lastSessionAt: "2026-10-16T09:10:00-05:00"
 
 **Also still open from earlier this same session**: the Sept 3 merge (`fa2684d`) regression sweep (two found by accident — PR #37/#38 — more may exist unnoticed; see the entry below) has not been done as a deliberate pass.
 
-**Pre-existing, unrelated to this session**: `list_pull_requests` shows 12 old open draft PRs (#1, #2, #3, #6, #7, #9, #10, #11, #12, #13, #14, #18) from well before this session — none touched this session. A few may now overlap with what's shipped (e.g. #12/#13 sunrise-sunset vs. PR #43's weather card, #7 "Modernize home UI" vs. the WelcomeBanner/splash/Home work) — worth a look next session, but not acted on without direction.
+**Resolved: the 12 old pre-session PRs + PR #55, all closed/merged (2026-10-16).** Given an explicit directive to complete every open PR, did a real investigation rather than blind-merging: fetched each PR's head and dry-ran a local merge against current `main` for all 12. Every single one conflicted — most in `src/App.jsx` itself (rewritten many times over since these PRs' April/May bases), several also in `index.html`/`package.json`/PWA icons/`src/FishingApp.jsx`. Closed all 12 with a per-PR comment naming the specific later work that already covers the same ground:
+- **#12, #13** (sunrise/sunset) → superseded by PR #43's Home dashboard rebuild.
+- **#3** (Near Me GPS sorting) → superseded by the Scout tab's real `SCOUT_SPOTS`/haversine "near me."
+- **#7** (home UI modernization) → superseded by PR #43 + PR #47 (beige theme).
+- **#6** (catch measurement hardening + Vitest) → superseded by PR #49's measurement redesign; the test-suite addition also runs against `CLAUDE.md`'s explicit "no test suite, no linter" policy.
+- **#10** (article-link verification + spot saving) → superseded by PR #42's real Firestore privacy model and PR #54/#55's article work.
+- **#11** (future-features doc, RFC renaming, private-spot sharing) → superseded by PR #42's privacy model and `docs/RFC-PLATFORM-PRD.md` as the actual future-direction doc.
+- **#14** (map pin drop + big batch) → superseded by `SpotMapPicker.jsx`/`SpotMapThumb.jsx` + PR #43.
+- **#1** (club-email sharing, ruler overlay, closest-spot) → superseded by the real roster-gated auth, PR #46's full login gate, and PR #49's catch-flow redesign.
+- **#2** (Cursor-Cloud `AGENTS.md`) → not applicable now that this project is worked on via Claude Code; `CLAUDE.md` is the maintained equivalent.
+- **#9** (remove unused `src/FishingApp.jsx`) → **not acted on** despite being otherwise correct (file is still real dead code) — `CLAUDE.md` explicitly requires confirming with the user before touching/removing that file, so left it alone and said so in the PR comment.
+- **#18** (docs: keep CLAUDE.md/CHANGELOG.md current) → its one still-relevant idea was reapplied fresh as **PR #56** (merged, deployed): a new "Keeping docs current" section in `CLAUDE.md`. **⚠️ Noted but not fixed**: `CHANGELOG.md` itself is stale (last updated 2026-08-30, missing everything from PR #40 on) — backfilling it accurately is separate, larger work, flagged here rather than guessed at.
+
+**PR #55** (MidwestOutdoors tactics) also merged and deployed to both GitHub Pages and Cloudflare Pages, completing the item above.
 
 ### Prior session (2026-09-09, early): auth regressions found while building the WelcomeBanner
 
