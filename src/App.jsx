@@ -804,6 +804,15 @@ const ARTICLES = [
   {title:"Catfish Tactics for Midwest Rivers",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/catfish/",species:"Channel Catfish"},
   {title:"Waukegan Harbor Coho Reports",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/salmon/",species:"Coho Salmon"},
   {title:"Illinois Fishing Regulations and License",source:"IDNR",url:"https://www.ifishillinois.org/",species:"All"},
+  // Added per direct request: better links to official sources instead of embedding specific
+  // bag/size-limit numbers in the app -- this app has no server and can't scrape DNR sites live
+  // (they're also blocked from this sandbox's network), so a static number here could go stale
+  // silently. These are the other 3 states this club's waters actually touch (Lake Michigan
+  // shoreline, Wolf Lake on the IL/IN line, South Haven MI) -- unverified live from this sandbox
+  // (DNR sites are blocked here the same way), so worth a live click-check before relying on them.
+  {title:"Indiana Fishing Regulations and License",source:"Indiana DNR",url:"https://www.in.gov/dnr/fish-and-wildlife/fishing/",species:"All"},
+  {title:"Michigan Fishing Regulations and License",source:"Michigan DNR",url:"https://www.michigan.gov/dnr/things-to-do/fishing",species:"All"},
+  {title:"Wisconsin Fishing Regulations and License",source:"Wisconsin DNR",url:"https://dnr.wisconsin.gov/topic/fishing",species:"All"},
 ];
 
 // ─── WEATHER UTIL ─────────────────────────────────────────────────────────────
@@ -967,6 +976,30 @@ function goldenHourMessage(sunriseIso, sunsetIso) {
     return "🌅 Golden hour in " + Math.floor(m2 / 60) + "h " + (m2 % 60) + "min";
   }
   return "🌙 Evening bite window opening";
+}
+
+/**
+ * General (species-independent) technique guidance for right now, keyed off sunrise/sunset the
+ * same way goldenHourMessage already is -- added so the "Try:" bait callout actually changes with
+ * the clock, not just species/season. Deliberately doesn't invent new per-species bait data (that
+ * would be fabricating fishing advice this app can't vouch for); this just layers on broadly-true,
+ * standard low-light-vs-bright-light technique advice that applies regardless of species.
+ */
+function timeOfDayTactic(sunriseIso, sunsetIso) {
+  var now = Date.now();
+  var sr = sunriseIso ? new Date(sunriseIso).getTime() : null;
+  var ss = sunsetIso ? new Date(sunsetIso).getTime() : null;
+  var LOW_LIGHT_WINDOW = 90 * 60000; // 90 min around sunrise/sunset -- the classic dawn/dusk bite window
+  if (sr != null && Math.abs(now - sr) <= LOW_LIGHT_WINDOW) {
+    return { icon:"🌅", label:"Dawn bite", tip:"Low light = active, chasing fish. Fish it faster and shallower than you'd think." };
+  }
+  if (ss != null && Math.abs(now - ss) <= LOW_LIGHT_WINDOW) {
+    return { icon:"🌇", label:"Dusk bite", tip:"Same as dawn — low light turns fish aggressive. Keep it moving." };
+  }
+  if (sr != null && ss != null && now > sr && now < ss) {
+    return { icon:"☀️", label:"Midday", tip:"Bright light pushes fish deeper or tighter to cover. Slow down and go subtler." };
+  }
+  return { icon:"🌙", label:"After dark", tip:"Slower retrieves, bigger profile — fish feel more than see after dark." };
 }
 
 function findNearestHomeWater(lat, lng) {
@@ -1789,6 +1822,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var solunar = wx ? calcSolunarWindows(wx.sunrise, wx.sunset) : [];
   var waterTemp = wx ? estimateWaterTemp(wx.temp, new Date().getMonth()) : null;
   var golden = wx ? goldenHourMessage(wx.sunrise, wx.sunset) : "";
+  var tactic = wx ? timeOfDayTactic(wx.sunrise, wx.sunset) : null;
   var displayName = (profile && profile.name) ? profile.name.split(" ")[0] : "Angler";
   var nearSpot = nearestWater && nearestWater.spot;
   var nearDist = nearestWater ? nearestWater.dist.toFixed(1) : null;
@@ -2087,6 +2121,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
             <div style={{ fontSize:13, color:th.white, marginTop:8, lineHeight:1.45 }}>
               <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {featuredBaits[0] ? featuredBaits[0].name : "Live minnow"} — {featuredBaits[0] ? featuredBaits[0].why : "versatile starter bait"}
             </div>
+            {tactic ? (
+              <div style={{ fontSize:12, color:th.muted, marginTop:4, lineHeight:1.45 }}>
+                {tactic.icon} <span style={{ color:th.white, fontWeight:600 }}>{tactic.label} right now:</span> {tactic.tip}
+              </div>
+            ) : null}
             {pinnedSpot && pinnedSpot.notes ? <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45, fontStyle:"italic" }}>{pinnedSpot.notes.slice(0, 120)}{pinnedSpot.notes.length > 120 ? "…" : ""}</div> : null}
             <div style={{ marginTop:8, display:"inline-block", background:bfrTierColor(biteScore) + "22", border:"1px solid " + bfrTierColor(biteScore), borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:bfrTierColor(biteScore) }}>
               Bite score {biteScore}/100
