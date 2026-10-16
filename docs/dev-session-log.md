@@ -1,5 +1,5 @@
 ---
-lastSessionAt: "2026-10-16T11:20:00-05:00"
+lastSessionAt: "2026-10-16T11:45:00-05:00"
 ---
 
 # Dev session log (fishing-app)
@@ -46,10 +46,18 @@ lastSessionAt: "2026-10-16T11:20:00-05:00"
 - **#14** (map pin drop + big batch) → superseded by `SpotMapPicker.jsx`/`SpotMapThumb.jsx` + PR #43.
 - **#1** (club-email sharing, ruler overlay, closest-spot) → superseded by the real roster-gated auth, PR #46's full login gate, and PR #49's catch-flow redesign.
 - **#2** (Cursor-Cloud `AGENTS.md`) → not applicable now that this project is worked on via Claude Code; `CLAUDE.md` is the maintained equivalent.
-- **#9** (remove unused `src/FishingApp.jsx`) → **not acted on** despite being otherwise correct (file is still real dead code) — `CLAUDE.md` explicitly requires confirming with the user before touching/removing that file, so left it alone and said so in the PR comment.
-- **#18** (docs: keep CLAUDE.md/CHANGELOG.md current) → its one still-relevant idea was reapplied fresh as **PR #56** (merged, deployed): a new "Keeping docs current" section in `CLAUDE.md`. **⚠️ Noted but not fixed**: `CHANGELOG.md` itself is stale (last updated 2026-08-30, missing everything from PR #40 on) — backfilling it accurately is separate, larger work, flagged here rather than guessed at.
+- **#9** (remove unused `src/FishingApp.jsx`) → initially left alone per `CLAUDE.md`'s require-confirmation gotcha; **user then explicitly confirmed deletion** — removed in a fresh follow-up commit (below), and the now-obsolete gotcha/key-files row removed from `CLAUDE.md`.
+- **#18** (docs: keep CLAUDE.md/CHANGELOG.md current) → its one still-relevant idea was reapplied fresh as **PR #56** (merged, deployed): a new "Keeping docs current" section in `CLAUDE.md`. `CHANGELOG.md` itself was stale (last updated 2026-08-30, missing everything from PR #40 on) — backfilled accurately from git history + this log (not guessed at), see below.
 
 **PR #55** (MidwestOutdoors tactics) also merged and deployed to both GitHub Pages and Cloudflare Pages, completing the item above.
+
+**CHANGELOG.md backfilled** (PRs #24–#56, corrected several stale "open"/"not yet merged" labels) and pushed directly to `main`.
+
+**Four remaining items put to the user directly** (via `AskUserQuestion`, since each is genuinely their call, not something more autonomous work resolves) and decided 2026-10-16:
+1. **`src/FishingApp.jsx` deletion** → user said delete it now. Done (see above).
+2. **Buoy wave/wind thresholds** → user said keep the PR #51 proposed defaults as permanent, not a placeholder awaiting real RFC numbers.
+3. **Cloudflare Worker + Firestore rules deploys** → user will run both themselves outside this session (`docs/BUOY-PROXY-DEPLOY.md`, `docs/FIREBASE-DEPLOY.md`) — confirmed no sandboxed session has the credentials to do either (`wrangler whoami` / `firebase` CLI both checked, neither configured here).
+4. **Real-device confirmation** for PRs #44, #46–#50, #54, #55 → user accepted headless-browser/sandbox verification as sufficient; not reopening these pending a phone check.
 
 ### Prior session (2026-09-09, early): auth regressions found while building the WelcomeBanner
 
@@ -150,16 +158,14 @@ Follow-up session on top of the PR #15/#17 work. Shipped and deployed PRs #19–
 
 ## Next
 
-- **⚠️ Top priority — deploy the buoy-proxy Cloudflare Worker.** `cloudflare/buoy-proxy-worker.js` exists and is tested against a mocked response, but isn't live anywhere yet. Follow `docs/BUOY-PROXY-DEPLOY.md` (dashboard only, no CLI/account setup beyond what already exists for Pages) and send back the resulting `*.workers.dev` URL — a quick follow-up commit will swap it into `BUOY_PROXY_URL` (`src/App.jsx`) and redeploy. Until then the buoy card shows a clear "not deployed yet" message instead of live data. **Still not done as of 2026-10-16.**
+- **Deploy the buoy-proxy Cloudflare Worker** (`cloudflare/buoy-proxy-worker.js`, steps in `docs/BUOY-PROXY-DEPLOY.md`) and **run the Firestore rules deploy for PR #42** (`firebase deploy --only firestore:rules,storage --project rfc-management`) — both need credentials only the user has (confirmed via `wrangler whoami` / `firebase` CLI checks, neither configured in any sandboxed session). **User confirmed 2026-10-16 they'll run both themselves outside this session** — no longer blocking, just needs doing on their end. Once the Worker's live, send back its `*.workers.dev` URL for a quick follow-up commit to swap into `BUOY_PROXY_URL` (`src/App.jsx`).
 - **Click-check the 3 new regs links (PR #54)** — Indiana/Michigan/Wisconsin DNR fishing-regs URLs are standard, stable top-level government pages but unverified live (DNR sites are blocked from this sandbox, same as other reference sites).
-- **Get RFC's real 🟢/🟡/🔴 buoy thresholds.** PR #51 shipped with proposed wave-height/wind-speed bands, not RFC's own numbers — asked twice this session, never received. Code comments in the buoy-report block (`src/App.jsx`, search `buoyBand`) are set up for an easy swap once real numbers come in.
+- ~~Get RFC's real 🟢/🟡/🔴 buoy thresholds~~ — **decided 2026-10-16**: user chose to keep PR #51's proposed defaults as permanent rather than wait on real numbers. No longer open.
 - **Species icons: real/AI photos instead of emoji, app-wide** — deferred from PR #50. Needs a mockup/screenshot shown first (same pattern as the beige theme) before rolling `SPECIES_PHOTO_BY_ID`'s existing real-photo pattern out to list rows and chips, since it's a real visual-identity shift away from the current emoji-chip look.
-- **Confirm PR #46 (full login gate), #47 (beige default theme), #48 (AI species card restyle), #49 (simplified measurement), #50 (photo picker/musky/bullhead fixes), and #54 (time-of-day tactics) on a real device.** None of these have been confirmed live — #46 needs confirming sign-in actually completes and lands in the normal app shell with nothing reachable while signed out; #47 needs a real look at the new default palette; the rest only have sandbox (mocked-auth, network-intercepted, or mocked-geolocation) verification, never a real signed-in session or real device behavior.
-- **⚠️ Top priority — run the Firestore rules deploy for PR #42.** The privacy fix (owner-only `main` profile doc, new club-readable `clubShare` subset) is merged and app-deployed, but the actual Firestore security rule is **not yet enforced** — needs `firebase deploy --only firestore:rules,storage --project rfc-management` run by someone with Firebase CLI access (this sandbox has none). Until that runs, the old broader rule is still live. Existing club-shared spots will repopulate the new `clubShare` doc automatically on each member's next normal app sync — no backfill script needed once the rule itself is deployed.
-- **Confirm PR #44 (locked profile fields, password reset) on a real device.** Couldn't verify the signed-in Profile view from this sandbox at all (no way to fake a real Firebase session here).
-- **Confirm PR #43's Home redesign, especially the weather card**, live — Open-Meteo is blocked from this sandbox so that one specifically has zero live verification yet, only a clean build.
+- ~~Confirm PR #44, #46, #47, #48, #49, #50, #54 on a real device~~ — **decided 2026-10-16**: user accepted sandbox/headless-browser verification as sufficient for these. No longer open.
+- **Confirm PR #43's Home redesign, especially the weather card**, live — Open-Meteo is blocked from this sandbox so that one specifically has zero live verification yet, only a clean build. (Not covered by the 2026-10-16 real-device decision above — PR #43 wasn't in that batch.)
 - **"Screen 2: Main page"** — still not shared in enough detail to scope or build. Don't build ahead of it.
-- **Old pre-existing open draft PRs** (#1, #2, #3, #6, #7, #9, #10, #11, #12, #13, #14, #18) — untouched this session, some may now overlap with what's shipped (sunrise/sunset, home UI modernization). Worth a look, not urgent, don't act without direction.
+- ~~Old pre-existing open draft PRs (#1, #2, #3, #6, #7, #9, #10, #11, #12, #13, #14, #18)~~ — **resolved 2026-10-16**: all closed as superseded (or merged fresh, for #18's docs policy and #9's FishingApp.jsx removal) — see the entry earlier in this log.
 - **Sweep for more Sept 3 merge (`fa2684d`) regressions.** Two found by accident so far (ProfileTab sign-in form, sign-in-link tab-switch) — both were silent (no error, just missing behavior), so more may exist unnoticed. Consider a deliberate diff of `194be16` (last commit before that merge) against current `App.jsx`.
 - **Still not confirmed on a real device**: the earlier (2026-08-30/09-03) batch of fixes — photo compression, CSV import, text-size setting, map pinch-zoom/pin-placement. Lower priority than the items above, but still open.
 - This sandbox **cannot reach `ew3adam.github.io`, `*.pages.dev`, or `api.open-meteo.com` directly** (`EGRESS_BLOCKED`/`connect_rejected`, an org network-policy limit on this environment, not a bug) — live-production and live-weather checks need the user's own device/screenshots. Local `npm run preview` + headless Chromium still works fine for pre-deploy verification of everything else.
