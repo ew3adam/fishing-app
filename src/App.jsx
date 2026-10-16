@@ -796,13 +796,25 @@ const LESSONS = [
 ];
 
 // ─── ARTICLES ─────────────────────────────────────────────────────────────────
+// URLs below were re-verified by WebSearch (this sandbox's network blocks direct fetch to
+// midwestoutdoors.com, windycityfishing.com, and fpdcc.com, so links can't be curled from here --
+// same egress limit documented in CLAUDE.md for DNR/reference sites, worth a live click-check).
+// The previous midwestoutdoors.com/fish/{species}/ URLs and windycityfishing.com don't match
+// either site's real structure/existence and were replaced. Each `tip` is a 1-2 sentence
+// condensation of that specific article's real content (not generic advice), surfaced on Home
+// next to the matching species so the "how to fish now" guidance reflects what these sources
+// actually say, not just this app's own curated bait list.
 const ARTICLES = [
-  {title:"Spring Crappie Tactics for Illinois Lakes",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/crappie/",species:"Crappie"},
-  {title:"Des Plaines River Fishing Guide",source:"WindyCityFishing",url:"https://www.windycityfishing.com/",species:"Bass"},
+  {title:"Guides' Hard-Won Jigging Tactics for Crappie",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/fishing/guides-hard-won-jigging-tactics-tackle-crappies/",species:"Crappie",
+    tip:"Tournament guides stress careful boat/bank positioning near cover and a firm hookset — and note stained water holds crappie higher and less wary, so don't be afraid to fish shallow."},
+  {title:"Des Plaines River Fishing Guide",source:"onX Maps",url:"https://www.onxmaps.com/fish/fishing-spots/us/illinois/des-plaines-river-g8zl53v0761w",species:"Smallmouth Bass",
+    tip:"Rated for smallmouth with solid shore/wading access — work spinnerbaits or small-bladed baits through current and deep-diving crankbaits through pools; a fall drop-shot bite near ledge structure in 4-9 ft is a proven local pattern."},
   {title:"Lake Michigan Coho Shore Fishing 101",source:"Indiana DNR",url:"https://www.in.gov/dnr/fish-and-wildlife/fishing/lake-michigan-fishing/",species:"Coho Salmon"},
   {title:"Cook County Forest Preserve Fishing",source:"FPDCC",url:"https://fpdcc.com/things-to-do/fishing/",species:"Rainbow Trout"},
-  {title:"Catfish Tactics for Midwest Rivers",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/catfish/",species:"Channel Catfish"},
-  {title:"Waukegan Harbor Coho Reports",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/salmon/",species:"Coho Salmon"},
+  {title:"Spider-Rigging for Catfish",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/?p=118075",species:"Channel Catfish",
+    tip:"Channel cats spawn just after crappie and move into the same shallow coves and riprap once water hits the upper 60s°F — spread multiple rods wide apart to cover water without tangling."},
+  {title:"Spring Coho Salmon — Lake Michigan Shore Tactics",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/fishing/spring-coho-salmon/",species:"Coho Salmon",
+    tip:"Coho push into warming shoreline water chasing baitfish starting in April/May once it hits the low 50s°F — \"cast one and soak one\": cast a spoon or crankbait while a second rod soaks bait off bottom, working the upper half of the water column."},
   {title:"Illinois Fishing Regulations and License",source:"IDNR",url:"https://www.ifishillinois.org/",species:"All"},
   // Added per direct request: better links to official sources instead of embedding specific
   // bag/size-limit numbers in the app -- this app has no server and can't scrape DNR sites live
@@ -814,6 +826,13 @@ const ARTICLES = [
   {title:"Michigan Fishing Regulations and License",source:"Michigan DNR",url:"https://www.michigan.gov/dnr/things-to-do/fishing",species:"All"},
   {title:"Wisconsin Fishing Regulations and License",source:"Wisconsin DNR",url:"https://dnr.wisconsin.gov/topic/fishing",species:"All"},
 ];
+
+/** First ARTICLES entry with a real tactical `tip` for this species, or null. */
+function articleTipForSpecies(species) {
+  if (!species) return null;
+  var match = ARTICLES.find(function(a) { return a.tip && a.species === species; });
+  return match || null;
+}
 
 // ─── WEATHER UTIL ─────────────────────────────────────────────────────────────
 function fishingScore(wx) {
@@ -1819,6 +1838,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var bfr = calcBFR(wx, moonInfo);
   var season = getSeason(new Date().getMonth());
   var baits = speciesBaitTips(targetSpecies, season);
+  var targetSpeciesArticleTip = articleTipForSpecies(targetSpecies);
   var solunar = wx ? calcSolunarWindows(wx.sunrise, wx.sunset) : [];
   var waterTemp = wx ? estimateWaterTemp(wx.temp, new Date().getMonth()) : null;
   var golden = wx ? goldenHourMessage(wx.sunrise, wx.sunset) : "";
@@ -1857,6 +1877,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
     ? pinnedSpot.species_present[0]
     : targetSpecies;
   var featuredBaits = speciesBaitTips(featuredPrimarySpecies, season);
+  var featuredArticleTip = articleTipForSpecies(featuredPrimarySpecies);
   var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
@@ -2126,6 +2147,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
                 {tactic.icon} <span style={{ color:th.white, fontWeight:600 }}>{tactic.label} right now:</span> {tactic.tip}
               </div>
             ) : null}
+            {featuredArticleTip ? (
+              <div style={{ fontSize:11, color:th.muted, marginTop:4, lineHeight:1.45 }}>
+                📰 <span style={{ color:th.white, fontWeight:600 }}>From {featuredArticleTip.source}:</span> {featuredArticleTip.tip}
+              </div>
+            ) : null}
             {pinnedSpot && pinnedSpot.notes ? <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45, fontStyle:"italic" }}>{pinnedSpot.notes.slice(0, 120)}{pinnedSpot.notes.length > 120 ? "…" : ""}</div> : null}
             <div style={{ marginTop:8, display:"inline-block", background:bfrTierColor(biteScore) + "22", border:"1px solid " + bfrTierColor(biteScore), borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:bfrTierColor(biteScore) }}>
               Bite score {biteScore}/100
@@ -2208,6 +2234,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
                 </div>
               );
             })}
+            {targetSpeciesArticleTip ? (
+              <div style={{ marginTop:4, fontSize:11, color:th.muted, lineHeight:1.45 }}>
+                📰 <span style={{ color:th.white, fontWeight:600 }}>From {targetSpeciesArticleTip.source}:</span> {targetSpeciesArticleTip.tip}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div style={{ color:th.red, fontSize:13, textAlign:"center", padding:16 }}>
@@ -2317,6 +2348,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
                 <span style={{ fontSize:10, color:th.muted }}>{a.source}</span>
                 <Pill label={a.species} color={th.green} />
               </div>
+              {a.tip ? <div style={{ fontSize:11, color:th.muted, marginTop:4, lineHeight:1.4 }}>{a.tip}</div> : null}
             </a>
           );
         })}
