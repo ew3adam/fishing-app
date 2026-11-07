@@ -2129,27 +2129,35 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         </div>
       ) : null}
 
+      {/* This card's background (bfrBg) is always a fixed dark gradient, independent of the
+          selected theme (unlike the weather card above, which derives its gradient from theme
+          tokens). Text inside it must therefore use fixed light colors too, not th.white/th.blue
+          — those resolve to near-black in the beige/light themes (calibrated for light card
+          backgrounds elsewhere), which was invisible against this always-dark card. Confirmed by
+          a real-device screenshot (beige theme, 2026-11-07). th.muted/th.green/th.gold and
+          bfrTierColor()'s fixed bright colors already have sufficient contrast here and are left
+          as-is. */}
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
-        <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
-        <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
+        <div style={{ fontSize:11, color:"#5a9fd4", fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
+        <div style={{ fontSize:20, color:"#fff", fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
         {loading ? (
           <div style={{ fontSize:13, color:th.muted, padding:"12px 0" }}>Locating nearest water…</div>
         ) : (pinnedSpot || nearSpot) ? (
           <div>
-            {pinnedSpot ? <div style={{ fontSize:10, color:th.blue, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>📍 Your pinned spot</div> : null}
+            {pinnedSpot ? <div style={{ fontSize:10, color:"#5a9fd4", fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>📍 Your pinned spot</div> : null}
             <div style={{ fontSize:15, color:th.green, fontWeight:700 }}>{featuredSpotName}{featuredDist ? " · " + featuredDist + " mi" : ""}</div>
             {featuredSpeciesList ? <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Active: {featuredSpeciesList}</div> : null}
-            <div style={{ fontSize:13, color:th.white, marginTop:8, lineHeight:1.45 }}>
+            <div style={{ fontSize:13, color:"#fff", marginTop:8, lineHeight:1.45 }}>
               <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {featuredBaits[0] ? featuredBaits[0].name : "Live minnow"} — {featuredBaits[0] ? featuredBaits[0].why : "versatile starter bait"}
             </div>
             {tactic ? (
               <div style={{ fontSize:12, color:th.muted, marginTop:4, lineHeight:1.45 }}>
-                {tactic.icon} <span style={{ color:th.white, fontWeight:600 }}>{tactic.label} right now:</span> {tactic.tip}
+                {tactic.icon} <span style={{ color:"#fff", fontWeight:600 }}>{tactic.label} right now:</span> {tactic.tip}
               </div>
             ) : null}
             {featuredArticleTip ? (
               <div style={{ fontSize:11, color:th.muted, marginTop:4, lineHeight:1.45 }}>
-                📰 <span style={{ color:th.white, fontWeight:600 }}>From {featuredArticleTip.source}:</span> {featuredArticleTip.tip}
+                📰 <span style={{ color:"#fff", fontWeight:600 }}>From {featuredArticleTip.source}:</span> {featuredArticleTip.tip}
               </div>
             ) : null}
             {pinnedSpot && pinnedSpot.notes ? <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45, fontStyle:"italic" }}>{pinnedSpot.notes.slice(0, 120)}{pinnedSpot.notes.length > 120 ? "…" : ""}</div> : null}
