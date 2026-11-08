@@ -1047,6 +1047,11 @@ function speciesBaitTips(targetSpecies, season) {
   });
 }
 
+// Always rendered inside the "Bite Forecast" Card, whose background is a fixed dark rgba()
+// regardless of theme (see its `style` prop at the call site) -- the needle and score number here
+// are fixed "#fff" for the same reason the RFC Bite Forecast card's text is, not th.white (which
+// is near-black in the beige/light themes, invisible against this always-dark dial). Found via a
+// second real-device screenshot after the first card's fix, 2026-11-08.
 function BFRDial({ score, color, T }) {
   var th = THEMES[T];
   var [animScore, setAnimScore] = useState(0);
@@ -1064,10 +1069,10 @@ function BFRDial({ score, color, T }) {
         <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={th.border} strokeWidth="10" strokeLinecap="round" />
         <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={color || th.green} strokeWidth="10" strokeLinecap="round" strokeDasharray={filled + " " + arcLen} style={{ transition:"stroke-dasharray 1s ease-out" }} />
         <g transform={"rotate(" + angle + " 110 110)"} style={{ transition:"transform 1s ease-out" }}>
-          <line x1="110" y1="110" x2="110" y2="32" stroke={th.white} strokeWidth="3" strokeLinecap="round" />
+          <line x1="110" y1="110" x2="110" y2="32" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
           <circle cx="110" cy="110" r="6" fill={color || th.green} />
         </g>
-        <text x="110" y="98" textAnchor="middle" fill={th.white} fontSize="28" fontWeight="800">{animScore}</text>
+        <text x="110" y="98" textAnchor="middle" fill="#fff" fontSize="28" fontWeight="800">{animScore}</text>
         <text x="110" y="118" textAnchor="middle" fill={color || th.green} fontSize="11" fontWeight="700">BITE FORECAST</text>
       </svg>
     </div>
@@ -2207,6 +2212,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         </div>
       )}
 
+      {/* Fixed dark background regardless of theme -- same as the RFC Bite Forecast card above.
+          Text nested in a th.card-background sub-box (the 4 stat tiles, solunar rows) correctly
+          uses th.white/th.muted since those boxes ARE theme-colored (light in beige/light). Text
+          sitting directly on this Card's own dark background (bait names, article tip) must use
+          fixed light colors instead -- see BFRDial's comment for why. */}
       <Card T={T} borderColor={bfr ? bfr.color : th.border} style={{ background:T === "bluesteel" ? "rgba(18,32,53,0.85)" : "rgba(10,22,28,0.9)" }}>
         {loading ? (
           <div style={{ textAlign:"center", padding:"24px 0", color:th.muted }}>Calculating bite forecast…</div>
@@ -2251,14 +2261,14 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
             {baits.map(function(b, i) {
               return (
                 <div key={i} style={{ marginBottom:8, paddingBottom:8, borderBottom: i < baits.length - 1 ? "1px solid " + th.border : "none" }}>
-                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{b.name}</div>
+                  <div style={{ fontSize:13, color:"#fff", fontWeight:700 }}>{b.name}</div>
                   <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{b.why}</div>
                 </div>
               );
             })}
             {targetSpeciesArticleTip ? (
               <div style={{ marginTop:4, fontSize:11, color:th.muted, lineHeight:1.45 }}>
-                📰 <span style={{ color:th.white, fontWeight:600 }}>From {targetSpeciesArticleTip.source}:</span> {targetSpeciesArticleTip.tip}
+                📰 <span style={{ color:"#fff", fontWeight:600 }}>From {targetSpeciesArticleTip.source}:</span> {targetSpeciesArticleTip.tip}
               </div>
             ) : null}
           </div>
@@ -3452,15 +3462,18 @@ function CatalogueTab({ T }) {
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+          {/* Fixed dark backgrounds regardless of theme -- th.muted below was invisible-ish
+              against them in the beige/light themes (~2.8:1, under the 4.5:1 minimum), same bug
+              class as the Bite Forecast cards. Fixed to a dedicated light caption color. */}
           <a href={"https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(sel.searchQ)} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:"#1a3a5a", border:"1px solid #2a5a8a", borderRadius:10, padding:14, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:24 }}>📸</div>
             <div style={{ fontSize:13, color:"#7ab8e8", fontWeight:700, marginTop:4 }}>More Photos</div>
-            <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Google Images</div>
+            <div style={{ fontSize:10, color:"#a8c4d8", marginTop:2 }}>Google Images</div>
           </a>
           <a href={sel.yt} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:"#3a1a1a", border:"1px solid #8a2a2a", borderRadius:10, padding:14, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:24 }}>▶️</div>
             <div style={{ fontSize:13, color:"#e87a7a", fontWeight:700, marginTop:4 }}>Watch Tutorial</div>
-            <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>YouTube</div>
+            <div style={{ fontSize:10, color:"#d8a8a8", marginTop:2 }}>YouTube</div>
           </a>
         </div>
 

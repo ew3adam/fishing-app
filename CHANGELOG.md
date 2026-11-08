@@ -270,6 +270,14 @@ this line of work is drawn from. All merged._
   resolves to near-black, giving ~1.1:1 contrast against the dark card (needs 4.5:1).
   Fixed by using fixed light colors there instead, matching the weather card above it
   which already does this correctly. Found from a real-device screenshot.
+- **Same bug in the Bite Forecast gauge card and Tackle tab reference links** (found
+  from a second real-device screenshot after the fix above): `BFRDial`'s score number
+  and needle, the gauge card's bait names/article-tip text, and two caption lines on
+  the Tackle tab's "More Photos"/"Watch Tutorial" links all sat directly on fixed dark
+  backgrounds using theme tokens meant for light ones. Did a full repo-wide audit this
+  time (not just the one card) rather than fix instances one at a time — confirmed via
+  code search that every other `th.white`/`th.muted` usage in `App.jsx` and the
+  component files is correctly paired with a theme-derived background.
 
 ### Next
 - **Firebase Console (manual, one-time steps)**:
