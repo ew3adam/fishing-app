@@ -24,7 +24,7 @@ Before calling any non-trivial change done, check whether it made a claim in eit
 - **Maps**: Leaflet, OpenStreetMap tiles
 - **EXIF parsing**: exifr (reads GPS coords from catch photos)
 - **Weather**: Open-Meteo REST API (no key)
-- **AI features**: direct browser `fetch` to `api.anthropic.com` (weather-estimate fallback, fishing tips, tackle images/lookups) — see gotcha below
+- **AI features**: direct browser `fetch` to `api.anthropic.com` (weather-estimate fallback, fishing tips, tackle images/lookups) — see gotcha below. Exception: the Fishing Assistant chat bubble goes through a Cloudflare Worker that holds the real API key, not a direct browser call.
 - **Deploy**: `npm run deploy` → `gh-pages` branch (GitHub Pages); base path also supports Cloudflare Pages
 
 ## Development Commands
@@ -78,6 +78,8 @@ There are two separate "roster" concepts — don't conflate them:
 ### AI features have no API key
 Several features (weather-estimate fallback, one-line fishing tips, tackle image/info lookups in `App.jsx`) call `https://api.anthropic.com/v1/messages` directly from the browser with **no `x-api-key`/auth header at all**. This only works in environments that transparently proxy that origin (e.g. this session's sandboxed network, or Claude.ai's artifact preview) — in a normal browser hitting the real `api.anthropic.com`, or the deployed GitHub Pages site, these calls will fail with 401/CORS errors. Most call sites (`loadFishingTip`, `loadTackleImage`) wrap the whole thing in `try/catch` and fail silently — those are fine. **`loadWeather`'s Anthropic fallback is not**: it runs unguarded inside the `catch` block that handles the Open-Meteo failure (`src/App.jsx` ~line 1016-1033), so if it also throws (CORS/network error), the exception isn't caught anywhere, `loadWeather(...)` rejects, and its only caller (`HomeTab`'s `load()`, ~line 1118) has no `.catch()` — so `setLoading(false)` never runs and the forecast can be stuck loading. Treat this as a real bug to fix (wrap the Anthropic call in its own `try/catch` returning `null`, and/or add a `.catch()` at the call site), not as an intentional silent-fallback pattern — don't add a client-exposed API key to "fix" it instead.
 
+**The Fishing Assistant is the one exception** (`src/components/FishingAssistant.jsx`, the chat bubble on Home) — it does NOT call Anthropic from the browser. It calls a Cloudflare Worker (`cloudflare/fishing-assistant-worker.js`, same no-server-side-key-in-the-bundle pattern as the buoy proxy below) that holds a real `ANTHROPIC_API_KEY` secret and makes the actual API call server-side. Requires a signed-in member (checks a Firebase ID token via Firebase's own `accounts:lookup` REST endpoint — not a full active-roster check, see the Worker file's top comment for the known limitation). Scoped by its own system prompt to answer only from the real context `HomeTab` sends it (weather, buoy report, nearby spots, bait tips) plus general fishing knowledge — told explicitly not to invent regs numbers or specifics it wasn't given. `FISHING_ASSISTANT_URL` in that component is a placeholder (`YOUR-SUBDOMAIN`) until the Worker is deployed — see `docs/FISHING-ASSISTANT-DEPLOY.md`.
+
 ### Firebase config
 `src/lib/firebase.js` has hardcoded fallback values for the public web config (safe to expose — it's not a secret); `VITE_FIREBASE_*` env vars override them when set (see `.env.example`). `src/config/authProviders.js` **is committed to git** (not gitignored) and reads `VITE_GOOGLE_CLIENT_ID` / `VITE_FACEBOOK_APP_ID` / `VITE_APPLE_CLIENT_ID` / `VITE_PHONE_AUTH_ENABLED` at runtime, all disabled by default; `src/config/authProviders.example.js` is an older/unused template with a different (static object) shape — prefer editing `authProviders.js` directly.
 
@@ -93,6 +95,8 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `src/services/rosterHealthService.js` | Diagnostic check that the roster/auth Firestore reads work |
 | `src/services/catchPhotoStorage.js` | Compresses + uploads catch photos to Firebase Storage; strips base64 before Firestore writes |
 | `src/components/ClubFeedList.jsx` | Club-wide catch feed (pull-to-refresh, likes) |
+| `src/components/FishingAssistant.jsx` | Home chat bubble — scoped Q&A grounded in real app data, via Worker (not a direct Anthropic call) |
+| `cloudflare/fishing-assistant-worker.js` | Holds the real `ANTHROPIC_API_KEY` secret server-side; deployed separately, see `docs/FISHING-ASSISTANT-DEPLOY.md` |
 | `src/components/SpotMapPicker.jsx` / `SpotMapThumb.jsx` | Leaflet map for picking/displaying spots |
 | `src/components/ScoutResultsMap.jsx` | Read-only Leaflet overview map for Scout results (red pins) — visual sanity-check, not a picker |
 | `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed (see Architecture above) |

@@ -249,6 +249,28 @@ this line of work is drawn from. All merged._
   sandbox verification accepted as sufficient (user's call) — not reopening these
   pending a phone check.
 
+### Added (2026-11-07/08)
+- **Papoose Lake** added to `SCOUT_SPOTS` — reported live by a member standing at the
+  lake; coordinates confirmed via the member's own Apple Maps pin, species/parking
+  from a real FPDCC lake-survey sheet the member photographed on-site (not guessed).
+- **Fishing Assistant** — chat bubble on Home, scoped to fishing/app questions.
+  Answers only from real context (current weather, buoy report, nearby known spots,
+  species bait tips) sent from the client, plus general fishing knowledge; told
+  explicitly not to invent regs numbers or specifics it wasn't given. Calls a new
+  Cloudflare Worker (`cloudflare/fishing-assistant-worker.js`) that holds the real
+  Anthropic API key server-side — the browser never sees it, same pattern as the
+  buoy proxy. Requires a signed-in member (Firebase ID token checked at the Worker).
+  **⚠️ `FISHING_ASSISTANT_URL` is a placeholder until the Worker is deployed** — see
+  `docs/FISHING-ASSISTANT-DEPLOY.md`.
+
+### Fixed
+- **RFC Bite Forecast card text nearly invisible in the beige theme (Section 508
+  contrast violation)**: the card's background is a fixed dark gradient regardless of
+  theme, but its text used theme tokens meant for light backgrounds — beige's "white"
+  resolves to near-black, giving ~1.1:1 contrast against the dark card (needs 4.5:1).
+  Fixed by using fixed light colors there instead, matching the weather card above it
+  which already does this correctly. Found from a real-device screenshot.
+
 ### Next
 - **Firebase Console (manual, one-time steps)**:
   1. Authentication → Sign-in method → Add provider → **Email link (passwordless)** → Enable
@@ -262,6 +284,10 @@ this line of work is drawn from. All merged._
   send back its real `*.workers.dev` URL to replace the `BUOY_PROXY_URL` placeholder
   in `src/App.jsx` (PR #53) — same reason, needs the user's own Cloudflare account.
   **User has confirmed they'll run both of these deploys themselves.**
+- **Deploy `cloudflare/fishing-assistant-worker.js`** per
+  `docs/FISHING-ASSISTANT-DEPLOY.md` (needs a real Anthropic API key set as a Worker
+  secret, in addition to Cloudflare account access) and send back its URL to replace
+  `FISHING_ASSISTANT_URL` in `src/components/FishingAssistant.jsx`.
 
 ---
 
@@ -399,4 +425,4 @@ _Commits: `524b219` → `7b4ce5a`_
 - **GitHub Pages**: https://ew3adam.github.io/fishing-app/
 - **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-11-08_
