@@ -7,6 +7,7 @@ import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
+import FishingAssistant from "./components/FishingAssistant.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
@@ -1879,6 +1880,19 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var featuredBaits = speciesBaitTips(featuredPrimarySpecies, season);
   var featuredArticleTip = articleTipForSpecies(featuredPrimarySpecies);
   var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
+  // Real, current data handed to the Fishing Assistant Worker as grounding context -- never
+  // invented, same discipline as the rest of this card. Kept compact (no full SCOUT_SPOTS dump)
+  // since every token here is billed per chat message (see FISHING-ASSISTANT-DEPLOY.md).
+  var assistantContext = [
+    wx ? ("Weather: " + wx.temp + "°F, " + wx.condition + ", wind " + wx.wind + " mph" + (wx.windCompass ? " " + wx.windCompass : "") + ".") : null,
+    featuredSpotName ? ("Nearest/featured spot: " + featuredSpotName + (featuredDist ? " (" + featuredDist + " mi away)" : "") + (featuredSpeciesList ? ", species: " + featuredSpeciesList : "") + ".") : null,
+    topNearbySpots.length ? ("Other nearby known spots: " + topNearbySpots.map(function(s) { return s.name + " (" + s.dist.toFixed(1) + " mi)"; }).join(", ") + ".") : null,
+    ("Current season: " + season + ". Member's selected target species: " + targetSpecies + ".") ,
+    featuredBaits[0] ? ("Top bait suggestion on file for " + featuredPrimarySpecies + ": " + featuredBaits[0].name + " — " + featuredBaits[0].why) : null,
+    tactic ? ("Time-of-day tactic right now (" + tactic.label + "): " + tactic.tip) : null,
+    buoyReport ? ("Lake Michigan shore report — overall: " + buoyReport.statusLabel + ". By spot: " + buoyReport.shoreConditions.map(function(s) { return s.name + ": " + s.phrase; }).join("; ") + (buoyReport.notes.length ? ". Notes: " + buoyReport.notes.join(" ") : "") + ".") : "Lake Michigan buoy/shore report: not available right now (Worker not deployed or no data) — don't guess at Lake Michigan conditions.",
+    bfr ? ("Bite forecast score: " + biteScore + "/100 (" + bfr.label + ").") : null,
+  ].filter(Boolean).join(" ");
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
   var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
@@ -2363,6 +2377,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
       </Card>
       </>
       )}
+      <FishingAssistant T={T} authMember={authMember} contextSummary={assistantContext} />
     </div>
   );
 }
