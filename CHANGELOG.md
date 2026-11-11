@@ -263,6 +263,17 @@ this line of work is drawn from. All merged._
   **⚠️ `FISHING_ASSISTANT_URL` is a placeholder until the Worker is deployed** — see
   `docs/FISHING-ASSISTANT-DEPLOY.md`.
 
+### Added (2026-11-11)
+- **Invite roster members who've never signed in**, in Profile's Club members section.
+  Lists only real roster members whose `authUid` is still null (never completed
+  sign-in) — never a free-typed email/number, since anyone not actually on the roster
+  would hit the sign-in gate anyway. Select one or more, then "Email Selected"/"Text
+  Selected" opens the device's own Mail/Messages app pre-filled with a short message
+  and the canonical sign-in link (now exported from `authService.js` as
+  `CANONICAL_SIGN_IN_URL` so both call sites share one source of truth) — this app
+  still can't send email/text itself, so it's a manual nudge, not an automatic blast.
+  Each button only appears for members who actually have that contact method on file.
+
 ### Fixed
 - **RFC Bite Forecast card text nearly invisible in the beige theme (Section 508
   contrast violation)**: the card's background is a fixed dark gradient regardless of
@@ -433,4 +444,4 @@ _Commits: `524b219` → `7b4ce5a`_
 - **GitHub Pages**: https://ew3adam.github.io/fishing-app/
 - **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
 
-_Last updated: 2026-11-08_
+_Last updated: 2026-11-11_

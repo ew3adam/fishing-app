@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud, CANONICAL_SIGN_IN_URL } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
@@ -604,6 +604,25 @@ function normalizeProfile(raw) {
   out.cloudSyncedAt = typeof p.cloudSyncedAt === "string" ? p.cloudSyncedAt : "";
   if (out.email) out.email = out.email.replace(/\s+/g, "").trim().toLowerCase();
   return out;
+}
+
+/** Real, honest invite text -- no fake urgency, no fabricated claims about the app. */
+function inviteMessageText() {
+  return "Hey! You're on the Riverside Fishing Club roster but haven't signed into the club app yet. Sign in here to log catches, check bite conditions, and see the club feed: " + CANONICAL_SIGN_IN_URL;
+}
+
+/** mailto: link pre-filled for one or more members -- null if none of them have an email on file. */
+function buildInviteMailtoLink(members) {
+  var emails = (members || []).map(function(m) { return m.email; }).filter(Boolean);
+  if (!emails.length) return null;
+  return "mailto:" + emails.join(",") + "?subject=" + encodeURIComponent("Join us on the RFC Fishing app") + "&body=" + encodeURIComponent(inviteMessageText());
+}
+
+/** sms: link pre-filled for one or more members -- null if none of them have a phone on file. */
+function buildInviteSmsLink(members) {
+  var phones = (members || []).map(function(m) { return String(m.phone || "").replace(/[^\d+]/g, ""); }).filter(Boolean);
+  if (!phones.length) return null;
+  return "sms:" + phones.join(",") + "?&body=" + encodeURIComponent(inviteMessageText());
 }
 
 function appendSpotActivity(setProfile, message) {
@@ -4537,6 +4556,19 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwResult, setChangePwResult] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
+  // Invite roster members who've never signed in (authUid null) -- recipients are always drawn
+  // from the real roster list (clubMembers), never free-typed, since anyone not actually on the
+  // roster would hit the sign-in gate anyway. No backend/outbound email here (this app can't send
+  // mail itself) -- just opens the device's own Mail/Messages app pre-filled, same as every other
+  // share-via-native-app pattern in this file.
+  const [inviteSelected, setInviteSelected] = useState({});
+  function toggleInviteSelected(id) {
+    setInviteSelected(function(prev) {
+      var next = Object.assign({}, prev);
+      if (next[id]) delete next[id]; else next[id] = true;
+      return next;
+    });
+  }
 
   useEffect(function() {
     setForm(normalizeProfile(profile));
@@ -4687,6 +4719,53 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
           <div style={{ fontSize:12, color:th.muted }}>No members loaded — check Firestore rules or roster import.</div>
         )}
       </Card>
+
+      {(function() {
+        var neverSignedIn = (clubMembers || []).filter(function(m) { return !m.authUid; });
+        if (!neverSignedIn.length) return null;
+        var selectedMembers = neverSignedIn.filter(function(m) { return inviteSelected[m.id]; });
+        var mailtoLink = buildInviteMailtoLink(selectedMembers);
+        var smsLink = buildInviteSmsLink(selectedMembers);
+        return (
+          <Card T={T} borderColor={th.gold + "44"}>
+            <SecLabel text={"Invite members who haven't signed in (" + neverSignedIn.length + ")"} T={T} />
+            <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.4 }}>
+              Select one or more, then open your Mail or Messages app pre-filled with a sign-in link.
+              Only real roster members show up here — there's no way to invite anyone else.
+            </div>
+            <div style={{ maxHeight:220, overflowY:"auto", marginBottom:10 }}>
+              {neverSignedIn.map(function(m) {
+                var checked = !!inviteSelected[m.id];
+                return (
+                  <label key={m.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid " + th.border, cursor:"pointer" }}>
+                    <input type="checkbox" checked={checked} onChange={function() { toggleInviteSelected(m.id); }} />
+                    <span style={{ flex:1, fontSize:12, color:th.white }}>{m.displayName || m.id}</span>
+                    <span style={{ fontSize:10, color:th.muted }}>
+                      {m.email ? "✉️" : ""}{m.phone ? " 📱" : ""}{!m.email && !m.phone ? "no contact info" : ""}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              {mailtoLink ? (
+                <a href={mailtoLink} style={{ flex:1, textAlign:"center", background:th.blue, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
+                  ✉️ Email Selected ({selectedMembers.filter(function(m) { return m.email; }).length})
+                </a>
+              ) : (
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>✉️ Email</div>
+              )}
+              {smsLink ? (
+                <a href={smsLink} style={{ flex:1, textAlign:"center", background:th.green, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
+                  📱 Text Selected ({selectedMembers.filter(function(m) { return m.phone; }).length})
+                </a>
+              ) : (
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>📱 Text</div>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
 
       <Card T={T}>
         <SecLabel text="Your Info" T={T} />

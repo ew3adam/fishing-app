@@ -53,7 +53,7 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 - **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
 - **Spots**: private + club-shared fishing spots, Leaflet map picker.
 - **Scout**: browse/search known spots, club-shared spots, and live OSM/Overpass water + businesses; results also plot as red pins on a `ScoutResultsMap` overview map (blue dot = your position) so a bad/mislabeled entry is visible before you drive there — see spot-data-quality gotcha below.
-- **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme.
+- **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme, inviting never-signed-in roster members via Mail/Messages (`buildInviteMailtoLink`/`buildInviteSmsLink`).
 
 ### Local-first, cloud-synced data
 Profile and catches live in `localStorage` first and are mirrored to Firestore once a member is signed in — this is not a thin Firestore client, so don't assume every read/write round-trips the network. Sync logic is in `src/services/fishingSyncService.js`:
