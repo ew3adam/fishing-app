@@ -4569,6 +4569,34 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
       return next;
     });
   }
+  // Sends a REAL passwordless sign-in link via Firebase (the same function the normal sign-in
+  // screen uses) -- unlike the mailto:/sms: drafts above, the member gets a working magic link
+  // straight from Firebase, no extra step. Only ever called for emails already confirmed to
+  // belong to a roster member (sourced from clubMembers, same "only members" restriction as the
+  // rest of this feature). Sequential, not Promise.all, so one slow/failing send doesn't race
+  // with the next and so per-member status updates land in a sane order.
+  const [inviteLinkBusy, setInviteLinkBusy] = useState(false);
+  const [inviteLinkStatus, setInviteLinkStatus] = useState({}); // {[memberId]: "sent" | "error"}
+  async function sendRealSignInLinks(members) {
+    setInviteLinkBusy(true);
+    // `let` (not `var`) is load-bearing here, not a style choice: setInviteLinkStatus's updater
+    // callback runs on React's own schedule, after this loop has already moved on -- with `var`
+    // (function-scoped), every callback closed over the SAME mutable binding, so by the time the
+    // first member's "sent" callback actually ran, the loop had already reassigned `member` to the
+    // next one, and the status landed on the wrong member entirely. `let` gives each iteration its
+    // own binding, which is what the closure actually needs.
+    for (let i = 0; i < members.length; i++) {
+      let member = members[i];
+      if (!member.email) continue;
+      try {
+        await sendSignInLink(member.email);
+        setInviteLinkStatus(function(prev) { var next = Object.assign({}, prev); next[member.id] = "sent"; return next; });
+      } catch (e) {
+        setInviteLinkStatus(function(prev) { var next = Object.assign({}, prev); next[member.id] = "error"; return next; });
+      }
+    }
+    setInviteLinkBusy(false);
+  }
 
   useEffect(function() {
     setForm(normalizeProfile(profile));
@@ -4726,20 +4754,26 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
         var selectedMembers = neverSignedIn.filter(function(m) { return inviteSelected[m.id]; });
         var mailtoLink = buildInviteMailtoLink(selectedMembers);
         var smsLink = buildInviteSmsLink(selectedMembers);
+        var selectedWithEmail = selectedMembers.filter(function(m) { return m.email; });
         return (
           <Card T={T} borderColor={th.gold + "44"}>
             <SecLabel text={"Invite members who haven't signed in (" + neverSignedIn.length + ")"} T={T} />
             <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.4 }}>
-              Select one or more, then open your Mail or Messages app pre-filled with a sign-in link.
+              Select one or more. "Send Sign-In Email" has Firebase email them a real, working
+              login link directly — the fastest option when they have an email on file. The two
+              draft buttons below open your own Mail/Messages app instead, for a personal nudge.
               Only real roster members show up here — there's no way to invite anyone else.
             </div>
             <div style={{ maxHeight:220, overflowY:"auto", marginBottom:10 }}>
               {neverSignedIn.map(function(m) {
                 var checked = !!inviteSelected[m.id];
+                var status = inviteLinkStatus[m.id];
                 return (
                   <label key={m.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid " + th.border, cursor:"pointer" }}>
                     <input type="checkbox" checked={checked} onChange={function() { toggleInviteSelected(m.id); }} />
                     <span style={{ flex:1, fontSize:12, color:th.white }}>{m.displayName || m.id}</span>
+                    {status === "sent" ? <span style={{ fontSize:10, color:th.green, fontWeight:700 }}>✓ Sent</span> : null}
+                    {status === "error" ? <span style={{ fontSize:10, color:th.red, fontWeight:700 }}>⚠️ Failed</span> : null}
                     <span style={{ fontSize:10, color:th.muted }}>
                       {m.email ? "✉️" : ""}{m.phone ? " 📱" : ""}{!m.email && !m.phone ? "no contact info" : ""}
                     </span>
@@ -4747,20 +4781,32 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
                 );
               })}
             </div>
+            <button
+              type="button"
+              disabled={!selectedWithEmail.length || inviteLinkBusy}
+              onClick={function() { sendRealSignInLinks(selectedWithEmail); }}
+              style={{
+                width:"100%", marginBottom:8, background: (!selectedWithEmail.length || inviteLinkBusy) ? th.border : th.gold,
+                color: (!selectedWithEmail.length || inviteLinkBusy) ? th.muted : "#000", border:"none", borderRadius:8,
+                padding:"11px 0", fontSize:13, fontWeight:700, cursor:(!selectedWithEmail.length || inviteLinkBusy) ? "default" : "pointer",
+              }}
+            >
+              {inviteLinkBusy ? "Sending…" : "📨 Send Sign-In Email (" + selectedWithEmail.length + ")"}
+            </button>
             <div style={{ display:"flex", gap:8 }}>
               {mailtoLink ? (
                 <a href={mailtoLink} style={{ flex:1, textAlign:"center", background:th.blue, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
-                  ✉️ Email Selected ({selectedMembers.filter(function(m) { return m.email; }).length})
+                  ✉️ Draft Email ({selectedMembers.filter(function(m) { return m.email; }).length})
                 </a>
               ) : (
-                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>✉️ Email</div>
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>✉️ Draft Email</div>
               )}
               {smsLink ? (
                 <a href={smsLink} style={{ flex:1, textAlign:"center", background:th.green, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
-                  📱 Text Selected ({selectedMembers.filter(function(m) { return m.phone; }).length})
+                  📱 Draft Text ({selectedMembers.filter(function(m) { return m.phone; }).length})
                 </a>
               ) : (
-                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>📱 Text</div>
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>📱 Draft Text</div>
               )}
             </div>
           </Card>

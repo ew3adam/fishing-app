@@ -273,8 +273,21 @@ this line of work is drawn from. All merged._
   `CANONICAL_SIGN_IN_URL` so both call sites share one source of truth) — this app
   still can't send email/text itself, so it's a manual nudge, not an automatic blast.
   Each button only appears for members who actually have that contact method on file.
+- **"Send Sign-In Email" button** added alongside the two drafts above — calls the
+  same `sendSignInLink()` Firebase already uses for normal self-service sign-in, so
+  selected members get a real, working magic-link email directly from Firebase
+  (not routed through the admin's own Mail app). Sequential per member with inline
+  ✓ Sent/⚠️ Failed status, only attempted for members who have an email on file.
 
 ### Fixed
+- **Invite status landed on the wrong member** — a real bug caught during testing,
+  not shipped: `sendRealSignInLinks`'s loop used `var member`, function-scoped, so
+  every status-update callback closed over the same mutable binding; by the time
+  the first member's "sent" callback actually ran (on React's own schedule, after
+  the loop had moved on), `member` already pointed at the next one, so the status
+  landed on the wrong row entirely. Fixed with `let` (block-scoped per iteration) —
+  deliberate exception to this file's usual `var` convention, since `var` here was
+  an actual closure bug, not a style choice.
 - **RFC Bite Forecast card text nearly invisible in the beige theme (Section 508
   contrast violation)**: the card's background is a fixed dark gradient regardless of
   theme, but its text used theme tokens meant for light backgrounds — beige's "white"
