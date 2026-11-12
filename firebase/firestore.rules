@@ -52,5 +52,23 @@ service cloud.firestore {
         || (isSignedIn() && isClubVisibleCatch()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']));
     }
+
+    // Comments on club-visible catches (Club Feed). Any signed-in member can read and add;
+    // authors can delete their own, and the catch owner can delete any on their catch.
+    match /members/{memberId}/fishingCatches/{catchId}/comments/{commentId} {
+      function parentCatch() {
+        return get(/databases/$(database)/documents/members/$(memberId)/fishingCatches/$(catchId)).data;
+      }
+      function parentVisible() {
+        return parentCatch().visibility == 'club' || parentCatch().visibility == 'public_feed';
+      }
+      allow read: if isSignedIn() && (isOwner(memberId) || parentVisible());
+      allow create: if isSignedIn() && parentVisible()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500
+        && request.resource.data.keys().hasOnly(['authorUid', 'authorId', 'authorName', 'text', 'createdAt']);
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || isOwner(memberId));
+    }
   }
 }

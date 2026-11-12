@@ -35,7 +35,8 @@ function catchesCol(memberId) {
 function pickSyncProfile(profile) {
   var p = profile || {};
   return {
-    level: p.level || "Beginner",
+    level: typeof p.level === "string" ? p.level : "Beginner",
+    myCatchesOpen: p.myCatchesOpen !== false,
     favSpecies: Array.isArray(p.favSpecies) ? p.favSpecies : [],
     favSpots: Array.isArray(p.favSpots) ? p.favSpots : [],
     gear: Array.isArray(p.gear) ? p.gear : [],
@@ -54,7 +55,8 @@ export async function loadFishingProfileFromCloud(memberId, localProfile) {
   var cloud = snap.data() || {};
   var local = localProfile || {};
   var merged = Object.assign({}, local, {
-    level: cloud.level || local.level,
+    level: typeof cloud.level === "string" ? cloud.level : local.level,
+    myCatchesOpen: typeof cloud.myCatchesOpen === "boolean" ? cloud.myCatchesOpen : local.myCatchesOpen !== false,
     favSpecies: cloud.favSpecies || local.favSpecies,
     favSpots: cloud.favSpots || local.favSpots,
     gear: cloud.gear && cloud.gear.length ? cloud.gear : local.gear,
@@ -126,6 +128,39 @@ export async function saveCatchToCloud(memberId, catchEntry) {
   var ref = doc(catchesCol(memberId), prepared.id);
   await setDoc(ref, Object.assign({}, prepared.data, { syncedAt: new Date().toISOString() }), { merge: true });
   return { id: prepared.id, photoUrl: prepared.photoUrl };
+}
+
+/** Comments on a club-visible catch, oldest first. */
+export async function loadCatchComments(ownerId, catchId) {
+  if (!ownerId || catchId == null) return [];
+  var snap = await getDocs(collection(getFirebaseDb(), "members", ownerId, "fishingCatches", String(catchId), "comments"));
+  return snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); })
+    .sort(function(a, b) { return String(a.createdAt || "").localeCompare(String(b.createdAt || "")); });
+}
+
+/** Add a comment as the signed-in member. Text is trimmed and capped at 500 characters. */
+export async function addCatchComment(ownerId, catchId, author, text) {
+  var clean = String(text || "").replace(/\s+/g, " ").trim().slice(0, 500);
+  if (!clean || !author || !author.uid) throw new Error("empty comment");
+  var id = Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  var data = { authorUid: author.uid, authorId: author.id || "", authorName: String(author.name || "Member").slice(0, 80), text: clean, createdAt: new Date().toISOString() };
+  await setDoc(doc(getFirebaseDb(), "members", ownerId, "fishingCatches", String(catchId), "comments", id), data);
+  return Object.assign({ id: id }, data);
+}
+
+export async function deleteCatchComment(ownerId, catchId, commentId) {
+  await deleteDoc(doc(getFirebaseDb(), "members", ownerId, "fishingCatches", String(catchId), "comments", String(commentId)));
+}
+
+/** Delete a member's own catch: Firestore doc, then its photo in Storage (best effort). */
+export async function deleteCatchFromCloud(memberId, catchId) {
+  if (!memberId || catchId == null) return;
+  await deleteDoc(doc(catchesCol(memberId), String(catchId)));
+  try {
+    var st = await import("firebase/storage");
+    var { getFirebaseStorage } = await import("../lib/firebase.js");
+    await st.deleteObject(st.ref(getFirebaseStorage(), "members/" + memberId + "/catches/" + catchId + "/photo.jpg"));
+  } catch (e) { /* no photo, or Storage rules not yet deployed: leave the file */ }
 }
 
 /** Increment or decrement likeCount on a club-visible catch. */

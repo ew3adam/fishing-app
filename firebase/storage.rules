@@ -17,6 +17,8 @@ service firebase.storage {
       allow write: if isCatchOwner(memberId)
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      // Delete has no request.resource, so it needs its own rule (owner only).
+      allow delete: if isCatchOwner(memberId);
     }
   }
 }

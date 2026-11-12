@@ -2,13 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { loadClubFeedCatches, updateCatchLike } from "../services/fishingSyncService.js";
 import { resolveCatchPhotoUrl } from "../services/catchPhotoStorage.js";
 import { formatFeedSpotName } from "../utils/feedSpotPrivacy.js";
+import CatchComments from "./CatchComments.jsx";
+import { THEMES } from "../theme.js";
 
-var THEMES = {
-  dark:      { card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a" },
-  light:     { card:"rgba(255,255,255,0.9)",  border:"#c0d4c0", green:"#2a7a2a", gold:"#a07010", white:"#1a2a1a", muted:"#5a7a5a" },
-  bluesteel: { card:"rgba(255,255,255,0.06)", border:"#1a3050", green:"#40c0e0", gold:"#e0c040", white:"#e8f0f8", muted:"#6080a0" },
-  beige:     { card:"#ffffff", border:"#e3dcc9", green:"#5b7a52", gold:"#a67c3d", white:"#2b2620", muted:"#8a8172" },
-};
 
 function memberFirstName(name) {
   if (!name) return "Member";
@@ -41,6 +37,8 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
   // in quick succession still both go through. Same root cause as the double-submit bug fixed in
   // CatchTab.submitCatch (BUG-1, see docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md).
   var likeInFlightRef = useRef({});
+  var [openComments, setOpenComments] = useState({});
+  var [commentCounts, setCommentCounts] = useState({});
 
   function doLoad() {
     return loadClubFeedCatches()
@@ -128,7 +126,7 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
         <div style={{ fontSize:13, color:th.muted, lineHeight:1.5, marginBottom:16 }}>Sign in with your roster account to see member catches.</div>
         {setTab ? (
           <button type="button" onClick={function() { if (onSignInClick) onSignInClick(); else setTab("me"); }}
-            style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 18px", cursor:"pointer", fontSize:13, fontWeight:700 }}>
+            style={{ background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"10px 18px", cursor:"pointer", fontSize:13, fontWeight:700 }}>
             Sign in
           </button>
         ) : null}
@@ -174,50 +172,57 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
             key={postId}
             style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, marginBottom:14, overflow:"hidden", animation:"fadeInUp 0.2s ease-out both" }}
           >
+            {/* Header: who, when, where (Facebook-style) */}
             <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px" }}>
-              <div style={{ width:36, height:36, borderRadius:"50%", background:th.green + "33", border:"1px solid " + th.green, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:800, color:th.green, flexShrink:0 }}>
+              <div style={{ width:40, height:40, borderRadius:"50%", background:th.green + "33", border:"1px solid " + th.green, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:800, color:th.green, flexShrink:0 }}>
                 {avatarInitial(c.memberName || c.user)}
               </div>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{memberFirstName(c.memberName || c.user)}</div>
-                <div style={{ fontSize:11, color:th.muted }}>{c.date || "Recent"}</div>
+                <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{c.memberName || c.user || "Member"}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{(c.date || "Recent") + (spotLabel ? " \u00b7 \ud83d\udccd " + spotLabel : "")}</div>
               </div>
             </div>
-            {resolveCatchPhotoUrl(c) ? (
-              <img src={resolveCatchPhotoUrl(c)} alt={c.species || "catch"} style={{ width:"100%", maxHeight:420, objectFit:"cover", display:"block", background:"#000" }} />
-            ) : null}
-            <div style={{ padding:"10px 12px 12px" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                <button
-                  type="button"
-                  onClick={function() { toggleLike(c); }}
-                  style={{
-                    background: liked ? th.green + "22" : "transparent",
-                    border: "1px solid " + (liked ? th.green : th.border),
-                    borderRadius:16,
-                    padding:"5px 12px",
-                    color: liked ? th.green : th.muted,
-                    fontSize:12,
-                    fontWeight:700,
-                    cursor:"pointer",
-                    display:"flex",
-                    alignItems:"center",
-                    gap:5,
-                    animation: animating ? "likePop 0.3s ease-out" : "none",
-                  }}
-                >
-                  <span>{liked ? "Nice fish ✓" : "Nice fish"}</span>
-                  {likeCount > 0 && <span style={{ fontSize:11, opacity:0.8 }}>({likeCount})</span>}
+            {/* What was caught */}
+            <div style={{ padding:"0 12px 10px" }}>
+              <div style={{ fontSize:14, color:th.white, lineHeight:1.45 }}>
+                Caught a <b>{c.species || "fish"}</b>{c.length ? <span> {"\u00b7"} <b style={{ color:th.green }}>{c.length}</b></span> : null}{c.estWeight ? <span style={{ color:th.muted }}> (~{c.estWeight})</span> : null}
+              </div>
+              {c.bait ? <div style={{ fontSize:12, color:th.muted, marginTop:2 }}>{"Bait: " + c.bait}</div> : null}
+              {c.notes ? <div style={{ fontSize:13, color:th.white, marginTop:4, lineHeight:1.45 }}>{c.notes}</div> : null}
+            </div>
+            {/* Photo(s): one full width, or a grid when there are several */}
+            {(function() {
+              var photos = (Array.isArray(c.photoUrls) && c.photoUrls.length ? c.photoUrls : [resolveCatchPhotoUrl(c)]).filter(Boolean).slice(0, 4);
+              if (!photos.length) return null;
+              if (photos.length === 1) return <img src={photos[0]} alt={c.species || "catch"} style={{ width:"100%", maxHeight:460, objectFit:"cover", display:"block", background:"#000" }} />;
+              return (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2, background:"#000" }}>
+                  {photos.map(function(u, pi) { return <img key={pi} src={u} alt={(c.species || "catch") + " photo " + (pi + 1)} style={{ width:"100%", height:180, objectFit:"cover", display:"block" }} />; })}
+                </div>
+              );
+            })()}
+            {/* Counts */}
+            {(likeCount > 0 || commentCounts[postId] > 0) ? (
+              <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 12px 0", fontSize:12, color:th.muted }}>
+                <span>{likeCount > 0 ? "\ud83d\udc4d " + likeCount : ""}</span>
+                <button type="button" onClick={function() { setOpenComments(function(o) { return Object.assign({}, o, { [postId]: !o[postId] }); }); }} style={{ background:"none", border:"none", color:th.muted, fontSize:12, cursor:"pointer", padding:0 }}>
+                  {commentCounts[postId] > 0 ? commentCounts[postId] + (commentCounts[postId] === 1 ? " comment" : " comments") : ""}
                 </button>
               </div>
-              <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>
-                {c.species}
-                {c.length ? <span style={{ color:th.green, fontWeight:600 }}> · {c.length}</span> : null}
-              </div>
-              {c.bait ? <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{c.bait}</div> : null}
-              <div style={{ fontSize:12, color:th.gold }}>{spotLabel}</div>
-              {c.notes ? <div style={{ fontSize:12, color:th.white, marginTop:6, fontStyle:"italic", lineHeight:1.45 }}>{c.notes}</div> : null}
+            ) : null}
+            {/* Action bar: Like, Comment (no Share for now) */}
+            <div style={{ display:"flex", borderTop:"1px solid " + th.border, margin:"8px 12px 0" }}>
+              <button type="button" onClick={function() { toggleLike(c); }} aria-pressed={liked}
+                style={{ flex:1, background:"transparent", border:"none", padding:"9px 0", color:liked ? th.green : th.muted, fontSize:13, fontWeight:700, cursor:"pointer", animation: animating ? "likePop 0.3s ease-out" : "none" }}>
+                {"\ud83d\udc4d " + (liked ? "Liked" : "Like")}
+              </button>
+              <button type="button" onClick={function() { setOpenComments(function(o) { return Object.assign({}, o, { [postId]: !o[postId] }); }); }}
+                style={{ flex:1, background:"transparent", border:"none", padding:"9px 0", color:openComments[postId] ? th.green : th.muted, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                {"\ud83d\udcac Comment"}
+              </button>
             </div>
+            <CatchComments post={c} authMember={authMember} th={th} open={!!openComments[postId]}
+              onCount={function(n) { setCommentCounts(function(m) { return Object.assign({}, m, { [postId]: n }); }); }} />
           </article>
         );
       })}

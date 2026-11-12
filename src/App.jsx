@@ -2,10 +2,18 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, deleteCatchFromCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
+import { identifySpecies } from "./services/speciesIdService.js";
+import { helperUrl } from "./lib/rfcHelper.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
+import { THEMES, themeIsLight } from "./theme.js";
+
+// Opening a new page/view starts at the top instead of the previous scroll position.
+function useScrollTop(deps) {
+  useEffect(function() { try { window.scrollTo(0, 0); } catch (e) { /* ignore */ } }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+}
 import SaveToast from "./components/SaveToast.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
@@ -16,26 +24,13 @@ import { BAIT_SHOPS } from "./data/baitShops.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
 import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
 
-// ─── THEMES ───────────────────────────────────────────────────────────────────
-const THEMES = {
-  dark:      { bg:"#0d1a0d", card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", dim:"#3a6a3a", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a", blue:"#5a9fd4", red:"#e05050", orange:"#e09030", teal:"#4ab8a0", indigo:"#5a6fd4", nav:"rgba(13,26,13,0.97)" },
-  light:     { bg:"#f0f4f0", card:"rgba(255,255,255,0.9)", border:"#c0d4c0", green:"#2a7a2a", dim:"#7ab87a", gold:"#a07010", white:"#1a2a1a", muted:"#5a7a5a", blue:"#2a5fa0", red:"#c03030", orange:"#b06010", teal:"#1a8070", indigo:"#3a4fb0", nav:"rgba(240,244,240,0.97)" },
-  bluesteel: { bg:"#0d1520", card:"rgba(255,255,255,0.06)", border:"#1a3050", green:"#40c0e0", dim:"#1a5070", gold:"#e0c040", white:"#e8f0f8", muted:"#6080a0", blue:"#60a0e0", red:"#e05050", orange:"#e09030", teal:"#40d0c0", indigo:"#8080e0", nav:"rgba(13,21,32,0.97)" },
-  // Default theme as of 2026-09-19, per direct request: "the neon green is something that I
-  // like, but it's not professional so go in a white beige theme." Keeps green as the accent
-  // (the user said they like it) but swaps the neon dark-mode green for a muted sage/forest
-  // tone against warm ivory/beige surfaces instead of the saturated green-tinted "light"
-  // theme above, which is unchanged and still available in the picker.
-  beige:     { bg:"#f7f3ec", card:"#ffffff", border:"#e3dcc9", green:"#5b7a52", dim:"#9ab08f", gold:"#a67c3d", white:"#2b2620", muted:"#8a8172", blue:"#3f6a92", red:"#a8433a", orange:"#b3743a", teal:"#3a7d70", indigo:"#4a5480", nav:"rgba(247,243,236,0.97)" },
-};
-
 // ─── KNOWN SPOTS (reverse-geocode EXIF + Scout tab) ──────────────────────────
 const KNOWN_SPOTS = [
   { name:"Salt Creek",                   lat:41.826, lng:-87.845 },
   { name:"Thatcher Woods / Des Plaines", lat:41.874, lng:-87.831 },
   { name:"Columbia Woods / Des Plaines", lat:41.762, lng:-87.884 },
   { name:"Cal-Sag Channel",              lat:41.762, lng:-87.858 },
-  { name:"Sag Quarry East",              lat:41.704, lng:-87.845 },
+  { name:"Sag Quarry East",              lat:41.6926, lng:-87.9312 },
   { name:"Horsetail Lake",               lat:41.698, lng:-87.851 },
   { name:"Tampier Lake",                 lat:41.656, lng:-87.845 },
   { name:"Wolf Lake",                    lat:41.656, lng:-87.533 },
@@ -457,7 +452,7 @@ const LOCAL_SPOTS = [
   {name:"Thatcher Woods / Des Plaines",addr:"River Forest, IL",dist:"~3 mi",lat:41.874,lng:-87.831,species:["Bass","Carp","Catfish","Crappie","Pike"],tag:"River",color:"#5a9fd4",tip:"Eddies behind fallen logs = bass. Night = catfish.",apple:"maps://maps.apple.com/?daddr=41.874,-87.831",google:"https://maps.google.com/?daddr=41.874,-87.831"},
   {name:"Columbia Woods / Des Plaines",addr:"Willow Springs, IL",dist:"~6 mi",lat:41.762,lng:-87.884,species:["Bass","Catfish","Carp","Crappie"],tag:"River",color:"#5a9fd4",tip:"Best catfish holes on the Des Plaines. Night fish.",apple:"maps://maps.apple.com/?daddr=41.762,-87.884",google:"https://maps.google.com/?daddr=41.762,-87.884"},
   {name:"Cal-Sag Channel",addr:"Hodgkins, IL",dist:"~7 mi",lat:41.762,lng:-87.858,species:["Carp","Catfish","Bass"],tag:"Channel",color:"#e09030",tip:"Heavy rigs, long casts. Great carp fishing.",apple:"maps://maps.apple.com/?daddr=41.762,-87.858",google:"https://maps.google.com/?daddr=41.762,-87.858"},
-  {name:"Sag Quarry East",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,species:["Rainbow Trout","Bass"],tag:"Trout Lake",color:"#5a9fd4",tip:"PowerBait near aerators after stocking.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
+  {name:"Sag Quarry East",addr:"Archer Ave, near Lemont, IL",dist:"~12 mi",lat:41.6926,lng:-87.9312,species:["Rainbow Trout","Bass"],tag:"Trout Lake",color:"#5a9fd4",tip:"PowerBait near aerators after stocking.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.6926,-87.9312",google:"https://maps.google.com/?daddr=41.6926,-87.9312"},
   {name:"Horsetail Lake",addr:"Palos Hills, IL",dist:"~9 mi",lat:41.698,lng:-87.851,species:["Rainbow Trout"],tag:"Trout Lake",color:"#5a9fd4",tip:"Smaller lake — easier to cover. Spinners work great.",alert:"Trout Stamp required",apple:"maps://maps.apple.com/?daddr=41.698,-87.851",google:"https://maps.google.com/?daddr=41.698,-87.851"},
 ];
 
@@ -481,7 +476,7 @@ var LOCATION_TRAIL_KEY = "rfc_location_trail_v1";
 function sharingRosterFromSources(cloudMembers, localRoster, selfId) {
   if (cloudMembers && cloudMembers.length) {
     return cloudMembers.filter(function(m) { return m.isActive !== false && m.id !== selfId; }).map(function(m) {
-      return { id: m.id, name: m.displayName || m.id };
+      return { id: m.id, name: m.displayName || m.id, email: m.email || "" };
     });
   }
   return rosterForSharingPicker(localRoster).filter(function(m) { return m.id !== selfId; });
@@ -592,8 +587,9 @@ function normalizeProfile(raw) {
   var out = {};
   out.name = typeof p.name === "string" ? p.name : "";
   out.email = typeof p.email === "string" ? p.email : "";
-  out.level = p.level || "Beginner";
+  out.level = typeof p.level === "string" ? p.level : "Beginner";
   out.favSpecies = Array.isArray(p.favSpecies) ? p.favSpecies : [];
+  out.myCatchesOpen = p.myCatchesOpen !== false; // My catches list starts open unless turned off
   out.favSpots = Array.isArray(p.favSpots) ? p.favSpots : [];
   out.gear = Array.isArray(p.gear) ? p.gear : [];
   out.privateSpots = Array.isArray(p.privateSpots) ? p.privateSpots : [];
@@ -721,11 +717,11 @@ function formatLongShareDate(iso) {
 
 // ─── LAKES DATABASE ───────────────────────────────────────────────────────────
 const LAKES = [
-  {id:"sag_east",name:"Sag Quarry East",aka:"Trout Lake",addr:"Palos Hills, IL",dist:"~8 mi",lat:41.704,lng:-87.845,maxDepth:45,avgDepth:22,species:["Rainbow Trout","Largemouth Bass","Bluegill"],primary:"Rainbow Trout",alert:"Trout Stamp required",
+  {id:"sag_east",name:"Sag Quarry East",aka:"Trout Lake",addr:"Archer Ave, near Lemont, IL",dist:"~12 mi",lat:41.6926,lng:-87.9312,maxDepth:45,avgDepth:22,species:["Rainbow Trout","Largemouth Bass","Bluegill"],primary:"Rainbow Trout",alert:"Trout Stamp required",
     zones:[{depth:"3–8 ft",loc:"North & east shoreline",tip:"Stocked trout stage here — float + PowerBait"},{depth:"12–20 ft",loc:"Center-west basin",tip:"Main trout holding zone mid-day"},{depth:"35–45 ft",loc:"South quarry wall",tip:"Deep refuge in summer heat — drop shot"}],
     bankSpots:[{name:"North Aerator",tip:"Cast toward the aerator — trout stack here after stocking."},{name:"East Inlet Pipe",tip:"Inlet brings oxygenated water — trout hold just downstream."},{name:"South Wall",tip:"Cast parallel to wall for deep trout mid-summer."}],
     season:{spring:"Go right after FPDCC stocking (April). PowerBait near aerators.",summer:"Trout go deep. Early morning only. Drop shot at 30+ ft.",fall:"Second stocking October. Same spring tactics. Spinners work well.",winter:"Check FPDCC ice advisories. No fishing during unsafe ice."},
-    lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.704,-87.845",google:"https://maps.google.com/?daddr=41.704,-87.845"},
+    lakelink:"https://www.lakelink.com/lakes/illinois/cook-county/",apple:"maps://maps.apple.com/?daddr=41.6926,-87.9312",google:"https://maps.google.com/?daddr=41.6926,-87.9312"},
   {id:"tampier",name:"Tampier Lake",addr:"Palos Park, IL",dist:"~12 mi",lat:41.656,lng:-87.845,maxDepth:18,avgDepth:8,species:["Largemouth Bass","Crappie","Bluegill","Channel Catfish","Yellow Perch"],primary:"Largemouth Bass",
     zones:[{depth:"2–5 ft",loc:"North shallows and weed flats",tip:"Bass and bluegill spawn here — topwater frogs and poppers"},{depth:"8–12 ft",loc:"Main basin center",tip:"Crappie suspend at 8 ft near brush — slip float + minnow"},{depth:"14–18 ft",loc:"South channel near dam",tip:"Catfish and larger bass — slip sinker with chicken liver at night"}],
     bankSpots:[{name:"North Weed Flats",tip:"Dawn topwater for bass along the weed edge."},{name:"Main Launch Dock",tip:"Crappie stack under docks — tiny jig at 6-8 ft."},{name:"South Dam",tip:"Night fish catfish here. Slip sinker with chicken liver."}],
@@ -1162,12 +1158,8 @@ var BUOY_STATIONS = [
   { id:"45198", label:"Navy Pier", area:"Burnham / 31st / 87th St area" },
   { id:"45170", label:"South Haven, MI", area:"East basin — storm warning buoy" },
 ];
-// Cloudflare Worker that proxies NOAA NDBC's buoy data server-side (see cloudflare/
-// buoy-proxy-worker.js + docs/BUOY-PROXY-DEPLOY.md). Direct browser fetches to NDBC/ERDDAP were
-// tried first and failed live on a real device ("Load failed") -- neither sends CORS headers, and
-// this app has no server of its own to bypass that from (CLAUDE.md: client-side only). Replace
-// the placeholder below with the real *.workers.dev URL once the Worker is deployed.
-var BUOY_PROXY_URL = "https://rfc-buoy-proxy.YOUR-SUBDOMAIN.workers.dev";
+// NOAA NDBC buoy data comes through the RFC Helper's /buoy route (cloudflare/rfc-helper/):
+// NDBC sends no CORS headers, so a direct browser fetch fails ("Load failed" on a real device).
 var HARBOR_DAMPENING = 1 / 3; // "Inside harbors = roughly 1/3 of main lake wave height" (RFC rule)
 // Shore spots the buoy status is actually meaningful for -- open Lake Michigan shoreline only.
 // Deliberately leaves out river/inland spots (Des Plaines River, Palos FP lakes): Lake Michigan
@@ -1198,10 +1190,9 @@ function degToCompass(deg) {
 
 /** Fetch the latest reading for each RFC buoy via the Cloudflare Worker proxy (see above). */
 async function fetchBuoyReadings() {
-  if (BUOY_PROXY_URL.indexOf("YOUR-SUBDOMAIN") >= 0) {
-    throw new Error("Buoy proxy not deployed yet — see docs/BUOY-PROXY-DEPLOY.md");
-  }
-  var res = await fetch(BUOY_PROXY_URL);
+  var url = helperUrl("/buoy");
+  if (!url) throw new Error("RFC Helper not set up yet — see docs/RFC-HELPER-DEPLOY.md");
+  var res = await fetch(url);
   if (!res.ok) {
     var bodyText = "";
     try { bodyText = (await res.text()).slice(0, 300); } catch (e2) {}
@@ -1367,37 +1358,142 @@ function overpassElementLatLng(el) {
   return null;
 }
 
-/** Named/typed water features from OpenStreetMap within radiusMi of lat/lng. No API key; capped result count. */
+/** Overpass call with fallback mirrors (the main server often answers 429/504 when busy). */
+var OVERPASS_ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+async function overpassPost(q, timeoutMs) {
+  var lastErr = null;
+  for (var i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    try {
+      var r = await fetchWithTimeout(OVERPASS_ENDPOINTS[i], {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(q),
+      }, timeoutMs);
+      if (r.ok) return await r.json();
+      lastErr = new Error("Overpass " + r.status);
+      if (r.status === 429) await new Promise(function(res) { setTimeout(res, 2000); });
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("Overpass query failed");
+}
+
+/**
+ * Fishable water from OpenStreetMap within radiusMi of lat/lng. No API key.
+ * Rivers/streams are long lines, so instead of pinning a river at the middle of each OSM segment
+ * (often miles away, and then filtered out by the radius), each river is pinned at the point of
+ * its line CLOSEST to the member, one result per river, and named after the nearest public access
+ * point (canoe launch, fishing pier) or forest preserve/park next to it. Public access points are
+ * also returned as their own results.
+ */
 async function loadNearbyWater(lat, lng, radiusMi) {
   var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
-  var q = "[out:json][timeout:25];(" +
-    "node[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
-    "way[\"natural\"=\"water\"](around:" + radiusM + "," + lat + "," + lng + ");" +
-    "way[\"waterway\"~\"^(river|stream|canal)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
-    "node[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
-    "way[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
-    ");out center tags 80;";
-  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(q),
-  }, 20000);
-  if (!r.ok) throw new Error("Overpass water query failed");
-  var data = await r.json();
+  // Cache per ~1 km grid cell + radius for 24h: the free Overpass server is slow (often 30s+)
+  // and rate-limits, so a repeat visit should never wait or fail.
+  var cacheKey = "rfc_osm_water_v3|" + lat.toFixed(2) + "|" + lng.toFixed(2) + "|" + Math.round(radiusMi);
+  try {
+    var cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+    if (cached && cached.t && Date.now() - cached.t < 86400000 && Array.isArray(cached.list)) return cached.list;
+  } catch (e) { /* ignore */ }
+  var dLat = radiusM / 111320;
+  var dLng = radiusM / (111320 * Math.cos(lat * Math.PI / 180));
+  var bbox = (lat - dLat).toFixed(5) + "," + (lng - dLng).toFixed(5) + "," + (lat + dLat).toFixed(5) + "," + (lng + dLng).toFixed(5);
+  // One request (the server allows only ~2 at a time per user), global bbox filter (much faster than "around").
+  var q = "[out:json][timeout:45][bbox:" + bbox + "];" +
+    "way[\"waterway\"~\"^(river|stream|canal)$\"][\"name\"]->.rivers;" +
+    ".rivers out body geom(" + bbox + ") 120;" +
+    "(node[\"leisure\"=\"slipway\"];way[\"leisure\"=\"slipway\"];node[\"canoe\"~\"put_in|egress\"];node[\"leisure\"=\"fishing\"];way[\"leisure\"=\"fishing\"];node[\"man_made\"=\"pier\"][\"fishing\"];way[\"man_made\"=\"pier\"][\"fishing\"];)->.access;" +
+    ".access out center tags 80;" +
+    "(way[\"leisure\"=\"nature_reserve\"][\"name\"];relation[\"leisure\"=\"nature_reserve\"][\"name\"];way[\"boundary\"=\"protected_area\"][\"name\"];relation[\"boundary\"=\"protected_area\"][\"name\"];)->.parks;" +
+    ".parks out center tags 100;" +
+    "(node[\"natural\"=\"water\"][\"name\"];way[\"natural\"=\"water\"][\"name\"];relation[\"natural\"=\"water\"][\"name\"];)->.lakes;" +
+    ".lakes out center tags 150;";
+  var data = await overpassPost(q, 50000);
+  var els = data.elements || [];
+  var out = [];
   var seen = {};
-  return (data.elements || []).map(function(el) {
-    var pos = overpassElementLatLng(el);
-    if (!pos) return null;
+  function cap(x) { return x ? x.charAt(0).toUpperCase() + x.slice(1) : ""; }
+
+  var parks = [];
+  var access = [];
+  var riverBest = {};
+  els.forEach(function(el) {
     var tags = el.tags || {};
+    if (tags.waterway && el.geometry && el.geometry.length) {
+      var nm = sanitizeStr(tags.name || "", 120);
+      if (!nm) return;
+      el.geometry.forEach(function(pt) {
+        if (!pt || pt.lat == null) return;
+        var d = haversineMi(lat, lng, pt.lat, pt.lon);
+        if (!riverBest[nm] || d < riverBest[nm].d) riverBest[nm] = { d: d, lat: pt.lat, lng: pt.lon, type: cap(tags.waterway), tags: tags, id: el.id };
+      });
+      return;
+    }
+    var pos = overpassElementLatLng(el);
+    if (!pos) return;
+    if (tags.leisure === "slipway" || tags.canoe || tags.leisure === "fishing" || tags.man_made === "pier") {
+      access.push({ el: el, tags: tags, pos: pos });
+      return;
+    }
+    if (tags.leisure === "nature_reserve" || tags.boundary === "protected_area") {
+      // Skip umbrella names (e.g. the whole county forest preserve district) — too broad to label a spot.
+      if (tags.name && !/district|county of|state of/i.test(tags.name)) parks.push({ name: sanitizeStr(tags.name, 120), pos: pos, tags: tags });
+      return;
+    }
+    // lakes / ponds
+    if (tags.leisure === "swimming_pool" || /^(swimming_pool|wastewater|reflecting_pool|fountain)$/.test(tags.water || "")) return;
     var name = tags.name || null;
-    if (!name) return null; // unnamed water is too noisy to surface (retention basins, ditches, etc.)
+    if (!name) return; // unnamed water is too noisy to surface (retention basins, ditches, etc.)
     var key = name + "|" + pos.lat.toFixed(3) + "|" + pos.lng.toFixed(3);
-    if (seen[key]) return null;
+    if (seen[key]) return;
     seen[key] = true;
-    var type = tags.waterway ? (tags.waterway.charAt(0).toUpperCase() + tags.waterway.slice(1)) :
-      tags.water ? (tags.water.charAt(0).toUpperCase() + tags.water.slice(1)) : "Water";
-    return { id: "osm_" + (el.id || key), name: name, lat: pos.lat, lng: pos.lng, waterType: type, access: accessLabelFromOsmTags(tags), source: "osm" };
-  }).filter(Boolean);
+    var type = tags.water ? cap(tags.water) : "Water";
+    out.push({ id: "osm_" + (el.id || key), name: name, lat: pos.lat, lng: pos.lng, waterType: type, access: accessLabelFromOsmTags(tags), source: "osm" });
+  });
+
+  function nearest(list, pLat, pLng, maxMi, posOf) {
+    var best = null;
+    list.forEach(function(x) {
+      var p = posOf(x);
+      var d = haversineMi(pLat, pLng, p.lat, p.lng);
+      if (d <= maxMi && (!best || d < best.d)) best = { d: d, x: x };
+    });
+    return best ? best.x : null;
+  }
+  function accessName(a) {
+    var t = a.tags;
+    if (t.name) return sanitizeStr(t.name, 120);
+    if (t.leisure === "slipway" || t.canoe) return "Canoe / kayak launch";
+    if (t.man_made === "pier") return "Fishing pier";
+    return "Fishing access";
+  }
+
+  // Rivers: one result per river at the closest point, labeled with nearby access or preserve.
+  Object.keys(riverBest).forEach(function(nm) {
+    var b = riverBest[nm];
+    var acc = nearest(access, b.lat, b.lng, 0.4, function(a) { return a.pos; });
+    var park = nearest(parks, b.lat, b.lng, 0.5, function(pk) { return pk.pos; });
+    var where = acc && acc.tags.name ? sanitizeStr(acc.tags.name, 80) : (park ? park.name : "");
+    var label = where ? nm + " \u2014 " + where : nm + " (closest bank)";
+    var accessLbl = accessLabelFromOsmTags(b.tags);
+    if (accessLbl === "Unknown" && park) accessLbl = accessLabelFromOsmTags(park.tags);
+    out.push({ id: "osm_river_" + b.id, name: label, lat: b.lat, lng: b.lng, waterType: b.type, access: accessLbl, source: "osm" });
+  });
+
+  // Public access points (launches, piers, fishing areas) as their own results.
+  access.forEach(function(a) {
+    var park = nearest(parks, a.pos.lat, a.pos.lng, 0.5, function(pk) { return pk.pos; });
+    var nm = accessName(a);
+    if (!a.tags.name && park) nm = park.name + " \u2014 " + nm;
+    var key = nm + "|" + a.pos.lat.toFixed(3) + "|" + a.pos.lng.toFixed(3);
+    if (seen[key]) return;
+    seen[key] = true;
+    var lbl = accessLabelFromOsmTags(a.tags);
+    if (lbl === "Unknown" && park) lbl = accessLabelFromOsmTags(park.tags);
+    out.push({ id: "osm_access_" + (a.el.id || key), name: nm, lat: a.pos.lat, lng: a.pos.lng, waterType: a.tags.man_made === "pier" ? "Pier" : (a.tags.leisure === "fishing" ? "Fishing access" : "Launch"), access: lbl, source: "osm" });
+  });
+
+  try { localStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), list: out })); } catch (e) { /* ignore */ }
+  return out;
 }
 
 /** Businesses/clubs that advertise fishing access (pay lakes, marinas, guide services) via their own published contact info. */
@@ -1408,13 +1504,7 @@ async function loadNearbyFishingBusinesses(lat, lng, radiusMi) {
     "way[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     "node[\"tourism\"][\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     ");out center tags 40;";
-  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(q),
-  }, 20000);
-  if (!r.ok) throw new Error("Overpass business query failed");
-  var data = await r.json();
+  var data = await overpassPost(q, 40000);
   return (data.elements || []).map(function(el) {
     var pos = overpassElementLatLng(el);
     if (!pos) return null;
@@ -1826,7 +1916,8 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
-  var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
+  // Light themes use dark text, so the forecast box must be light there (was always dark = unreadable).
+  var bfrBg = themeIsLight(th) ? th.card : T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
   var hour = new Date().getHours();
   var timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   var nextWindow = solunar && solunar[0];
@@ -2116,7 +2207,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
             <div style={{ color:th.green, fontSize:13, fontWeight:700 }}>Ready to refresh?</div>
             <div style={{ color:th.muted, fontSize:11 }}>Tap to load fresh bite intel</div>
           </div>
-          <button onClick={load} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>Update</button>
+          <button onClick={load} style={{ background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:700 }}>Update</button>
         </div>
       )}
 
@@ -2261,7 +2352,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         <Card T={T} borderColor={th.green + "44"}>
           <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:6 }}>New to fishing? Start here</div>
           <div style={{ fontSize:12, color:th.muted, lineHeight:1.5, marginBottom:10 }}>Pick a species above, check the bite score, then open Learn for gear basics.</div>
-          {setTab ? <button type="button" onClick={function() { setTab("learn"); }} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Open Learn tab →</button> : null}
+          {setTab ? <button type="button" onClick={function() { setTab("learn"); }} style={{ background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Open Learn tab →</button> : null}
         </Card>
       ) : null}
 
@@ -2293,6 +2384,7 @@ function SpeciesTab({ T, profile, setTab }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
+  useScrollTop([sel]);
   const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
 
   useEffect(function() {
@@ -2427,6 +2519,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
   const [lakeTab, setLakeTab] = useState("overview");
   const [privView, setPrivView] = useState("main");
   const [privSpotId, setPrivSpotId] = useState(null);
+  useScrollTop([view, selectedLake, privView, privSpotId]);
   const [saveDraft, setSaveDraft] = useState(null);
   const [saveErr, setSaveErr] = useState("");
   const [geoLoading, setGeoLoading] = useState(false);
@@ -2676,6 +2769,17 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     appendSpotActivity(setProfile, msg);
   }
 
+  // Opens the member's own mail app with an invite to a club roster member (roster emails only).
+  function inviteMemberByEmail(mem) {
+    var memEmail = sanitizeStr(mem.email || "", 200).toLowerCase();
+    if (!memEmail || memEmail.indexOf("@") < 1) { alert("No email on file for this member."); return; }
+    var first = (sanitizeStr(mem.name || "", 120).split(" ")[0]) || "there";
+    var inviter = sanitizeStr((authMember && authMember.displayName) || (profile && profile.name) || "A fellow club member", 120);
+    var subj = encodeURIComponent("Join me on the Riverside Fishing Club app");
+    var body = encodeURIComponent("Hi " + first + ",\n\n" + inviter + " invited you to try the Riverside Fishing Club app.\n\nOpen the app: https://ew3adam.github.io/fishing-app/\nSign in with the email the club has on file for you.\n\nSee you on the water!");
+    window.location.href = "mailto:" + memEmail + "?subject=" + subj + "&body=" + body;
+  }
+
   if (selectedLake) {
     var lake = selectedLake;
     var now2 = new Date(); var mo2 = now2.getMonth();
@@ -2787,7 +2891,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               </div>
             </label>
             {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:8 }}>{saveErr}</div> : null}
-            <button type="button" onClick={saveFromPickMap} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"14px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}>
+            <button type="button" onClick={saveFromPickMap} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:10, padding:"14px 0", cursor:"pointer", fontSize:15, fontWeight:800 }}>
               Save my spot
             </button>
             <div style={{ display:"flex", gap:8, marginTop:10 }}>
@@ -2846,7 +2950,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
           <textarea value={saveDraft.access_info} onChange={function(e) { setDraftField("access_info", e.target.value); }} placeholder="Where to park, path in, bank vs wading…" rows={3} style={Object.assign({}, inp, { minHeight:72, resize:"vertical" })} />
         </Card>
         {saveErr ? <div style={{ color:th.red, fontSize:12, marginBottom:10 }}>{saveErr}</div> : null}
-        <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
+        <button type="button" onClick={submitSaveForm} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:12, padding:"16px 0", cursor:"pointer", fontSize:17, fontWeight:800 }}>
           {privSpotId ? "Save changes" : "Save to my spots"}
         </button>
         <div style={{ fontSize:12, color:th.muted, marginTop:12, lineHeight:1.55 }}>Stays private until you choose sharing from your spot details.</div>
@@ -2889,7 +2993,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
               }
               setPastMapsParseMsg("Could not find latitude and longitude. Use a Maps URL that contains @lat,lng or paste two numbers with a comma.");
             }}
-            style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800, marginBottom:8 }}
+            style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:10, padding:"12px 0", cursor:"pointer", fontSize:15, fontWeight:800, marginBottom:8 }}
           >
             Fill latitude &amp; longitude from paste
           </button>
@@ -3010,9 +3114,16 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
             {rosterF.map(function(m) {
               var on = (selectedSpot.sharedWith || []).some(function(x) { return x.id === m.id; });
               return (
-                <button key={m.id} type="button" onClick={function() { toggleShareMember(m); }} style={{ textAlign:"left", background:on ? th.green + "22" : th.card, border:"1px solid " + (on ? th.green : th.border), borderRadius:8, padding:8, color:th.white, cursor:"pointer", fontSize:12 }}>
-                  {on ? "✓ " : ""}{m.name}
-                </button>
+                <div key={m.id} style={{ display:"flex", gap:6 }}>
+                  <button type="button" onClick={function() { toggleShareMember(m); }} style={{ flex:1, textAlign:"left", background:on ? th.green + "22" : th.card, border:(on ? "2px solid " + th.green : "1px solid " + th.border), borderRadius:8, padding:on ? 7 : 8, color:th.white, fontWeight:on ? 700 : 400, cursor:"pointer", fontSize:12 }}>
+                    {on ? "\u2713 " : ""}{m.name}
+                  </button>
+                  {m.email ? (
+                    <button type="button" onClick={function() { inviteMemberByEmail(m); }} aria-label={"Invite " + m.name + " to the app"} style={{ background:"transparent", border:"1px solid " + th.blue, borderRadius:8, padding:"6px 10px", color:th.blue, cursor:"pointer", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
+                      Invite
+                    </button>
+                  ) : null}
+                </div>
               );
             })}
           </div>
@@ -3086,7 +3197,7 @@ function SpotsTab({ profile, setProfile, T, spotsOpenSection, clearSpotsOpenSect
     return (
       <div>
         <GuideMyToggle modeGuide={false} />
-        <button type="button" disabled={geoLoading} onClick={startPickMapHere} style={{ width:"100%", background:th.green, color:"#081208", border:"none", borderRadius:10, padding:"12px 0", cursor:geoLoading ? "wait" : "pointer", fontSize:15, fontWeight:700, marginBottom:8 }}>
+        <button type="button" disabled={geoLoading} onClick={startPickMapHere} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:10, padding:"12px 0", cursor:geoLoading ? "wait" : "pointer", fontSize:15, fontWeight:700, marginBottom:8 }}>
           {geoLoading ? "Finding GPS…" : "📍 Pick on map"}
         </button>
         <div style={{ display:"flex", gap:8, marginBottom:12 }}>
@@ -3311,6 +3422,7 @@ function CatalogueTab({ T }) {
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
   const [img, setImg] = useState(null);
+  useScrollTop([sel]);
   const [imgLoading, setImgLoading] = useState(false);
 
   useEffect(function() {
@@ -3471,7 +3583,7 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
       {rfcLink ? (
         <div style={{ background:th.green + "14", border:"1px solid " + th.green + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
           <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:4 }}>Email RFC members?</div>
-          <a href={rfcLink} style={{ display:"block", background:th.green, color:"#000", borderRadius:8, padding:"10px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:13 }}>Open Email to RFC</a>
+          <a href={rfcLink} style={{ display:"block", background:th.green, color:th.onGreen, borderRadius:8, padding:"10px 0", textDecoration:"none", textAlign:"center", fontWeight:700, fontSize:13 }}>Open Email to RFC</a>
         </div>
       ) : null}
       <button onClick={onReset} style={{ background:"transparent", border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 24px", cursor:"pointer", fontSize:13 }}>
@@ -3484,7 +3596,7 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
 function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const th = THEMES[T];
-  const [showMyLogs, setShowMyLogs] = useState(false);
+  const [showMyLogs, setShowMyLogs] = useState(!profile || profile.myCatchesOpen !== false);
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
@@ -3496,6 +3608,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     return [];
   });
   const [step, setStep] = useState(0);
+  useScrollTop([step]);
   const [photo, setPhoto] = useState(null);
   const [referencePhotos, setReferencePhotos] = useState([]);
   const [photoB64, setPhotoB64] = useState(null);
@@ -3597,9 +3710,30 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     });
   }
 
+  // A real image: browser says image/*, or (iPhone HEIC with no type) the file name says so.
+  function isImageFile(f) {
+    if (!f) return false;
+    if (f.type && f.type.indexOf("image/") === 0) return true;
+    return !f.type && /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name || "");
+  }
+  function resetCatchFlow() {
+    setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null); setAiLoading(false);
+    setReferencePhotos([]);
+    setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies("");
+    setCatchVisibility("private"); setUsePreciseMeasure(false); setSimpleLengthInches("");
+    setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
   function handlePhoto(e) {
     var files = Array.from(e.target.files || []);
+    e.target.value = ""; // lets the member pick again (even the same file) after a mistake
     if (!files.length) return;
+    files = files.filter(isImageFile);
+    if (!files.length) {
+      if (onSaveToast) onSaveToast("That file isn't a photo. Please choose a picture (JPG, PNG or HEIC).", "error");
+      return;
+    }
     var primary = files[0];
     // Parse EXIF GPS, IPTC location, and capture date for auto-fill.
     exifr.parse(primary, {
@@ -3636,25 +3770,17 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       }
       setAiLoading(true);
       var photoDataUrl = img.full;
-      fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400,
-          messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:img.type,data:img.b64}},
-            {type:"text",text:"Identify the fish species and analyze its orientation. Respond ONLY with raw JSON (no markdown, no extra text):\n{\"species\":\"Largemouth Bass\",\"confidence\":95,\"length\":\"12 inches\",\"notes\":\"Brief ID note\",\"rotation\":90,\"mouth_pct\":15,\"tail_pct\":85}\n\nRules:\n- rotation: degrees clockwise (0, 90, 180, or 270) needed to orient fish horizontally with mouth pointing LEFT\n- mouth_pct: horizontal % position (0=left edge, 100=right edge) of fish mouth AFTER applying that rotation\n- tail_pct: horizontal % position of fish tail tip AFTER applying that rotation\n- If no fish visible use rotation:0, mouth_pct:10, tail_pct:90\n- If ruler visible in photo, estimate length from it; otherwise estimate from body proportions"}
-          ]}]
-        })
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        var txt = (data.content && data.content[0] && data.content[0].text) || "";
-        var m = txt.match(/\{[\s\S]*\}/);
-        if (m) {
-          try {
-            var res = JSON.parse(m[0]);
+      // AI ID runs through the club's Cloudflare Worker (key stays server-side, members only).
+      identifySpecies(photoDataUrl).then(function(raw) {
+        if (raw && Array.isArray(raw.suggestions) && raw.suggestions.length) {
+          {
+            var top = raw.suggestions[0];
+            var res = { species: top.species, confidence: top.confidence, notes: top.why, suggestions: raw.suggestions, length: raw.length, rotation: raw.rotation, mouth_pct: raw.mouth_pct, tail_pct: raw.tail_pct };
             setAiResult(res);
             var lengthMatch = res.length && String(res.length).match(/[\d.]+/);
             if (lengthMatch) setSimpleLengthInches(lengthMatch[0]);
             var matchedSpecies = matchSpeciesName(res.species);
-            if (matchedSpecies) {
+            if (matchedSpecies && (parseInt(res.confidence, 10) || 0) >= 70) {
               setForm(function(f) { return Object.assign({}, f, { species:matchedSpecies }); });
             }
             var rot = parseInt(res.rotation, 10) || 0;
@@ -3674,12 +3800,11 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
             } else {
               applyMarkers();
             }
-          } catch(e) {}
+          }
         }
         setAiLoading(false);
       }).catch(function() { setAiLoading(false); });
     }).catch(function() {});
-    e.target.value = "";
   }
 
   function applyCanvasRotation(dataUrl, degrees) {
@@ -3887,10 +4012,33 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
             My catches ({catches.length}) {showMyLogs ? "▾" : "▸"}
           </button>
           {showMyLogs ? catches.slice(0, 8).map(function(c, i) {
+            var thumb = c.photoUrl || c.photo || "";
+            var place = c.spotDisplayName || c.spot || "";
             return (
-              <div key={i} style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8 }}>
-                <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
-                <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+              <div key={c.id || i} style={{ display:"flex", gap:10, alignItems:"flex-start", borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8 }}>
+                {thumb ? (
+                  <img src={thumb} alt={c.species || "catch"} style={{ width:64, height:64, objectFit:"cover", borderRadius:8, border:"1px solid " + th.border, flexShrink:0 }} />
+                ) : (
+                  <div style={{ width:64, height:64, borderRadius:8, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>{"\ud83c\udfa3"}</div>
+                )}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species || "Unknown species"}</div>
+                  <div style={{ fontSize:11, color:th.muted }}>{[c.length, c.estWeight ? "~" + c.estWeight : "", c.date].filter(Boolean).join(" \u00b7 ")}</div>
+                  {place ? <div style={{ fontSize:11, color:th.muted }}>{"\ud83d\udccd " + place}</div> : null}
+                  {c.bait ? <div style={{ fontSize:11, color:th.muted }}>{"Bait: " + c.bait}</div> : null}
+                  <div style={{ fontSize:11, color:c.visibility === "club" ? th.green : th.muted, fontWeight:700, marginTop:2 }}>{c.visibility === "club" ? "Shared with club" : "Private"}</div>
+                </div>
+                <button type="button" aria-label={"Delete " + (c.species || "catch")} onClick={function() {
+                  if (!window.confirm("Delete this catch? This can't be undone.")) return;
+                  setCatches(function(list) { return list.filter(function(x) { return String(x.id) !== String(c.id); }); });
+                  if (authMember && authMember.id) {
+                    deleteCatchFromCloud(authMember.id, c.id).then(function() {
+                      if (onSaveToast) onSaveToast("Catch deleted.", "success");
+                    }).catch(function() {
+                      if (onSaveToast) onSaveToast("Deleted on this device, but the cloud copy could not be removed. Try again later.", "error");
+                    });
+                  }
+                }} style={{ background:"transparent", border:"1px solid " + th.red, color:th.red, borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:11, fontWeight:700, flexShrink:0 }}>Delete</button>
               </div>
             );
           }) : null}
@@ -3909,8 +4057,19 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
             <Card T={T} borderColor={th.blue + "44"} style={{ marginBottom:10 }}>
               <div style={{ fontSize:13, color:th.white, fontWeight:700, marginBottom:6 }}>Log a catch in 3 steps</div>
               <div style={{ fontSize:12, color:th.muted, lineHeight:1.5 }}>1) Add photo · 2) Measure & pick species · 3) Review & save</div>
-              <button type="button" onClick={dismissCatchHint} style={{ marginTop:8, background:th.green, color:"#000", border:"none", borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Got it</button>
+              <button type="button" onClick={dismissCatchHint} style={{ marginTop:8, background:th.green, color:th.onGreen, border:"none", borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Got it</button>
             </Card>
+          ) : null}
+          <input type="file" accept="image/*,.heic,.heif" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
+          {step !== 0 ? (
+            <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+              <button type="button" onClick={resetCatchFlow} style={{ flex:1, background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"9px 0", cursor:"pointer", color:th.white, fontSize:12, fontWeight:700 }}>
+                {"\u2190 Start over"}
+              </button>
+              <button type="button" onClick={function() { if (fileRef.current) fileRef.current.click(); }} style={{ flex:1, background:"transparent", border:"1px solid " + th.green, borderRadius:8, padding:"9px 0", cursor:"pointer", color:th.green, fontSize:12, fontWeight:700 }}>
+                {photo ? "Choose a different photo" : "Add a photo"}
+              </button>
+            </div>
           ) : null}
           {step === 0 && (
             <div style={{ textAlign:"center", padding:"20px 0" }}>
@@ -3921,7 +4080,6 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                   the OS picker's "Photo Library" option entirely (reported: tapping this only
                   opened the camera, never the gallery). Plain accept="image/*" lets the browser
                   show its normal photo-source picker (camera + library) instead. */}
-              <input type="file" accept="image/*" ref={fileRef} onChange={handlePhoto} style={{ display:"none" }} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
                 <button onClick={function() { fileRef.current.click(); }} style={{ background:th.green + "22", border:"1px solid " + th.green, borderRadius:10, padding:16, cursor:"pointer", color:th.green, fontSize:13, fontWeight:700 }}>📷 Use Photo</button>
                 <button onClick={function() { setStep(3); }} style={{ background:th.blue + "22", border:"1px solid " + th.blue, borderRadius:10, padding:16, cursor:"pointer", color:th.blue, fontSize:13, fontWeight:700 }}>📝 Log Only</button>
@@ -4062,6 +4220,14 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                       </div>
                     ) : null}
                   </div>
+                  {/* Marker sliders sit right under the photo so the member can watch the lines move. */}
+                  <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:10, padding:"10px 12px", marginTop:8 }}>
+                    <div style={{ fontSize:12, color:th.green, fontWeight:700, marginBottom:2 }}>{rulerOrientation === "vertical" ? "Mouth (green line, top = 0%)" : "Mouth (green line)"}</div>
+                    <input type="range" min="0" max="100" step="0.5" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} aria-label="Mouth marker position" style={{ width:"100%", marginBottom:8, accentColor:th.green, height:28 }} />
+                    <div style={{ fontSize:12, color:th.orange, fontWeight:700, marginBottom:2 }}>{rulerOrientation === "vertical" ? "Tail (orange line, top = 0%)" : "Tail (orange line)"}</div>
+                    <input type="range" min="0" max="100" step="0.5" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} aria-label="Tail marker position" style={{ width:"100%", marginBottom:6, accentColor:th.orange, height:28 }} />
+                    <div style={{ fontSize:14, color:th.white, fontWeight:800 }}>Length: {measuredLengthLabel}</div>
+                  </div>
                   <button onClick={rotatePhoto} style={{ width:"100%", marginTop:8, background:"rgba(255,255,255,0.08)", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", color:th.white, fontSize:14, fontWeight:600, letterSpacing:"0.02em" }}>↻ Rotate Photo</button>
                   <Card T={T} borderColor={th.blue + "44"} style={{ marginTop:10 }}>
                     <div style={{ fontSize:12, color:th.white, marginBottom:8, lineHeight:1.5 }}>
@@ -4121,10 +4287,6 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                         <input type="number" min="0.1" max="24" step="0.01" value={referenceInches} onChange={function(e) { setReferenceInches(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom:8 })} />
                       </div>
                     ) : null}
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Mouth position (top=0%)" : "Mouth marker position"}</div>
-                    <input type="range" min="0" max="100" step="1" value={mouthPct} onChange={function(e) { setMouthPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
-                    <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>{rulerOrientation === "vertical" ? "Tail position (top=0%)" : "Tail marker position"}</div>
-                    <input type="range" min="0" max="100" step="1" value={tailPct} onChange={function(e) { setTailPct(parseFloat(e.target.value)); }} style={{ width:"100%", marginBottom:8 }} />
                     {usesObjectReference ? (
                       <div style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:4 }}>
                         <div style={{ fontSize:11, color:th.muted, marginBottom:4 }}>Reference start marker</div>
@@ -4161,7 +4323,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                   </Card>
                 </div>
               ) : null}
-              <button onClick={continueFromMeasurement} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginTop:8 }}>
+              <button onClick={continueFromMeasurement} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700, marginTop:8 }}>
                 {form.species || (aiResult && aiResult.species) ? "Continue → Catch Details" : "Confirm Length → Pick Species"}
               </button>
             </div>
@@ -4176,35 +4338,37 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                   AI identifying fish...
                 </div>
               ) : null}
-              {aiResult && !aiLoading ? (function() {
-                var matchedName = matchSpeciesName(aiResult.species);
-                var matchedSp = SPECIES.find(function(s) { return s.name === matchedName; });
-                var selected = form.species === matchedName;
-                var confidence = Math.max(0, Math.min(100, parseInt(aiResult.confidence, 10) || 0));
-                return (
-                  <Card T={T} borderColor={th.green + "44"}>
-                    <SecLabel text="AI Recognition Results" T={T} />
-                    <button type="button" onClick={function() { setF("species", matchedName); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"8px 4px", background:selected ? th.green + "22" : "transparent", border:"none", borderRadius:8, cursor:"pointer", textAlign:"left" }}>
-                      <span style={{ position:"relative", flexShrink:0 }}>
-                        <span style={{ display:"flex", alignItems:"center", justifyContent:"center", width:44, height:44, borderRadius:8, background:th.card, border:"1px solid " + th.border, fontSize:22 }}>
-                          {(matchedSp && matchedSp.emoji) || "🐟"}
+              {aiResult && !aiLoading ? (
+                <Card T={T} borderColor={th.green + "44"}>
+                  <SecLabel text="AI suggestions — tap the right one" T={T} />
+                  {(aiResult.suggestions && aiResult.suggestions.length ? aiResult.suggestions : [{ species:aiResult.species, confidence:aiResult.confidence, why:aiResult.notes }]).map(function(sg, si) {
+                    var matchedName = matchSpeciesName(sg.species) || sg.species;
+                    var matchedSp = SPECIES.find(function(x) { return x.name === matchedName; });
+                    var selected = form.species === matchedName;
+                    var confidence = Math.max(0, Math.min(100, parseInt(sg.confidence, 10) || 0));
+                    return (
+                      <button key={si} type="button" onClick={function() { setF("species", matchedName); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"8px 4px", marginBottom:4, background:selected ? th.green + "22" : "transparent", border:selected ? "2px solid " + th.green : "1px solid transparent", borderRadius:8, cursor:"pointer", textAlign:"left" }}>
+                        <span style={{ position:"relative", flexShrink:0 }}>
+                          <span style={{ display:"flex", alignItems:"center", justifyContent:"center", width:44, height:44, borderRadius:8, background:th.card, border:"1px solid " + th.border, fontSize:22 }}>
+                            {(matchedSp && matchedSp.emoji) || "\ud83d\udc1f"}
+                          </span>
+                          {selected ? <span style={{ position:"absolute", top:-4, right:-4, width:16, height:16, borderRadius:"50%", background:th.green, color:th.onGreen, fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>{"\u2713"}</span> : null}
                         </span>
-                        {selected ? <span style={{ position:"absolute", top:-4, right:-4, width:16, height:16, borderRadius:"50%", background:th.green, color:"#000", fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>✓</span> : null}
-                      </span>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>{matchedName}</div>
-                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <div style={{ flex:1, height:5, borderRadius:3, background:th.border, overflow:"hidden" }}>
-                            <div style={{ width:confidence + "%", height:"100%", background:th.green, borderRadius:3 }} />
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>{matchedName}</div>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <div style={{ flex:1, height:5, borderRadius:3, background:th.border, overflow:"hidden" }}>
+                              <div style={{ width:confidence + "%", height:"100%", background:th.green, borderRadius:3 }} />
+                            </div>
+                            <div style={{ fontSize:11, color:th.muted, flexShrink:0 }}>{confidence}%</div>
                           </div>
-                          <div style={{ fontSize:11, color:th.muted, flexShrink:0 }}>{confidence}%</div>
+                          {sg.why ? <div style={{ fontSize:11, color:th.muted, marginTop:4 }}>{sg.why}</div> : null}
                         </div>
-                      </div>
-                    </button>
-                    {aiResult.notes ? <div style={{ fontSize:12, color:th.muted, marginTop:8 }}>{aiResult.notes}</div> : null}
-                  </Card>
-                );
-              })() : null}
+                      </button>
+                    );
+                  })}
+                </Card>
+              ) : null}
               {!aiResult && !aiLoading ? (
                 <Card T={T} borderColor={th.orange + "44"}>
                   <div style={{ fontSize:13, color:th.orange }}>AI unavailable — pick species below</div>
@@ -4309,7 +4473,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               ) : null}
               <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>Notes (optional)</div>
               <input value={form.notes} onChange={function(e) { setF("notes", e.target.value); }} placeholder="Technique, conditions..." style={inputStyle} />
-              <button onClick={function() { setStep(5); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
+              <button onClick={function() { setStep(5); }} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>Review</button>
             </div>
           )}
 
@@ -4340,7 +4504,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                 </div>
                 {!authMember && catchVisibility === "club" ? <div style={{ fontSize:11, color:th.orange, marginTop:8 }}>Sign in to share with the club feed.</div> : null}
               </Card>
-              <button onClick={submitCatch} disabled={submitting} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:submitting ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:submitting ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (submitting ? "Saving…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"))}</button>
+              <button onClick={submitCatch} disabled={submitting} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"11px 0", cursor:submitting ? "wait" : "pointer", fontSize:14, fontWeight:700, marginBottom:8, opacity:submitting ? 0.7 : 1 }}>{cloudSaving ? "Saving to cloud…" : (submitting ? "Saving…" : (catchVisibility === "club" ? "Save & share with club" : "Save catch (private)"))}</button>
               <OBtn label="Edit" onClick={function() { setStep(4); }} color={th.muted} style={{ width:"100%", boxSizing:"border-box" }} />
             </div>
           )}
@@ -4355,12 +4519,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               catches={catches}
               onOpenClubFeed={onOpenClubFeed}
               rfcLink={rfcLink}
-              onReset={function() {
-                setStep(0); setPhoto(null); setPhotoB64(null); setAiResult(null);
-                setSpeciesSearch(""); setSpotMetaSource(""); setCustomSpecies("");
-                setCatchVisibility("private"); setUsePreciseMeasure(false); setSimpleLengthInches("");
-                setForm({ species:"", length:"", bait:"", spot:"", rod:"", notes:"", date:new Date().toLocaleDateString() });
-              }}
+              onReset={resetCatchFlow}
             />
           )}
         </div>
@@ -4372,6 +4531,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
 function LearnTab({ T }) {
   const th = THEMES[T];
   const [sel, setSel] = useState(null);
+  useScrollTop([sel]);
   if (sel !== null) {
     var L = LESSONS[sel];
     return (
@@ -4420,9 +4580,10 @@ function LearnTab({ T }) {
 // ProfileTab is only ever reached signed in now -- the full login gate (WelcomeSplash, at
 // the top of App()'s render) blocks every tab, this one included, while !authMember. The
 // sign-in form itself lives in SignInGateCard, used by the gate, not here.
-function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authMember, onSignOut, onChangePassword, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
+function ProfileTab({ profile, setProfile, cloudSyncedAt, theme, setTheme, textScale, setTextScale, T, goMyPrivateSpots, authMember, onSignOut, onChangePassword, clubMembers, clubMembersLoading, localRoster, onLoadSeedRoster, onImportRosterCsv, rosterImportError, rosterImportBusy }) {
   const th = THEMES[T];
   const [view, setView] = useState("main");
+  useScrollTop([view]);
   const [form, setForm] = useState(normalizeProfile(profile));
   const [saved, setSaved] = useState(false);
   const [fsTestBusy, setFsTestBusy] = useState(false);
@@ -4445,9 +4606,20 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
     setSaved(true);
     setTimeout(function() { setSaved(false); }, 2000);
   }
+  // Toggles save straight to the profile (no Save button), per member request.
+  function saveNow(k, v) {
+    setF(k, v);
+    setProfile(function(p) {
+      var prev = normalizeProfile(p);
+      var patch = {}; patch[k] = v;
+      return normalizeProfile(Object.assign({}, prev, patch));
+    });
+    setSaved(true);
+    setTimeout(function() { setSaved(false); }, 1500);
+  }
   function toggleSp(s) {
     var favSp = form.favSpecies || [];
-    setF("favSpecies", favSp.includes(s) ? favSp.filter(function(x) { return x !== s; }) : favSp.concat([s]));
+    saveNow("favSpecies", favSp.includes(s) ? favSp.filter(function(x) { return x !== s; }) : favSp.concat([s]));
   }
   function addGear() {
     if (!newGear.brand) return;
@@ -4493,7 +4665,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
           <select value={newGear.line_type} onChange={function(e) { setG("line_type", e.target.value); }} style={Object.assign({}, iStyle, { background:th.card })}>
             {["Monofilament","Fluorocarbon","Braid"].map(function(l) { return <option key={l} value={l}>{l}</option>; })}
           </select>
-          <button onClick={addGear} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>+ Add to My Gear</button>
+          <button onClick={addGear} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>+ Add to My Gear</button>
         </Card>
       </div>
     );
@@ -4513,7 +4685,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
       <Card T={T} borderColor={th.green + "55"}>
         <SecLabel text="You're signed in!" T={T} />
         <div style={{ fontSize:13, color:th.white, marginBottom:4 }}>{displayEmail}</div>
-        {profile.cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(profile.cloudSyncedAt).toLocaleString()}</div> : null}
+        {cloudSyncedAt ? <div style={{ fontSize:10, color:th.green, marginBottom:8 }}>Last cloud sync: {new Date(cloudSyncedAt).toLocaleString()}</div> : null}
         <div style={{ fontSize:11, color:th.muted, marginBottom:10, lineHeight:1.5 }}>Your catches and spots are saved to the cloud. You can open the app on any device and see the same data.</div>
         <button type="button" onClick={onSignOut} style={{ width:"100%", background:"transparent", border:"1px solid " + th.border, borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, color:th.muted, marginBottom:8 }}>Sign out</button>
         <button type="button" disabled={changePwBusy} onClick={function() {
@@ -4551,7 +4723,7 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
         <button type="button" disabled={rosterImportBusy} onClick={onLoadSeedRoster} style={{ width:"100%", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:"9px 0", cursor:"pointer", fontSize:12, color:th.white, marginBottom:8 }}>
           Load seed roster (Adam)
         </button>
-        <label style={{ display:"block", width:"100%", background:th.green, color:"#000", borderRadius:8, padding:"9px 0", cursor:"pointer", fontSize:12, fontWeight:700, textAlign:"center" }}>
+        <label style={{ display:"block", width:"100%", background:th.green, color:th.onGreen, borderRadius:8, padding:"9px 0", cursor:"pointer", fontSize:12, fontWeight:700, textAlign:"center" }}>
           {rosterImportBusy ? "Importing…" : "Import roster CSV"}
           <input type="file" accept=".csv,text/csv" style={{ display:"none" }} onChange={function(e) {
             var f = e.target.files && e.target.files[0];
@@ -4604,15 +4776,13 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
           <div style={{ display:"flex", gap:6, marginBottom:12 }}>
             {["Beginner","Intermediate","Experienced"].map(function(l) {
               return (
-                <button key={l} onClick={function() { setF("level", l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:"1px solid " + (form.level===l ? th.green : th.border), borderRadius:8, color:form.level===l ? th.green : th.muted, padding:"7px 4px", cursor:"pointer", fontSize:11 }}>
-                  {l}
+                <button key={l} onClick={function() { saveNow("level", form.level === l ? "" : l); }} style={{ flex:1, background:form.level===l ? th.green + "33" : "transparent", border:(form.level===l ? "2px solid " + th.green : "1px solid " + th.border), borderRadius:8, color:form.level===l ? th.white : th.muted, fontWeight:form.level===l ? 700 : 400, padding:form.level===l ? "6px 3px" : "7px 4px", cursor:"pointer", fontSize:11 }}>
+                  {form.level===l ? "\u2713 " : ""}{l}
                 </button>
               );
             })}
           </div>
-          <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"11px 0", cursor:"pointer", fontSize:14, fontWeight:700 }}>
-            {saved ? "✓ Saved!" : "Save Profile"}
-          </button>
+          <div style={{ fontSize:11, color:saved ? th.green : th.muted, fontWeight:saved ? 700 : 400 }}>{saved ? "\u2713 Saved" : "Tap to turn on or off. Saves automatically."}</div>
         </div>
       </Card>
 
@@ -4637,14 +4807,17 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
         <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
           {SPECIES.map(function(sp) {
             var favSp = form.favSpecies || [];
+            // One selected style for every species and theme (the per-species color was
+            // unreadable on some themes and looked different fish to fish).
+            var on = favSp.includes(sp.name);
             return (
-              <button key={sp.id} onClick={function() { toggleSp(sp.name); }} style={{ background:favSp.includes(sp.name) ? sp.color + "33" : "transparent", border:"1px solid " + (favSp.includes(sp.name) ? sp.color : th.border), borderRadius:20, color:favSp.includes(sp.name) ? sp.color : th.muted, padding:"5px 12px", cursor:"pointer", fontSize:12 }}>
-                {sp.emoji} {sp.name}
+              <button key={sp.id} onClick={function() { toggleSp(sp.name); }} style={{ background:on ? th.green + "33" : "transparent", border:(on ? "2px solid " + th.green : "1px solid " + th.border), borderRadius:20, color:on ? th.white : th.muted, fontWeight:on ? 700 : 400, padding:on ? "4px 11px" : "5px 12px", cursor:"pointer", fontSize:12 }}>
+                {on ? "\u2713 " : ""}{sp.emoji} {sp.name}
               </button>
             );
           })}
         </div>
-        <button onClick={save} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 0", cursor:"pointer", fontSize:13, fontWeight:700, marginTop:10 }}>Save Favorites</button>
+        <div style={{ fontSize:11, color:saved ? th.green : th.muted, fontWeight:saved ? 700 : 400, marginTop:10 }}>{saved ? "\u2713 Saved" : "Tap to turn on or off. Saves automatically."}</div>
       </Card>
 
       <Card T={T}>
@@ -4659,6 +4832,23 @@ function ProfileTab({ profile, setProfile, theme, setTheme, textScale, setTextSc
           })}
         </div>
         <div style={{ fontSize:10, color:th.muted, marginTop:6 }}>More themes coming in a future update.</div>
+      </Card>
+
+      <Card T={T}>
+        <SecLabel text="My catches list" T={T} />
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+          <div style={{ fontSize:13, color:th.white }}>Show my catches open on the Catch screen</div>
+          {(function() {
+            var on = !profile || profile.myCatchesOpen !== false;
+            return (
+              <button type="button" role="switch" aria-checked={on} aria-label="Show my catches open"
+                onClick={function() { setProfile(function(p) { return Object.assign({}, normalizeProfile(p), { myCatchesOpen: !on }); }); }}
+                style={{ width:50, height:28, borderRadius:14, border:"1px solid " + (on ? th.green : th.border), background:on ? th.green : th.card, position:"relative", cursor:"pointer", flexShrink:0, padding:0 }}>
+                <span style={{ position:"absolute", top:3, left:on ? 25 : 3, width:20, height:20, borderRadius:"50%", background:on ? th.onGreen : th.muted, transition:"left 0.15s" }} />
+              </button>
+            );
+          })()}
+        </div>
       </Card>
 
       <Card T={T}>
@@ -4824,15 +5014,17 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
     var t = setTimeout(function() {
       setWaterLoading(true);
       setWaterError("");
+      setBizLoading(true);
       loadNearbyWater(activePos.lat, activePos.lng, radiusMi).then(function(list) {
         if (!cancelled) setWaterResults(list);
       }).catch(function() {
         if (!cancelled) { setWaterResults([]); setWaterError("Could not load nearby water right now."); }
       }).finally(function() {
         if (!cancelled) setWaterLoading(false);
-      });
-      setBizLoading(true);
-      loadNearbyFishingBusinesses(activePos.lat, activePos.lng, radiusMi).then(function(list) {
+      }).then(function() {
+        if (cancelled) return [];
+        return loadNearbyFishingBusinesses(activePos.lat, activePos.lng, radiusMi);
+      }).then(function(list) {
         if (!cancelled) setBizResults(list);
       }).catch(function() {
         if (!cancelled) setBizResults([]);
@@ -4965,7 +5157,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
           <div style={{ fontSize:18, color:th.white, fontWeight:800, marginBottom:4 }}>🔍 Identify This Spot</div>
           <div style={{ fontSize:12, color:th.muted, marginBottom:12, lineHeight:1.5 }}>Upload any fishing photo — Instagram, TikTok, or your own.</div>
           <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleScoutPhoto} />
-          <button type="button" onClick={function() { fileRef.current && fileRef.current.click(); }} style={{ width:"100%", background:th.green, color:"#000", border:"none", borderRadius:10, padding:"14px 0", fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:12 }}>
+          <button type="button" onClick={function() { fileRef.current && fileRef.current.click(); }} style={{ width:"100%", background:th.green, color:th.onGreen, border:"none", borderRadius:10, padding:"14px 0", fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:12 }}>
             📷 Upload photo
           </button>
           {scoutPhoto ? <img src={scoutPhoto} alt="scout" style={{ width:"100%", borderRadius:10, marginBottom:12, maxHeight:200, objectFit:"cover" }} /> : null}
@@ -5080,7 +5272,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
               <div style={{ fontSize:12, color:th.red, fontWeight:700, marginBottom:6 }}>⚠️ Not using your real location</div>
               <div style={{ fontSize:12, color:th.white, lineHeight:1.5, marginBottom:10 }}>{gpsError}</div>
               <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Everything below is centered on a default spot (North Riverside, IL), not where you actually are.</div>
-              <button type="button" onClick={requestGps} style={{ background:th.green, color:"#000", border:"none", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>↻ Retry location</button>
+              <button type="button" onClick={requestGps} style={{ background:th.green, color:th.onGreen, border:"none", borderRadius:8, padding:"10px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>↻ Retry location</button>
             </Card>
           ) : null}
 
@@ -5097,10 +5289,13 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
             />
           </Card>
 
+          {/* All results in ONE list ordered by distance (CSS order), so the closest water is first
+              no matter which source found it. Before, every built-in spot was listed before any live map result. */}
+          <div style={{ display:"flex", flexDirection:"column" }}>
           {nearSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={"known_" + idx} T={T} borderColor={th.blue + "33"}>
+              <div key={"known_" + idx} style={{ order: Math.round(s.distMi * 1000) }}><Card T={T} borderColor={th.blue + "33"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
                   <Pill label={s.waterType} color={th.blue} />
@@ -5116,14 +5311,14 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
                   <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
                   <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
                 </div>
-              </Card>
+              </Card></div>
             );
           })}
 
           {nearClubSpots.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={"club_" + idx} T={T} borderColor={th.teal + "55"}>
+              <div key={"club_" + idx} style={{ order: Math.round(s.distMi * 1000) }}><Card T={T} borderColor={th.teal + "55"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.displayName}</div>
                   <Pill label="Club spot" color={th.teal} />
@@ -5138,19 +5333,19 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
                   <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
                   <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
                 </div>
-              </Card>
+              </Card></div>
             );
           })}
 
           {nearWater.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={"osm_" + idx} T={T} borderColor={th.blue + "33"}>
+              <div key={"osm_" + idx} style={{ order: Math.round(s.distMi * 1000) }}><Card T={T} borderColor={th.blue + "33"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
                   <Pill label={s.waterType} color={th.blue} />
                 </div>
-                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · Unverified water</div>
+                <div style={{ fontSize:12, color:th.blue, fontWeight:700, marginBottom:6 }}>{s.distMi.toFixed(1)} mi · Found on map, not checked by club yet</div>
                 <Pill label={"Access: " + s.access} color={s.access === "Private" ? th.red : s.access === "Public" ? th.green : th.muted} />
                 <div style={{ fontSize:10, color:th.muted, margin:"8px 0", lineHeight:1.5 }}>
                   Found via OpenStreetMap, not an official access list. May be private property, restricted, or unsafe to reach. Verify before you go.
@@ -5159,14 +5354,14 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
                   <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
                   <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
                 </div>
-              </Card>
+              </Card></div>
             );
           })}
 
           {nearBiz.map(function(s, idx) {
             var maps = mapsUrl(s.lat, s.lng);
             return (
-              <Card key={"biz_" + idx} T={T} borderColor={th.orange + "55"}>
+              <div key={"biz_" + idx} style={{ order: Math.round(s.distMi * 1000) }}><Card T={T} borderColor={th.orange + "55"}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                   <div style={{ fontSize:14, color:th.white, fontWeight:700 }}>{s.name}</div>
                   <Pill label="Business" color={th.orange} />
@@ -5182,9 +5377,10 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
                   <a href={maps.google} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.blue, fontSize:11, fontWeight:700, textDecoration:"none" }}>Google</a>
                   <a href={maps.apple} target="_blank" rel="noopener noreferrer" style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, borderRadius:8, padding:8, color:th.green, fontSize:11, fontWeight:700, textDecoration:"none" }}>Apple</a>
                 </div>
-              </Card>
+              </Card></div>
             );
           })}
+          </div>
 
           {!gpsLoading && !waterLoading && !bizLoading && !clubSpotsLoading && !nearSpots.length && !nearClubSpots.length && !nearWater.length && !nearBiz.length ? (
             <Card T={T}><div style={{ fontSize:13, color:th.muted }}>Nothing found in range. Try a bigger radius or clear an excluded direction.</div></Card>
@@ -5218,6 +5414,7 @@ var NAV = [
 export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
+  useScrollTop([tab, homeSection]);
   const [theme, setTheme] = useState("beige");
   const [textScale, setTextScaleState] = useState(function() {
     try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
@@ -5245,6 +5442,10 @@ export default function App() {
     return n;
   });
   const [toast, setToast] = useState(null);
+  const [cloudSyncedAt, setCloudSyncedAt] = useState("");
+  // Blocks pushing the local profile to the cloud until the sign-in pull has finished,
+  // so a stale copy on this device can't overwrite newer cloud data (e.g. spot sharing).
+  var cloudPullDone = useRef(false);
   var th = THEMES[theme];
   var cloudSaveTimer = useRef(null);
   var toastTimer = useRef(null);
@@ -5294,7 +5495,9 @@ export default function App() {
   useEffect(function() {
     if (!authUser || !authMember) return;
     var memberId = authMember.id;
+    cloudPullDone.current = false;
     pullCloudProfile(memberId, profile).then(function(merged) {
+      cloudPullDone.current = true;
       setProfile(function(p) {
         var prev = normalizeProfile(p);
         return normalizeProfile(Object.assign({}, prev, merged, {
@@ -5383,6 +5586,7 @@ export default function App() {
   }, [pendingLinkHref]);
 
   var handleSignOut = useCallback(function() {
+    cloudPullDone.current = false;
     signOutMember().then(function() {
       setAuthUser(null);
       setAuthMember(null);
@@ -5430,12 +5634,13 @@ export default function App() {
   useEffect(function() {
     persistProfileToStorage(profile);
     if (!authMember || !authMember.id) return;
+    if (!cloudPullDone.current) return;
     if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(function() {
       syncLocalProfileToCloud(authMember.id, profile).then(function() {
-        setProfile(function(p) {
-          return Object.assign({}, p, { cloudSyncedAt: new Date().toISOString() });
-        });
+        // Kept out of `profile` on purpose: writing it into profile re-triggered this effect,
+        // causing an endless sync loop that also reset unsaved Profile-tab edits.
+        setCloudSyncedAt(new Date().toISOString());
       }).catch(function(err) {
         showToast("Spots & profile could not sync: " + (err && err.message ? err.message : "unknown error"), "error");
       });
@@ -5472,9 +5677,9 @@ export default function App() {
   }
 
   return (
-    <div style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48, zoom:textScaleZoom(textScale) }}>
+    <div className="app-shell" style={{ background:th.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:th.white, paddingBottom:80, paddingTop:48 }}>
       <SaveToast toast={toast} />
-      <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
+      <div className="app-shell-top" style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:22 }}>🎣</span>
           <span style={{ fontSize:15, fontWeight:700, color:th.white, letterSpacing:0.3 }}>RFC Fishing</span>
@@ -5483,7 +5688,10 @@ export default function App() {
           <span style={{ fontSize:22 }}>👤</span>
         </button>
       </div>
-      <div key={tab} className="tab-content" style={{ padding:"0 14px" }}>
+      {/* Text size zoom applies to page content only. Zooming the whole app (incl. the fixed
+          header/nav) pushed the bottom menu off-screen in iPhone Safari and made pages wider than
+          the screen. Width is shrunk by the same factor so zoomed content still fits. */}
+      <div key={tab} className="tab-content" style={{ padding:"0 14px", boxSizing:"border-box", zoom:textScaleZoom(textScale), width:(100 / textScaleZoom(textScale)) + "%" }}>
         {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} authMember={authMember} onMarkClubSpotsSeen={handleMarkClubSpotsSeen} />}
@@ -5491,9 +5699,9 @@ export default function App() {
         {tab==="catch"     && <CatchTab key={authMember ? authMember.id : "local"} profile={profile} authMember={authMember} T={theme} onOpenClubFeed={openClubFeed} onSaveToast={showToast} />}
         {tab==="scout"     && <ScoutTab T={theme} profile={profile} setProfile={setProfile} goMyPrivateSpots={goMyPrivateSpots} />}
         {tab==="learn"     && <LearnTab T={theme} />}
-        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authMember={authMember} onSignOut={handleSignOut} onChangePassword={handleChangePassword} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
+        {tab==="me"        && <ProfileTab profile={profile} setProfile={setProfile} cloudSyncedAt={cloudSyncedAt || profile.cloudSyncedAt} theme={theme} setTheme={setTheme} textScale={textScale} setTextScale={setTextScale} T={theme} goMyPrivateSpots={goMyPrivateSpots} authMember={authMember} onSignOut={handleSignOut} onChangePassword={handleChangePassword} clubMembers={clubMembers} clubMembersLoading={clubMembersLoading} localRoster={localRoster} onLoadSeedRoster={handleLoadSeedRoster} onImportRosterCsv={handleImportRosterCsv} rosterImportError={rosterImportError} rosterImportBusy={rosterImportBusy} />}
       </div>
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
+      <div className="app-shell-bottom" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderTop:"1px solid " + th.border, display:"flex", backdropFilter:"blur(12px)" }}>
         {NAV.map(function(n) {
           var badge = n.id === "spots" && clubSpotsNewCount > 0;
           return (

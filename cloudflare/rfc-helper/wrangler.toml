@@ -1,0 +1,9 @@
+name = "rfc-helper"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "rfc-management"
+ALLOWED_ORIGINS = "https://ew3adam.github.io,http://localhost:5173,http://localhost:5174"
+MODEL = "claude-sonnet-5-5"
+# ANTHROPIC_API_KEY is a secret: npx wrangler secret put ANTHROPIC_API_KEY  (never put it in this file)

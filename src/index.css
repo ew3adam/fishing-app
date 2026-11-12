@@ -36,3 +36,18 @@ body {
 
 .tab-content { animation: fadeInUp 0.18s ease-out both; }
 button:active { transform: scale(0.97); }
+
+/* Desktop: show the app as a phone-sized panel with an outline, so it doesn't blend into a wide screen. */
+@media (min-width: 600px) {
+  body { background: #3a3d3a; }
+  .app-shell {
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    border-right: 1px solid rgba(0, 0, 0, 0.25);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 12px 48px rgba(0, 0, 0, 0.45);
+  }
+  .app-shell-top, .app-shell-bottom {
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+    border-right: 1px solid rgba(0, 0, 0, 0.25);
+    box-sizing: border-box;
+  }
+}
