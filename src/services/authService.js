@@ -201,4 +201,4 @@ export async function signInMemberOAuth(providerId) {
   throw new Error(OAUTH_NOT_CONFIGURED_MSG);
 }
 
-export { ROSTER_BLOCK_MSG, OAUTH_NOT_CONFIGURED_MSG };
+export { ROSTER_BLOCK_MSG, OAUTH_NOT_CONFIGURED_MSG, CANONICAL_SIGN_IN_URL };

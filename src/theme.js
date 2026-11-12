@@ -1,10 +1,4 @@
 // App color themes, shared by App.jsx and components (one copy, so contrast fixes apply everywhere).
-export function themeIsLight(th) {
-  var h = (th && th.bg) || "#000000";
-  var r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
-  return (0.299*r + 0.587*g + 0.114*b) > 150;
-}
-
 export const THEMES = {
   dark:      { bg:"#0d1a0d", card:"rgba(255,255,255,0.06)", border:"#2a4a2a", green:"#6fcf6f", dim:"#3a6a3a", gold:"#d4a843", white:"#f0ece0", muted:"#8a9a7a", blue:"#5a9fd4", red:"#e05050", orange:"#e09030", teal:"#4ab8a0", indigo:"#5a6fd4", nav:"rgba(13,26,13,0.97)", onGreen:"#000000" },
   light:     { bg:"#f0f4f0", card:"rgba(255,255,255,0.9)", border:"#c0d4c0", green:"#2a7a2a", dim:"#7ab87a", gold:"#8e6410", white:"#1a2a1a", muted:"#547254", blue:"#2a5fa0", red:"#c03030", orange:"#a65a10", teal:"#18786a", indigo:"#3a4fb0", nav:"rgba(240,244,240,0.97)", onGreen:"#ffffff" },

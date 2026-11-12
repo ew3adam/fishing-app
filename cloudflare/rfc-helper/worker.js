@@ -7,6 +7,7 @@
  *   GET  /health       quick "is it up" check (no data)
  *   GET  /buoy         Lake Michigan buoy readings from NOAA NDBC (public data, cached 5 min)
  *   POST /species-id   AI fish ID for a photo (signed-in club members only)
+ *   POST /assistant    Fishing Assistant chat, answers only from app data sent with it (members only)
  *
  * Planned next on this same Worker: /invite (send member invite email), voice catch logging.
  *
@@ -15,6 +16,7 @@
  *   FIREBASE_PROJECT_ID  default "rfc-management"
  *   ALLOWED_ORIGINS      comma list of sites allowed to call member-only routes
  *   MODEL                AI model for species ID, default "claude-sonnet-5-5"
+ *   ASSISTANT_MODEL      AI model for the chat, default "claude-haiku-5-5" (short answers, cheaper)
  * Deploy steps: docs/RFC-HELPER-DEPLOY.md
  */
 
@@ -172,12 +174,8 @@ function buildPrompt() {
 
 async function handleSpeciesId(request, env, cors) {
   if (!env.ANTHROPIC_API_KEY) return json({ error: "not configured" }, 500, cors);
-  var auth = request.headers.get("Authorization") || "";
-  try {
-    await verifyFirebaseToken(auth.indexOf("Bearer ") === 0 ? auth.slice(7) : "", env.FIREBASE_PROJECT_ID || "rfc-management");
-  } catch (e) {
-    return json({ error: "sign in required" }, 401, cors);
-  }
+  var denied = await requireMember(request, env, cors);
+  if (denied) return denied;
   var body;
   try { body = await request.json(); } catch (e) { return json({ error: "bad json" }, 400, cors); }
   var image = String((body && body.image) || "");
@@ -215,6 +213,51 @@ async function handleSpeciesId(request, env, cors) {
   }, 200, cors);
 }
 
+// ---------------------------------------------------------------- /assistant
+var ASSISTANT_SYSTEM_PROMPT = [
+  "You are the RFC Fishing Assistant, built into the Riverside Fishing Club's member app for the Chicago/Lake Michigan area.",
+  "Answer ONLY using the CONTEXT block provided in each message (current weather, buoy/shore conditions, nearby known spots, species bait tips) plus your general fishing knowledge (techniques, species behavior, gear).",
+  "Never invent specific facts you were not given: exact regulations/bag limits/license rules, real-time conditions not in the CONTEXT block, or the existence/location of a fishing spot not in the CONTEXT or general public knowledge you're confident about.",
+  "For regulations questions, say you don't have live/current numbers and point to the official state DNR site instead of guessing a figure.",
+  "If the CONTEXT doesn't cover something (e.g. conditions at a spot not listed), say so plainly rather than guessing — do not pretend to have live data you weren't given.",
+  "If asked something unrelated to fishing, the club, or this app, say that's outside what you can help with here.",
+  "Keep answers short and mobile-friendly — a few sentences, plain text, no markdown headers.",
+].join(" ");
+
+async function requireMember(request, env, cors) {
+  var auth = request.headers.get("Authorization") || "";
+  try {
+    await verifyFirebaseToken(auth.indexOf("Bearer ") === 0 ? auth.slice(7) : "", env.FIREBASE_PROJECT_ID || "rfc-management");
+    return null;
+  } catch (e) {
+    return json({ error: "Sign in to use this." }, 401, cors);
+  }
+}
+
+async function handleAssistant(request, env, cors) {
+  if (!env.ANTHROPIC_API_KEY) return json({ error: "not configured" }, 500, cors);
+  var denied = await requireMember(request, env, cors);
+  if (denied) return denied;
+  var body;
+  try { body = await request.json(); } catch (e) { return json({ error: "bad json" }, 400, cors); }
+  var message = String((body && body.message) || "").trim().slice(0, 2000);
+  if (!message) return json({ error: "Empty message." }, 400, cors);
+  var context = String((body && body.context) || "").slice(0, 4000);
+  var history = (Array.isArray(body && body.history) ? body.history.slice(-6) : [])
+    .filter(function(h) { return h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string"; })
+    .map(function(h) { return { role: h.role, content: h.content.slice(0, 2000) }; });
+  history.push({ role: "user", content: "CONTEXT:\n" + (context || "(none available)") + "\n\nQUESTION:\n" + message });
+  var r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: env.ASSISTANT_MODEL || "claude-haiku-5-5", max_tokens: 500, system: ASSISTANT_SYSTEM_PROMPT, messages: history }),
+  });
+  if (!r.ok) return json({ error: "The assistant couldn't answer right now. Try again." }, 502, cors);
+  var data = await r.json();
+  var reply = (data.content && data.content[0] && data.content[0].text) || "";
+  return reply ? json({ reply: reply }, 200, cors) : json({ error: "No answer. Try rephrasing." }, 502, cors);
+}
+
 // ---------------------------------------------------------------- router
 export default {
   async fetch(request, env) {
@@ -225,6 +268,7 @@ export default {
       if (path === "/health" && request.method === "GET") return json({ ok: true }, 200, cors);
       if (path === "/buoy" && request.method === "GET") return handleBuoy(cors);
       if (path === "/species-id" && request.method === "POST") return await handleSpeciesId(request, env, cors);
+      if (path === "/assistant" && request.method === "POST") return await handleAssistant(request, env, cors);
       return json({ error: "not found" }, 404, cors);
     } catch (e) {
       return json({ error: "server error" }, 500, cors);

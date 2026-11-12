@@ -11,13 +11,20 @@ At the start of every session:
    - Exception: if behind origin AND there are local changes, STOP and ask Adam before pulling.
 2. Report: current branch, uncommitted changes, and a one-line summary of where we left off (see `docs/dev-session-log.md`).
 
+## Keeping docs current
+`CLAUDE.md` and `CHANGELOG.md` must both stay accurate as the app evolves — that's an ongoing responsibility, not a one-off docs pass.
+- **`CLAUDE.md`**: whenever a change touches something this file describes (tech stack, tab structure, data model/sync behavior, auth flow, a documented gotcha, the key-files table, dev commands), update the relevant section **in the same commit/PR as the code change**, not only when someone explicitly asks for a "docs" task.
+- **`CHANGELOG.md`**: add an entry under `## [Unreleased]` (Keep a Changelog format — `Added`/`Fixed`/`Removed`, etc.) for any user-facing change or notable internal fix, in the same commit/PR as the change itself.
+
+Before calling any non-trivial change done, check whether it made a claim in either file stale and fix it — treat stale docs the same as a bug you introduced.
+
 ## Tech Stack
 - **Framework**: React 18 + Vite 5, plain JS/JSX (no TypeScript)
 - **Backend**: Firebase (Auth, Firestore, Storage) — shared project `rfc-management`, also used by a separate RFC CRM app
 - **Maps**: Leaflet, OpenStreetMap tiles
 - **EXIF parsing**: exifr (reads GPS coords from catch photos)
 - **Weather**: Open-Meteo REST API (no key)
-- **AI features**: direct browser `fetch` to `api.anthropic.com` (weather-estimate fallback, fishing tips, tackle images/lookups) — see gotcha below
+- **AI features**: direct browser `fetch` to `api.anthropic.com` (weather-estimate fallback, fishing tips, tackle images/lookups) — see gotcha below. Exception: the Fishing Assistant chat bubble goes through a Cloudflare Worker that holds the real API key, not a direct browser call.
 - **Deploy**: `npm run deploy` → `gh-pages` branch (GitHub Pages); base path also supports Cloudflare Pages
 
 ## Development Commands
@@ -46,7 +53,7 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 - **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
 - **Spots**: private + club-shared fishing spots, Leaflet map picker.
 - **Scout**: browse/search known spots, club-shared spots, and live OSM/Overpass water + businesses; results also plot as red pins on a `ScoutResultsMap` overview map (blue dot = your position) so a bad/mislabeled entry is visible before you drive there — see spot-data-quality gotcha below.
-- **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme.
+- **Profile**: sign-in, member profile, gear list, favorite spots, roster import/health, theme, inviting never-signed-in roster members via Mail/Messages (`buildInviteMailtoLink`/`buildInviteSmsLink`).
 
 ### Local-first, cloud-synced data
 Profile and catches live in `localStorage` first and are mirrored to Firestore once a member is signed in — this is not a thin Firestore client, so don't assume every read/write round-trips the network. Sync logic is in `src/services/fishingSyncService.js`:
@@ -72,6 +79,8 @@ There are two separate "roster" concepts — don't conflate them:
 **Update 2026-11-11:** the RFC Helper Worker (`cloudflare/rfc-helper/`, `src/lib/rfcHelper.js`, `docs/RFC-HELPER-DEPLOY.md`) is now the one server for anything needing a key or a server-side fetch: `/buoy` and `/species-id` (members only, Firebase ID token verified). Move the remaining keyless AI calls below onto it rather than adding keys to the client.
 Several features (weather-estimate fallback, one-line fishing tips, tackle image/info lookups in `App.jsx`) call `https://api.anthropic.com/v1/messages` directly from the browser with **no `x-api-key`/auth header at all**. This only works in environments that transparently proxy that origin (e.g. this session's sandboxed network, or Claude.ai's artifact preview) — in a normal browser hitting the real `api.anthropic.com`, or the deployed GitHub Pages site, these calls will fail with 401/CORS errors. Most call sites (`loadFishingTip`, `loadTackleImage`) wrap the whole thing in `try/catch` and fail silently — those are fine. **`loadWeather`'s Anthropic fallback is not**: it runs unguarded inside the `catch` block that handles the Open-Meteo failure (`src/App.jsx` ~line 1016-1033), so if it also throws (CORS/network error), the exception isn't caught anywhere, `loadWeather(...)` rejects, and its only caller (`HomeTab`'s `load()`, ~line 1118) has no `.catch()` — so `setLoading(false)` never runs and the forecast can be stuck loading. Treat this as a real bug to fix (wrap the Anthropic call in its own `try/catch` returning `null`, and/or add a `.catch()` at the call site), not as an intentional silent-fallback pattern — don't add a client-exposed API key to "fix" it instead.
 
+**The Fishing Assistant is the one exception** (`src/components/FishingAssistant.jsx`, the chat bubble on Home) — it does NOT call Anthropic from the browser. It calls a Cloudflare Worker (`cloudflare/rfc-helper/worker.js (/assistant)`, same no-server-side-key-in-the-bundle pattern as the buoy proxy below) that holds a real `ANTHROPIC_API_KEY` secret and makes the actual API call server-side. Requires a signed-in member (checks a Firebase ID token via Firebase's own `accounts:lookup` REST endpoint — not a full active-roster check, see the Worker file's top comment for the known limitation). Scoped by its own system prompt to answer only from the real context `HomeTab` sends it (weather, buoy report, nearby spots, bait tips) plus general fishing knowledge — told explicitly not to invent regs numbers or specifics it wasn't given. `FISHING_ASSISTANT_URL` in that component is a placeholder (`YOUR-SUBDOMAIN`) until the Worker is deployed — see `docs/RFC-HELPER-DEPLOY.md`.
+
 ### Firebase config
 `src/lib/firebase.js` has hardcoded fallback values for the public web config (safe to expose — it's not a secret); `VITE_FIREBASE_*` env vars override them when set (see `.env.example`). `src/config/authProviders.js` **is committed to git** (not gitignored) and reads `VITE_GOOGLE_CLIENT_ID` / `VITE_FACEBOOK_APP_ID` / `VITE_APPLE_CLIENT_ID` / `VITE_PHONE_AUTH_ENABLED` at runtime, all disabled by default; `src/config/authProviders.example.js` is an older/unused template with a different (static object) shape — prefer editing `authProviders.js` directly.
 
@@ -87,6 +96,8 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `src/services/rosterHealthService.js` | Diagnostic check that the roster/auth Firestore reads work |
 | `src/services/catchPhotoStorage.js` | Compresses + uploads catch photos to Firebase Storage; strips base64 before Firestore writes |
 | `src/components/ClubFeedList.jsx` | Club-wide catch feed (pull-to-refresh, likes) |
+| `src/components/FishingAssistant.jsx` | Home chat bubble — scoped Q&A grounded in real app data, via Worker (not a direct Anthropic call) |
+| `cloudflare/rfc-helper/worker.js (/assistant)` | Holds the real `ANTHROPIC_API_KEY` secret server-side; deployed separately, see `docs/RFC-HELPER-DEPLOY.md` |
 | `src/components/SpotMapPicker.jsx` / `SpotMapThumb.jsx` | Leaflet map for picking/displaying spots |
 | `src/components/ScoutResultsMap.jsx` | Read-only Leaflet overview map for Scout results (red pins) — visual sanity-check, not a picker |
 | `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed (see Architecture above) |
@@ -97,6 +108,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `scripts/scan-pii.js` | PII/secrets scanner (pre-commit + pre-deploy) |
 | `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
 | `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
+| `CHANGELOG.md` | User-facing + notable internal changes, Keep a Changelog format under `[Unreleased]` — keep current per "Keeping docs current" above |
 
 ## Coding Style
 - Vanilla JS inside JSX (no TypeScript).
@@ -105,6 +117,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 - Minimal diffs: no drive-by refactors unless asked; if you do touch a file, leave it cleaner per `docs/refactoring-policy.md` (delete dead code/unused imports you encounter in the area you're already editing — don't go looking for more).
 
 ## Important Constraints
+- **Keep CLAUDE.md and CHANGELOG.md current** — update both alongside any change that affects what they document (see "Keeping docs current" above); don't let them drift into a stale snapshot.
 - **No test suite, no linter** — manually test in browser before marking anything done.
 - **PII scan** — `npm run scan:pii` audits the repo; pre-commit hook blocks staged emails/phones/passwords; `npm run deploy` scans `src`, `public`, `data` first. Known-safe strings go in `scripts/pii-allowlist.txt`.
 - `App.jsx` is intentionally monolithic; don't split it unless the user asks.

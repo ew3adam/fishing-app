@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
-import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud } from "./services/authService.js";
+import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud, CANONICAL_SIGN_IN_URL } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, deleteCatchFromCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
@@ -8,13 +8,14 @@ import { identifySpecies } from "./services/speciesIdService.js";
 import { helperUrl } from "./lib/rfcHelper.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
-import { THEMES, themeIsLight } from "./theme.js";
+import { THEMES } from "./theme.js";
 
 // Opening a new page/view starts at the top instead of the previous scroll position.
 function useScrollTop(deps) {
   useEffect(function() { try { window.scrollTo(0, 0); } catch (e) { /* ignore */ } }, deps); // eslint-disable-line react-hooks/exhaustive-deps
 }
 import SaveToast from "./components/SaveToast.jsx";
+import FishingAssistant from "./components/FishingAssistant.jsx";
 import { buildSpotDisplayName, sanitizeSpotForForm, formatFeedSpotName } from "./utils/feedSpotPrivacy.js";
 import SpotMapPicker from "./components/SpotMapPicker.jsx";
 import SpotMapThumb from "./components/SpotMapThumb.jsx";
@@ -601,6 +602,25 @@ function normalizeProfile(raw) {
   return out;
 }
 
+/** Real, honest invite text -- no fake urgency, no fabricated claims about the app. */
+function inviteMessageText() {
+  return "Hey! You're on the Riverside Fishing Club roster but haven't signed into the club app yet. Sign in here to log catches, check bite conditions, and see the club feed: " + CANONICAL_SIGN_IN_URL;
+}
+
+/** mailto: link pre-filled for one or more members -- null if none of them have an email on file. */
+function buildInviteMailtoLink(members) {
+  var emails = (members || []).map(function(m) { return m.email; }).filter(Boolean);
+  if (!emails.length) return null;
+  return "mailto:" + emails.join(",") + "?subject=" + encodeURIComponent("Join us on the RFC Fishing app") + "&body=" + encodeURIComponent(inviteMessageText());
+}
+
+/** sms: link pre-filled for one or more members -- null if none of them have a phone on file. */
+function buildInviteSmsLink(members) {
+  var phones = (members || []).map(function(m) { return String(m.phone || "").replace(/[^\d+]/g, ""); }).filter(Boolean);
+  if (!phones.length) return null;
+  return "sms:" + phones.join(",") + "?&body=" + encodeURIComponent(inviteMessageText());
+}
+
 function appendSpotActivity(setProfile, message) {
   var msg = sanitizeStr(message, 500);
   if (!msg) return;
@@ -792,15 +812,43 @@ const LESSONS = [
 ];
 
 // ─── ARTICLES ─────────────────────────────────────────────────────────────────
+// URLs below were re-verified by WebSearch (this sandbox's network blocks direct fetch to
+// midwestoutdoors.com, windycityfishing.com, and fpdcc.com, so links can't be curled from here --
+// same egress limit documented in CLAUDE.md for DNR/reference sites, worth a live click-check).
+// The previous midwestoutdoors.com/fish/{species}/ URLs and windycityfishing.com don't match
+// either site's real structure/existence and were replaced. Each `tip` is a 1-2 sentence
+// condensation of that specific article's real content (not generic advice), surfaced on Home
+// next to the matching species so the "how to fish now" guidance reflects what these sources
+// actually say, not just this app's own curated bait list.
 const ARTICLES = [
-  {title:"Spring Crappie Tactics for Illinois Lakes",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/crappie/",species:"Crappie"},
-  {title:"Des Plaines River Fishing Guide",source:"WindyCityFishing",url:"https://www.windycityfishing.com/",species:"Bass"},
+  {title:"Guides' Hard-Won Jigging Tactics for Crappie",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/fishing/guides-hard-won-jigging-tactics-tackle-crappies/",species:"Crappie",
+    tip:"Tournament guides stress careful boat/bank positioning near cover and a firm hookset — and note stained water holds crappie higher and less wary, so don't be afraid to fish shallow."},
+  {title:"Des Plaines River Fishing Guide",source:"onX Maps",url:"https://www.onxmaps.com/fish/fishing-spots/us/illinois/des-plaines-river-g8zl53v0761w",species:"Smallmouth Bass",
+    tip:"Rated for smallmouth with solid shore/wading access — work spinnerbaits or small-bladed baits through current and deep-diving crankbaits through pools; a fall drop-shot bite near ledge structure in 4-9 ft is a proven local pattern."},
   {title:"Lake Michigan Coho Shore Fishing 101",source:"Indiana DNR",url:"https://www.in.gov/dnr/fish-and-wildlife/fishing/lake-michigan-fishing/",species:"Coho Salmon"},
   {title:"Cook County Forest Preserve Fishing",source:"FPDCC",url:"https://fpdcc.com/things-to-do/fishing/",species:"Rainbow Trout"},
-  {title:"Catfish Tactics for Midwest Rivers",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/catfish/",species:"Channel Catfish"},
-  {title:"Waukegan Harbor Coho Reports",source:"MidwestOutdoors",url:"https://www.midwestoutdoors.com/fish/salmon/",species:"Coho Salmon"},
+  {title:"Spider-Rigging for Catfish",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/?p=118075",species:"Channel Catfish",
+    tip:"Channel cats spawn just after crappie and move into the same shallow coves and riprap once water hits the upper 60s°F — spread multiple rods wide apart to cover water without tangling."},
+  {title:"Spring Coho Salmon — Lake Michigan Shore Tactics",source:"MidwestOutdoors",url:"https://midwestoutdoors.com/fishing/spring-coho-salmon/",species:"Coho Salmon",
+    tip:"Coho push into warming shoreline water chasing baitfish starting in April/May once it hits the low 50s°F — \"cast one and soak one\": cast a spoon or crankbait while a second rod soaks bait off bottom, working the upper half of the water column."},
   {title:"Illinois Fishing Regulations and License",source:"IDNR",url:"https://www.ifishillinois.org/",species:"All"},
+  // Added per direct request: better links to official sources instead of embedding specific
+  // bag/size-limit numbers in the app -- this app has no server and can't scrape DNR sites live
+  // (they're also blocked from this sandbox's network), so a static number here could go stale
+  // silently. These are the other 3 states this club's waters actually touch (Lake Michigan
+  // shoreline, Wolf Lake on the IL/IN line, South Haven MI) -- unverified live from this sandbox
+  // (DNR sites are blocked here the same way), so worth a live click-check before relying on them.
+  {title:"Indiana Fishing Regulations and License",source:"Indiana DNR",url:"https://www.in.gov/dnr/fish-and-wildlife/fishing/",species:"All"},
+  {title:"Michigan Fishing Regulations and License",source:"Michigan DNR",url:"https://www.michigan.gov/dnr/things-to-do/fishing",species:"All"},
+  {title:"Wisconsin Fishing Regulations and License",source:"Wisconsin DNR",url:"https://dnr.wisconsin.gov/topic/fishing",species:"All"},
 ];
+
+/** First ARTICLES entry with a real tactical `tip` for this species, or null. */
+function articleTipForSpecies(species) {
+  if (!species) return null;
+  var match = ARTICLES.find(function(a) { return a.tip && a.species === species; });
+  return match || null;
+}
 
 // ─── WEATHER UTIL ─────────────────────────────────────────────────────────────
 function fishingScore(wx) {
@@ -965,6 +1013,30 @@ function goldenHourMessage(sunriseIso, sunsetIso) {
   return "🌙 Evening bite window opening";
 }
 
+/**
+ * General (species-independent) technique guidance for right now, keyed off sunrise/sunset the
+ * same way goldenHourMessage already is -- added so the "Try:" bait callout actually changes with
+ * the clock, not just species/season. Deliberately doesn't invent new per-species bait data (that
+ * would be fabricating fishing advice this app can't vouch for); this just layers on broadly-true,
+ * standard low-light-vs-bright-light technique advice that applies regardless of species.
+ */
+function timeOfDayTactic(sunriseIso, sunsetIso) {
+  var now = Date.now();
+  var sr = sunriseIso ? new Date(sunriseIso).getTime() : null;
+  var ss = sunsetIso ? new Date(sunsetIso).getTime() : null;
+  var LOW_LIGHT_WINDOW = 90 * 60000; // 90 min around sunrise/sunset -- the classic dawn/dusk bite window
+  if (sr != null && Math.abs(now - sr) <= LOW_LIGHT_WINDOW) {
+    return { icon:"🌅", label:"Dawn bite", tip:"Low light = active, chasing fish. Fish it faster and shallower than you'd think." };
+  }
+  if (ss != null && Math.abs(now - ss) <= LOW_LIGHT_WINDOW) {
+    return { icon:"🌇", label:"Dusk bite", tip:"Same as dawn — low light turns fish aggressive. Keep it moving." };
+  }
+  if (sr != null && ss != null && now > sr && now < ss) {
+    return { icon:"☀️", label:"Midday", tip:"Bright light pushes fish deeper or tighter to cover. Slow down and go subtler." };
+  }
+  return { icon:"🌙", label:"After dark", tip:"Slower retrieves, bigger profile — fish feel more than see after dark." };
+}
+
 function findNearestHomeWater(lat, lng) {
   var best = null;
   HOME_WATER_SPOTS.forEach(function(s) {
@@ -990,6 +1062,11 @@ function speciesBaitTips(targetSpecies, season) {
   });
 }
 
+// Always rendered inside the "Bite Forecast" Card, whose background is a fixed dark rgba()
+// regardless of theme (see its `style` prop at the call site) -- the needle and score number here
+// are fixed "#fff" for the same reason the RFC Bite Forecast card's text is, not th.white (which
+// is near-black in the beige/light themes, invisible against this always-dark dial). Found via a
+// second real-device screenshot after the first card's fix, 2026-11-08.
 function BFRDial({ score, color, T }) {
   var th = THEMES[T];
   var [animScore, setAnimScore] = useState(0);
@@ -1007,10 +1084,10 @@ function BFRDial({ score, color, T }) {
         <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={th.border} strokeWidth="10" strokeLinecap="round" />
         <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none" stroke={color || th.green} strokeWidth="10" strokeLinecap="round" strokeDasharray={filled + " " + arcLen} style={{ transition:"stroke-dasharray 1s ease-out" }} />
         <g transform={"rotate(" + angle + " 110 110)"} style={{ transition:"transform 1s ease-out" }}>
-          <line x1="110" y1="110" x2="110" y2="32" stroke={th.white} strokeWidth="3" strokeLinecap="round" />
+          <line x1="110" y1="110" x2="110" y2="32" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
           <circle cx="110" cy="110" r="6" fill={color || th.green} />
         </g>
-        <text x="110" y="98" textAnchor="middle" fill={th.white} fontSize="28" fontWeight="800">{animScore}</text>
+        <text x="110" y="98" textAnchor="middle" fill="#fff" fontSize="28" fontWeight="800">{animScore}</text>
         <text x="110" y="118" textAnchor="middle" fill={color || th.green} fontSize="11" fontWeight="700">BITE FORECAST</text>
       </svg>
     </div>
@@ -1876,9 +1953,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   var bfr = calcBFR(wx, moonInfo);
   var season = getSeason(new Date().getMonth());
   var baits = speciesBaitTips(targetSpecies, season);
+  var targetSpeciesArticleTip = articleTipForSpecies(targetSpecies);
   var solunar = wx ? calcSolunarWindows(wx.sunrise, wx.sunset) : [];
   var waterTemp = wx ? estimateWaterTemp(wx.temp, new Date().getMonth()) : null;
   var golden = wx ? goldenHourMessage(wx.sunrise, wx.sunset) : "";
+  var tactic = wx ? timeOfDayTactic(wx.sunrise, wx.sunset) : null;
   var displayName = (profile && profile.name) ? profile.name.split(" ")[0] : "Angler";
   var nearSpot = nearestWater && nearestWater.spot;
   var nearDist = nearestWater ? nearestWater.dist.toFixed(1) : null;
@@ -1913,11 +1992,24 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
     ? pinnedSpot.species_present[0]
     : targetSpecies;
   var featuredBaits = speciesBaitTips(featuredPrimarySpecies, season);
+  var featuredArticleTip = articleTipForSpecies(featuredPrimarySpecies);
   var biteScore = bfr ? bfr.score : (rating ? rating.score : 0);
+  // Real, current data handed to the Fishing Assistant Worker as grounding context -- never
+  // invented, same discipline as the rest of this card. Kept compact (no full SCOUT_SPOTS dump)
+  // since every token here is billed per chat message (see RFC-HELPER-DEPLOY.md).
+  var assistantContext = [
+    wx ? ("Weather: " + wx.temp + "°F, " + wx.condition + ", wind " + wx.wind + " mph" + (wx.windCompass ? " " + wx.windCompass : "") + ".") : null,
+    featuredSpotName ? ("Nearest/featured spot: " + featuredSpotName + (featuredDist ? " (" + featuredDist + " mi away)" : "") + (featuredSpeciesList ? ", species: " + featuredSpeciesList : "") + ".") : null,
+    topNearbySpots.length ? ("Other nearby known spots: " + topNearbySpots.map(function(s) { return s.name + " (" + s.dist.toFixed(1) + " mi)"; }).join(", ") + ".") : null,
+    ("Current season: " + season + ". Member's selected target species: " + targetSpecies + ".") ,
+    featuredBaits[0] ? ("Top bait suggestion on file for " + featuredPrimarySpecies + ": " + featuredBaits[0].name + " — " + featuredBaits[0].why) : null,
+    tactic ? ("Time-of-day tactic right now (" + tactic.label + "): " + tactic.tip) : null,
+    buoyReport ? ("Lake Michigan shore report — overall: " + buoyReport.statusLabel + ". By spot: " + buoyReport.shoreConditions.map(function(s) { return s.name + ": " + s.phrase; }).join("; ") + (buoyReport.notes.length ? ". Notes: " + buoyReport.notes.join(" ") : "") + ".") : "Lake Michigan buoy/shore report: not available right now (Worker not deployed or no data) — don't guess at Lake Michigan conditions.",
+    bfr ? ("Bite forecast score: " + biteScore + "/100 (" + bfr.label + ").") : null,
+  ].filter(Boolean).join(" ");
   var articles = expandArticles ? ARTICLES : ARTICLES.filter(function(a) { return favSp.length === 0 || favSp.includes(a.species) || a.species === "All"; });
   if (articles.length === 0) articles = ARTICLES;
-  // Light themes use dark text, so the forecast box must be light there (was always dark = unreadable).
-  var bfrBg = themeIsLight(th) ? th.card : T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
+  var bfrBg = T === "bluesteel" ? "linear-gradient(180deg, #0d1520 0%, #122035 100%)" : "linear-gradient(180deg, #0a1418 0%, #0d1f2d 100%)";
   var hour = new Date().getHours();
   var timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   var nextWindow = solunar && solunar[0];
@@ -2165,19 +2257,37 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         </div>
       ) : null}
 
+      {/* This card's background (bfrBg) is always a fixed dark gradient, independent of the
+          selected theme (unlike the weather card above, which derives its gradient from theme
+          tokens). Text inside it must therefore use fixed light colors too, not th.white/th.blue
+          — those resolve to near-black in the beige/light themes (calibrated for light card
+          backgrounds elsewhere), which was invisible against this always-dark card. Confirmed by
+          a real-device screenshot (beige theme, 2026-11-07). th.muted/th.green/th.gold and
+          bfrTierColor()'s fixed bright colors already have sufficient contrast here and are left
+          as-is. */}
       <div style={{ background:bfrBg, borderRadius:14, border:"1px solid " + th.border, padding:"14px 12px 10px", marginBottom:12 }}>
-        <div style={{ fontSize:11, color:th.blue, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
-        <div style={{ fontSize:20, color:th.white, fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
+        <div style={{ fontSize:11, color:"#5a9fd4", fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", marginBottom:6 }}>RFC Bite Forecast</div>
+        <div style={{ fontSize:20, color:"#fff", fontWeight:800, lineHeight:1.25, marginBottom:4 }}>What&apos;s biting near you right now</div>
         {loading ? (
           <div style={{ fontSize:13, color:th.muted, padding:"12px 0" }}>Locating nearest water…</div>
         ) : (pinnedSpot || nearSpot) ? (
           <div>
-            {pinnedSpot ? <div style={{ fontSize:10, color:th.blue, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>📍 Your pinned spot</div> : null}
+            {pinnedSpot ? <div style={{ fontSize:10, color:"#5a9fd4", fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>📍 Your pinned spot</div> : null}
             <div style={{ fontSize:15, color:th.green, fontWeight:700 }}>{featuredSpotName}{featuredDist ? " · " + featuredDist + " mi" : ""}</div>
             {featuredSpeciesList ? <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>Active: {featuredSpeciesList}</div> : null}
-            <div style={{ fontSize:13, color:th.white, marginTop:8, lineHeight:1.45 }}>
+            <div style={{ fontSize:13, color:"#fff", marginTop:8, lineHeight:1.45 }}>
               <span style={{ color:th.gold, fontWeight:700 }}>Try:</span> {featuredBaits[0] ? featuredBaits[0].name : "Live minnow"} — {featuredBaits[0] ? featuredBaits[0].why : "versatile starter bait"}
             </div>
+            {tactic ? (
+              <div style={{ fontSize:12, color:th.muted, marginTop:4, lineHeight:1.45 }}>
+                {tactic.icon} <span style={{ color:"#fff", fontWeight:600 }}>{tactic.label} right now:</span> {tactic.tip}
+              </div>
+            ) : null}
+            {featuredArticleTip ? (
+              <div style={{ fontSize:11, color:th.muted, marginTop:4, lineHeight:1.45 }}>
+                📰 <span style={{ color:"#fff", fontWeight:600 }}>From {featuredArticleTip.source}:</span> {featuredArticleTip.tip}
+              </div>
+            ) : null}
             {pinnedSpot && pinnedSpot.notes ? <div style={{ fontSize:11, color:th.muted, marginTop:6, lineHeight:1.45, fontStyle:"italic" }}>{pinnedSpot.notes.slice(0, 120)}{pinnedSpot.notes.length > 120 ? "…" : ""}</div> : null}
             <div style={{ marginTop:8, display:"inline-block", background:bfrTierColor(biteScore) + "22", border:"1px solid " + bfrTierColor(biteScore), borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:700, color:bfrTierColor(biteScore) }}>
               Bite score {biteScore}/100
@@ -2211,6 +2321,11 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         </div>
       )}
 
+      {/* Fixed dark background regardless of theme -- same as the RFC Bite Forecast card above.
+          Text nested in a th.card-background sub-box (the 4 stat tiles, solunar rows) correctly
+          uses th.white/th.muted since those boxes ARE theme-colored (light in beige/light). Text
+          sitting directly on this Card's own dark background (bait names, article tip) must use
+          fixed light colors instead -- see BFRDial's comment for why. */}
       <Card T={T} borderColor={bfr ? bfr.color : th.border} style={{ background:T === "bluesteel" ? "rgba(18,32,53,0.85)" : "rgba(10,22,28,0.9)" }}>
         {loading ? (
           <div style={{ textAlign:"center", padding:"24px 0", color:th.muted }}>Calculating bite forecast…</div>
@@ -2255,11 +2370,16 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
             {baits.map(function(b, i) {
               return (
                 <div key={i} style={{ marginBottom:8, paddingBottom:8, borderBottom: i < baits.length - 1 ? "1px solid " + th.border : "none" }}>
-                  <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>{b.name}</div>
+                  <div style={{ fontSize:13, color:"#fff", fontWeight:700 }}>{b.name}</div>
                   <div style={{ fontSize:11, color:th.muted, marginTop:2 }}>{b.why}</div>
                 </div>
               );
             })}
+            {targetSpeciesArticleTip ? (
+              <div style={{ marginTop:4, fontSize:11, color:th.muted, lineHeight:1.45 }}>
+                📰 <span style={{ color:"#fff", fontWeight:600 }}>From {targetSpeciesArticleTip.source}:</span> {targetSpeciesArticleTip.tip}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div style={{ color:th.red, fontSize:13, textAlign:"center", padding:16 }}>
@@ -2369,12 +2489,14 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
                 <span style={{ fontSize:10, color:th.muted }}>{a.source}</span>
                 <Pill label={a.species} color={th.green} />
               </div>
+              {a.tip ? <div style={{ fontSize:11, color:th.muted, marginTop:4, lineHeight:1.4 }}>{a.tip}</div> : null}
             </a>
           );
         })}
       </Card>
       </>
       )}
+      <FishingAssistant T={T} authMember={authMember} contextSummary={assistantContext} />
     </div>
   );
 }
@@ -3470,15 +3592,18 @@ function CatalogueTab({ T }) {
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+          {/* Fixed dark backgrounds regardless of theme -- th.muted below was invisible-ish
+              against them in the beige/light themes (~2.8:1, under the 4.5:1 minimum), same bug
+              class as the Bite Forecast cards. Fixed to a dedicated light caption color. */}
           <a href={"https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(sel.searchQ)} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:"#1a3a5a", border:"1px solid #2a5a8a", borderRadius:10, padding:14, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:24 }}>📸</div>
             <div style={{ fontSize:13, color:"#7ab8e8", fontWeight:700, marginTop:4 }}>More Photos</div>
-            <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>Google Images</div>
+            <div style={{ fontSize:10, color:"#a8c4d8", marginTop:2 }}>Google Images</div>
           </a>
           <a href={sel.yt} target="_blank" rel="noopener noreferrer" style={{ display:"block", background:"#3a1a1a", border:"1px solid #8a2a2a", borderRadius:10, padding:14, textDecoration:"none", textAlign:"center" }}>
             <div style={{ fontSize:24 }}>▶️</div>
             <div style={{ fontSize:13, color:"#e87a7a", fontWeight:700, marginTop:4 }}>Watch Tutorial</div>
-            <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>YouTube</div>
+            <div style={{ fontSize:10, color:"#d8a8a8", marginTop:2 }}>YouTube</div>
           </a>
         </div>
 
@@ -4591,6 +4716,47 @@ function ProfileTab({ profile, setProfile, cloudSyncedAt, theme, setTheme, textS
   const [changePwBusy, setChangePwBusy] = useState(false);
   const [changePwResult, setChangePwResult] = useState(null);
   const [newGear, setNewGear] = useState({ nickname:"", brand:"", model:"", length:"", power:"", action:"", reel:"", line_type:"Monofilament", line_weight:"", leader_type:"", leader_weight:"", notes:"" });
+  // Invite roster members who've never signed in (authUid null) -- recipients are always drawn
+  // from the real roster list (clubMembers), never free-typed, since anyone not actually on the
+  // roster would hit the sign-in gate anyway. No backend/outbound email here (this app can't send
+  // mail itself) -- just opens the device's own Mail/Messages app pre-filled, same as every other
+  // share-via-native-app pattern in this file.
+  const [inviteSelected, setInviteSelected] = useState({});
+  function toggleInviteSelected(id) {
+    setInviteSelected(function(prev) {
+      var next = Object.assign({}, prev);
+      if (next[id]) delete next[id]; else next[id] = true;
+      return next;
+    });
+  }
+  // Sends a REAL passwordless sign-in link via Firebase (the same function the normal sign-in
+  // screen uses) -- unlike the mailto:/sms: drafts above, the member gets a working magic link
+  // straight from Firebase, no extra step. Only ever called for emails already confirmed to
+  // belong to a roster member (sourced from clubMembers, same "only members" restriction as the
+  // rest of this feature). Sequential, not Promise.all, so one slow/failing send doesn't race
+  // with the next and so per-member status updates land in a sane order.
+  const [inviteLinkBusy, setInviteLinkBusy] = useState(false);
+  const [inviteLinkStatus, setInviteLinkStatus] = useState({}); // {[memberId]: "sent" | "error"}
+  async function sendRealSignInLinks(members) {
+    setInviteLinkBusy(true);
+    // `let` (not `var`) is load-bearing here, not a style choice: setInviteLinkStatus's updater
+    // callback runs on React's own schedule, after this loop has already moved on -- with `var`
+    // (function-scoped), every callback closed over the SAME mutable binding, so by the time the
+    // first member's "sent" callback actually ran, the loop had already reassigned `member` to the
+    // next one, and the status landed on the wrong member entirely. `let` gives each iteration its
+    // own binding, which is what the closure actually needs.
+    for (let i = 0; i < members.length; i++) {
+      let member = members[i];
+      if (!member.email) continue;
+      try {
+        await sendSignInLink(member.email);
+        setInviteLinkStatus(function(prev) { var next = Object.assign({}, prev); next[member.id] = "sent"; return next; });
+      } catch (e) {
+        setInviteLinkStatus(function(prev) { var next = Object.assign({}, prev); next[member.id] = "error"; return next; });
+      }
+    }
+    setInviteLinkBusy(false);
+  }
 
   useEffect(function() {
     setForm(normalizeProfile(profile));
@@ -4752,6 +4918,71 @@ function ProfileTab({ profile, setProfile, cloudSyncedAt, theme, setTheme, textS
           <div style={{ fontSize:12, color:th.muted }}>No members loaded — check Firestore rules or roster import.</div>
         )}
       </Card>
+
+      {(function() {
+        var neverSignedIn = (clubMembers || []).filter(function(m) { return !m.authUid; });
+        if (!neverSignedIn.length) return null;
+        var selectedMembers = neverSignedIn.filter(function(m) { return inviteSelected[m.id]; });
+        var mailtoLink = buildInviteMailtoLink(selectedMembers);
+        var smsLink = buildInviteSmsLink(selectedMembers);
+        var selectedWithEmail = selectedMembers.filter(function(m) { return m.email; });
+        return (
+          <Card T={T} borderColor={th.gold + "44"}>
+            <SecLabel text={"Invite members who haven't signed in (" + neverSignedIn.length + ")"} T={T} />
+            <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.4 }}>
+              Select one or more. "Send Sign-In Email" has Firebase email them a real, working
+              login link directly — the fastest option when they have an email on file. The two
+              draft buttons below open your own Mail/Messages app instead, for a personal nudge.
+              Only real roster members show up here — there's no way to invite anyone else.
+            </div>
+            <div style={{ maxHeight:220, overflowY:"auto", marginBottom:10 }}>
+              {neverSignedIn.map(function(m) {
+                var checked = !!inviteSelected[m.id];
+                var status = inviteLinkStatus[m.id];
+                return (
+                  <label key={m.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid " + th.border, cursor:"pointer" }}>
+                    <input type="checkbox" checked={checked} onChange={function() { toggleInviteSelected(m.id); }} />
+                    <span style={{ flex:1, fontSize:12, color:th.white }}>{m.displayName || m.id}</span>
+                    {status === "sent" ? <span style={{ fontSize:10, color:th.green, fontWeight:700 }}>✓ Sent</span> : null}
+                    {status === "error" ? <span style={{ fontSize:10, color:th.red, fontWeight:700 }}>⚠️ Failed</span> : null}
+                    <span style={{ fontSize:10, color:th.muted }}>
+                      {m.email ? "✉️" : ""}{m.phone ? " 📱" : ""}{!m.email && !m.phone ? "no contact info" : ""}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              disabled={!selectedWithEmail.length || inviteLinkBusy}
+              onClick={function() { sendRealSignInLinks(selectedWithEmail); }}
+              style={{
+                width:"100%", marginBottom:8, background: (!selectedWithEmail.length || inviteLinkBusy) ? th.border : th.gold,
+                color: (!selectedWithEmail.length || inviteLinkBusy) ? th.muted : "#000", border:"none", borderRadius:8,
+                padding:"11px 0", fontSize:13, fontWeight:700, cursor:(!selectedWithEmail.length || inviteLinkBusy) ? "default" : "pointer",
+              }}
+            >
+              {inviteLinkBusy ? "Sending…" : "📨 Send Sign-In Email (" + selectedWithEmail.length + ")"}
+            </button>
+            <div style={{ display:"flex", gap:8 }}>
+              {mailtoLink ? (
+                <a href={mailtoLink} style={{ flex:1, textAlign:"center", background:th.blue, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
+                  ✉️ Draft Email ({selectedMembers.filter(function(m) { return m.email; }).length})
+                </a>
+              ) : (
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>✉️ Draft Email</div>
+              )}
+              {smsLink ? (
+                <a href={smsLink} style={{ flex:1, textAlign:"center", background:th.green, color:"#fff", borderRadius:8, padding:"10px 0", fontSize:12, fontWeight:700, textDecoration:"none" }}>
+                  📱 Draft Text ({selectedMembers.filter(function(m) { return m.phone; }).length})
+                </a>
+              ) : (
+                <div style={{ flex:1, textAlign:"center", background:th.card, border:"1px solid " + th.border, color:th.muted, borderRadius:8, padding:"10px 0", fontSize:12 }}>📱 Draft Text</div>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
 
       <Card T={T}>
         <SecLabel text="Your Info" T={T} />

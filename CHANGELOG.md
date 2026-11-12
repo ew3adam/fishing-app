@@ -103,37 +103,205 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   location" card with an empty field now shows "Type a city, zip, or address first."
   instead of no-oping with zero feedback. ([PR #23](https://github.com/ew3adam/fishing-app/pull/23), merged)
 
-### Fixed — full-codebase bug triage (in review, not yet merged)
+### Fixed — full-codebase bug triage
 _See `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` for the full triage (7 bugs, ranked P0–P2)
-this line of work is drawn from._
+this line of work is drawn from. All merged._
 - **BUG-1 (P0) — catch photos could exceed `localStorage` quota and break catch
   logging**: photos are now compressed before ever being written to `localStorage`
   (not just before the Firebase Storage upload), the `rfc_catches_v1` write is
   wrapped in try/catch with a toast on quota failure instead of failing silently,
   and the local base64 copy is dropped once a cloud `photoUrl` exists.
-  ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+  ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), merged)
 - **BUG-2 (P1) — corrupt local catch data could silently break post-sign-in sync**:
   the unguarded `JSON.parse` on `rfc_catches_v1` in the post-sign-in effect is now
-  wrapped in try/catch, defaulting to `[]`. ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), open)
+  wrapped in try/catch, defaulting to `[]`. ([PR #28](https://github.com/ew3adam/fishing-app/pull/28), merged)
 - **BUG-3 (P1) — club feed and club-spot map did N sequential Firestore reads**:
   `loadClubFeedCatches` and `loadClubSharedSpots` now issue all per-member reads via
-  `Promise.all` instead of a sequential loop. ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+  `Promise.all` instead of a sequential loop. ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), merged)
 - **BUG-4 (P1) — sign-in could fail for roster emails not stored lowercase**:
   `findMemberByEmail` now falls back to a case-insensitive scan of active members
   (reusing the existing email normalization) instead of guessing at alternate
   casings, so a mixed-case CRM-imported email no longer blocks sign-in.
-  ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), open)
+  ([PR #29](https://github.com/ew3adam/fishing-app/pull/29), merged)
+- **BUG-5 (P1) — CSV roster import broke on quoted fields containing commas**: now
+  uses a real RFC-4180-aware tokenizer instead of a naive `split(",")`; a row whose
+  column count doesn't match the header throws a clear error instead of silently
+  importing shifted data. ([PR #31](https://github.com/ew3adam/fishing-app/pull/31), merged)
+- **BUG-6 (P2) — sign-in email link could fail with `auth/unauthorized-continue-uri`
+  on non-canonical domains**: `sendSignInLink` no longer builds the Firebase
+  continue-link URL from `window.location` at send time — hardcoded to the canonical
+  `https://ew3adam.github.io/fishing-app/` in production builds, falling back to
+  `window.location` only in local dev. ([PR #32](https://github.com/ew3adam/fishing-app/pull/32), merged)
+- **BUG-10 — club feed like button could double-count on a rapid double-tap**
+  (found in a follow-up audit, not the original triage). ([PR #36](https://github.com/ew3adam/fishing-app/pull/36), merged)
+- **BUG-8/BUG-9 — spot-name privacy fallback bugs** (found in the same follow-up audit).
+  ([PR #35](https://github.com/ew3adam/fishing-app/pull/35), merged)
 - **Maps: pinch-zoom snap-back; pin placement switched to press-and-hold**
-  ([PR #24](https://github.com/ew3adam/fishing-app/pull/24), open — pending real-device testing before merge).
+  ([PR #24](https://github.com/ew3adam/fishing-app/pull/24), merged).
 - **Scout: results map re-centered on every render; default search radius set to 5mi**
-  ([PR #25](https://github.com/ew3adam/fishing-app/pull/25), open — pending real-device testing before merge).
+  ([PR #25](https://github.com/ew3adam/fishing-app/pull/25), merged).
+- **Home rain alert/sign-in regressions from the 2026-09-03 reconciliation merge**:
+  `WelcomeBanner` restored non-blocking (not a gate — PR #37), sign-in email link
+  actually completes sign-in again (`setTab("me")` call restored — PR #38).
+  ([PR #37](https://github.com/ew3adam/fishing-app/pull/37), [PR #38](https://github.com/ew3adam/fishing-app/pull/38), merged)
 
-### Added — developer tooling (in review, not yet merged)
+### Added — developer tooling
 - `docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md` — full-codebase bug triage (7 issues,
   P0–P2) and feature-idea PRDs, written outside any single feature PR.
-  ([PR #26](https://github.com/ew3adam/fishing-app/pull/26), open)
+  ([PR #26](https://github.com/ew3adam/fishing-app/pull/26), merged)
 - `bug-fixes` review subagent + a `Stop` hook that gates new code against the triage
-  doc. ([PR #27](https://github.com/ew3adam/fishing-app/pull/27), open)
+  doc. ([PR #27](https://github.com/ew3adam/fishing-app/pull/27), merged)
+- **FEATURE-2 — text-size setting**: Small/Medium/Large picker in Profile, persists
+  to `localStorage`, applies a CSS `zoom` to the app's single root wrapper (scales
+  the whole app without touching ~480 individual `fontSize` declarations).
+  ([PR #33](https://github.com/ew3adam/fishing-app/pull/33), merged)
+
+### Added — login, Home dashboard & theme (PRs #37–#50)
+- **Non-blocking `WelcomeBanner`** for signed-out visitors, later restyled to match a
+  "Screen 1: Splash" mockup (fish-on-the-line hero art, "RFC Fishing" wordmark).
+  ([PR #37](https://github.com/ew3adam/fishing-app/pull/37), [PR #39](https://github.com/ew3adam/fishing-app/pull/39), merged)
+- **Scout "search complete" confirmation** — green toast after "Use my location"
+  finishes its GPS+search cycle. ([PR #40](https://github.com/ew3adam/fishing-app/pull/40), merged)
+- **Production hardening**: top-level React error boundary (`ErrorBoundary.jsx`) so
+  an uncaught render error shows a recoverable fallback instead of a white screen;
+  `firebase` dependency bump (12.14.0 → 12.19.0) resolving a `protobufjs` vuln.
+  ([PR #41](https://github.com/ew3adam/fishing-app/pull/41), merged)
+- **Real privacy fix for private spots**: new owner-written `clubShare` Firestore doc
+  (full-replace, only already-`shareClub:true` spots) is now the only thing
+  club-readable; the full profile doc (`privateSpots` included) is owner-read-only.
+  ⚠️ **The updated `firestore.rules` are merged and app-deployed but still need a
+  manual `firebase deploy --only firestore:rules,storage --project rfc-management`
+  run by someone with Firebase CLI access before the new rule is actually enforced**
+  — not something any sandboxed coding session has credentials to do itself.
+  ([PR #42](https://github.com/ew3adam/fishing-app/pull/42), merged)
+- **Home dashboard rebuilt** to match a shared mockup: real weather card (added
+  `humidity`), Nearby Hot Spots (real `SCOUT_SPOTS` distances), Recent Catch, and a
+  "Top Catch — Club Feed" section. ([PR #43](https://github.com/ew3adam/fishing-app/pull/43), merged)
+- **Login/profile overhaul**: one-time `WelcomeSplash` (shown once per device ever),
+  Profile Name/Email made read-only once signed in (sourced from the roster, with a
+  "Request a change" mailto), and real self-service password reset via Firebase's
+  `sendPasswordResetEmail`. ([PR #44](https://github.com/ew3adam/fishing-app/pull/44), merged)
+- **Removed the confusing "Join us" button** — it and "Sign in" did the same thing;
+  single "Sign in" button now. ([PR #45](https://github.com/ew3adam/fishing-app/pull/45), merged)
+- **Full login gate**: no tab content is reachable while signed out — `App()` renders
+  only `WelcomeSplash` (full-page, no nav, embedded sign-in form, no skip/dismiss)
+  whenever `!authMember`. Reverses the earlier "keep open browsing" decision at the
+  user's explicit request. ([PR #46](https://github.com/ew3adam/fishing-app/pull/46), merged)
+- **New default "beige" theme**: warm ivory background, white cards, muted sage-green
+  accent — `THEMES.beige`, now the app default (was dark). Fixed a hardcoded
+  dark-green `index.css` body background that never synced to the selected theme.
+  ([PR #47](https://github.com/ew3adam/fishing-app/pull/47), merged)
+- **Restyled AI species recognition** in the Catch flow to match a FishAngler
+  reference: thumbnail + checkmark + confidence bar, tap-to-select instead of a
+  separate "✓ Use" button. ([PR #48](https://github.com/ew3adam/fishing-app/pull/48), merged)
+- **Simplified the Catch flow's measurement step**: defaults to a plain editable
+  length number pre-filled from the AI photo estimate; the full ruler/reference-object
+  system moved behind a "Measure precisely from photo instead" link.
+  ([PR #49](https://github.com/ew3adam/fishing-app/pull/49), merged)
+- **Three Catch-flow bug fixes**: "Use Photo" always opened the camera instead of the
+  photo library (stray `capture="environment"` removed); searching "musky" found
+  nothing even though Muskellunge exists (added species aliases); Bullhead's icon was
+  an ox emoji (🐂, an unclear catfish pun) — swapped to a plain fish emoji.
+  ([PR #50](https://github.com/ew3adam/fishing-app/pull/50), merged)
+
+### Added — Lake Michigan buoy shore report & tactics (PRs #51–#55)
+- **Lake Michigan buoy shore report on Home**: translates live NOAA NDBC buoy
+  readings (5 stations) into a 🟢/🟡/🔴 shore-fishing status, a daily bait rotation,
+  and RFC's verified bait shop list, per RFC's own buoy-translation rules.
+  ([PR #51](https://github.com/ew3adam/fishing-app/pull/51), merged)
+- Widened the buoy data window (6h → 24h, since the upstream API 404s on a
+  zero-row match rather than returning empty) and made fetch failures show visibly
+  in the UI instead of silently vanishing. ([PR #52](https://github.com/ew3adam/fishing-app/pull/52), merged)
+- **Fixed the buoy report failing on real devices (CORS)**: the data source has no
+  CORS headers for browser `fetch`, so a small standalone Cloudflare Worker
+  (`cloudflare/buoy-proxy-worker.js`) now proxies it server-side. ⚠️ **The app calls
+  a placeholder `BUOY_PROXY_URL` until the Worker is actually deployed to the user's
+  own Cloudflare account** (dashboard-only steps in `docs/BUOY-PROXY-DEPLOY.md`) —
+  no sandboxed session has Cloudflare credentials to do this itself.
+  ([PR #53](https://github.com/ew3adam/fishing-app/pull/53), merged)
+- **Time-of-day bait tactics**: connects the existing golden-hour/solunar window data
+  to the "Try:" bait callout on Home — dawn/dusk, midday, and after-dark technique
+  guidance layered under the existing real per-species bait name. Also added
+  Indiana/Michigan/Wisconsin official DNR regs links alongside the existing Illinois
+  one. ([PR #54](https://github.com/ew3adam/fishing-app/pull/54), merged)
+- **Real MidwestOutdoors tactical tips**: condensed real how-to content (jig/rig/setup
+  tips) from the MidwestOutdoors articles already referenced in the app into 1-2
+  sentence summaries, surfaced next to the matching species on Home and in the
+  Fishing Articles list. Also fixed several of those article URLs, which didn't match
+  either source site's real structure. ([PR #55](https://github.com/ew3adam/fishing-app/pull/55), merged)
+
+### Added — documentation
+- **"Keeping docs current" standing policy** in `CLAUDE.md`: update `CLAUDE.md` and
+  this changelog in the same commit/PR as the code change they describe, not as a
+  separate pass. ([PR #56](https://github.com/ew3adam/fishing-app/pull/56), merged)
+
+### Removed
+- **`src/FishingApp.jsx`** — unused/orphaned duplicate of the app, never imported by
+  `main.jsx`. Confirmed dead by a `grep` across the repo before removal; the user
+  explicitly signed off on deleting it (previously left alone per `CLAUDE.md`'s
+  require-confirmation gotcha, now resolved).
+
+### Decided (2026-10-16) — no longer open
+- **Buoy wave/wind thresholds**: the 🟢/🟡/🔴 defaults proposed in PR #51 are now the
+  permanent thresholds (user's call) rather than a placeholder awaiting real RFC
+  numbers — adjust later if they prove wrong in practice.
+- **Real-device confirmation** for PRs #44, #46–#50, #54, #55: headless-browser/
+  sandbox verification accepted as sufficient (user's call) — not reopening these
+  pending a phone check.
+
+### Added (2026-11-07/08)
+- **Papoose Lake** added to `SCOUT_SPOTS` — reported live by a member standing at the
+  lake; coordinates confirmed via the member's own Apple Maps pin, species/parking
+  from a real FPDCC lake-survey sheet the member photographed on-site (not guessed).
+- **Fishing Assistant** — chat bubble on Home, scoped to fishing/app questions.
+  Answers only from real context (current weather, buoy report, nearby known spots,
+  species bait tips) sent from the client, plus general fishing knowledge; told
+  explicitly not to invent regs numbers or specifics it wasn't given. Calls a new
+  Cloudflare Worker (`cloudflare/fishing-assistant-worker.js`) that holds the real
+  Anthropic API key server-side — the browser never sees it, same pattern as the
+  buoy proxy. Requires a signed-in member (Firebase ID token checked at the Worker).
+  **⚠️ `FISHING_ASSISTANT_URL` is a placeholder until the Worker is deployed** — see
+  `docs/FISHING-ASSISTANT-DEPLOY.md`.
+
+### Added (2026-11-11)
+- **Invite roster members who've never signed in**, in Profile's Club members section.
+  Lists only real roster members whose `authUid` is still null (never completed
+  sign-in) — never a free-typed email/number, since anyone not actually on the roster
+  would hit the sign-in gate anyway. Select one or more, then "Email Selected"/"Text
+  Selected" opens the device's own Mail/Messages app pre-filled with a short message
+  and the canonical sign-in link (now exported from `authService.js` as
+  `CANONICAL_SIGN_IN_URL` so both call sites share one source of truth) — this app
+  still can't send email/text itself, so it's a manual nudge, not an automatic blast.
+  Each button only appears for members who actually have that contact method on file.
+- **"Send Sign-In Email" button** added alongside the two drafts above — calls the
+  same `sendSignInLink()` Firebase already uses for normal self-service sign-in, so
+  selected members get a real, working magic-link email directly from Firebase
+  (not routed through the admin's own Mail app). Sequential per member with inline
+  ✓ Sent/⚠️ Failed status, only attempted for members who have an email on file.
+
+### Fixed
+- **Invite status landed on the wrong member** — a real bug caught during testing,
+  not shipped: `sendRealSignInLinks`'s loop used `var member`, function-scoped, so
+  every status-update callback closed over the same mutable binding; by the time
+  the first member's "sent" callback actually ran (on React's own schedule, after
+  the loop had moved on), `member` already pointed at the next one, so the status
+  landed on the wrong row entirely. Fixed with `let` (block-scoped per iteration) —
+  deliberate exception to this file's usual `var` convention, since `var` here was
+  an actual closure bug, not a style choice.
+- **RFC Bite Forecast card text nearly invisible in the beige theme (Section 508
+  contrast violation)**: the card's background is a fixed dark gradient regardless of
+  theme, but its text used theme tokens meant for light backgrounds — beige's "white"
+  resolves to near-black, giving ~1.1:1 contrast against the dark card (needs 4.5:1).
+  Fixed by using fixed light colors there instead, matching the weather card above it
+  which already does this correctly. Found from a real-device screenshot.
+- **Same bug in the Bite Forecast gauge card and Tackle tab reference links** (found
+  from a second real-device screenshot after the fix above): `BFRDial`'s score number
+  and needle, the gauge card's bait names/article-tip text, and two caption lines on
+  the Tackle tab's "More Photos"/"Watch Tutorial" links all sat directly on fixed dark
+  backgrounds using theme tokens meant for light ones. Did a full repo-wide audit this
+  time (not just the one card) rather than fix instances one at a time — confirmed via
+  code search that every other `th.white`/`th.muted` usage in `App.jsx` and the
+  component files is correctly paired with a theme-derived background.
 
 ### Next
 - **Firebase Console (manual, one-time steps)**:
@@ -141,6 +309,17 @@ this line of work is drawn from._
   2. Authentication → Settings → Authorized domains → Add `ew3adam.github.io`
 - Email/Password provider can stay enabled as fallback.
 - Admin panel: list members + `authUid` link status (who has signed in vs. not yet)
+- **Run `firebase deploy --only firestore:rules,storage --project rfc-management`**
+  to actually enforce PR #42's privacy rule (merged in code; not yet live in
+  Firestore) — needs the user's own Firebase CLI access, no sandboxed session has it.
+- **Deploy `cloudflare/buoy-proxy-worker.js`** per `docs/BUOY-PROXY-DEPLOY.md` and
+  send back its real `*.workers.dev` URL to replace the `BUOY_PROXY_URL` placeholder
+  in `src/App.jsx` (PR #53) — same reason, needs the user's own Cloudflare account.
+  **User has confirmed they'll run both of these deploys themselves.**
+- **Deploy `cloudflare/fishing-assistant-worker.js`** per
+  `docs/FISHING-ASSISTANT-DEPLOY.md` (needs a real Anthropic API key set as a Worker
+  secret, in addition to Cloudflare account access) and send back its URL to replace
+  `FISHING_ASSISTANT_URL` in `src/components/FishingAssistant.jsx`.
 
 ---
 
@@ -278,4 +457,4 @@ _Commits: `524b219` → `7b4ce5a`_
 - **GitHub Pages**: https://ew3adam.github.io/fishing-app/
 - **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
 
-_Last updated: 2026-08-30_
+_Last updated: 2026-11-11_
