@@ -3,7 +3,7 @@ import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud, CANONICAL_SIGN_IN_URL } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
 import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
-import { isDataUrlImage, compressDataUrl } from "./services/catchPhotoStorage.js";
+import { isDataUrlImage, compressDataUrl, resolveCatchPhotoUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
 import SaveToast from "./components/SaveToast.jsx";
@@ -136,6 +136,11 @@ function findCatalogueForRig(rigName) {
   return CATALOGUE.find(function(c) {
     return c.name.toLowerCase() === rn || rn.indexOf(c.name.toLowerCase()) >= 0 || c.name.toLowerCase().indexOf(rn) >= 0;
   }) || null;
+}
+
+/** Local-first catch cache (see fishingSyncService.js / CLAUDE.md) — read-only snapshot for display. */
+function loadLocalCatches() {
+  try { return JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); } catch (e) { return []; }
 }
 
 function loadScoutHistory() {
@@ -2422,6 +2427,11 @@ function SpeciesTab({ T, profile, setTab }) {
   const [sel, setSel] = useState(null);
   const [subTab, setSubTab] = useState("rigs");
   const [speciesPhotoFailed, setSpeciesPhotoFailed] = useState(false);
+  // One-time read on mount, same local-first pattern as HomeTab's myRecentCatch -- this tab
+  // remounts on every nav switch (see the tab==="fish" && <SpeciesTab/> guard in App), so a
+  // stale snapshot only lasts until the member navigates back, no live subscription needed.
+  const [catches] = useState(loadLocalCatches);
+  const [speciesFilter, setSpeciesFilter] = useState("all"); // "all" | "caught" | "not"
 
   useEffect(function() {
     setSpeciesPhotoFailed(false);
@@ -2460,6 +2470,31 @@ function SpeciesTab({ T, profile, setTab }) {
         </div>
         {sp.alert ? <div style={{ background:th.orange + "22", border:"1px solid " + th.orange + "44", borderRadius:8, padding:"8px 12px", marginBottom:10, fontSize:12, color:th.orange }}>⚠️ {sp.alert}</div> : null}
         {speciesAlsoKnownAs(sp.name) ? <div style={{ fontSize:11, color:th.muted, marginBottom:10 }}>Also known as: {speciesAlsoKnownAs(sp.name)}</div> : null}
+        {(function() {
+          var mine = catches.filter(function(c) { return c.species === sp.name; });
+          if (!mine.length) return null;
+          return (
+            <Card T={T} borderColor={sp.color + "44"} style={{ marginBottom:10 }}>
+              <SecLabel text={"My catches (" + mine.length + ")"} T={T} />
+              {mine.slice(0, 8).map(function(c, i) {
+                var photoUrl = resolveCatchPhotoUrl(c);
+                return (
+                  <div key={i} style={{ display:"flex", gap:10, alignItems:"center", borderTop:i ? "1px solid " + th.border : "none", paddingTop:i ? 8 : 0, marginTop:i ? 8 : 0 }}>
+                    {photoUrl ? (
+                      <img src={photoUrl} alt={sp.name} style={{ width:44, height:44, borderRadius:8, objectFit:"cover", flexShrink:0, background:th.card }} />
+                    ) : (
+                      <div style={{ width:44, height:44, borderRadius:8, flexShrink:0, background:th.card, border:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{sp.emoji}</div>
+                    )}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.length}</div>
+                      <div style={{ fontSize:11, color:th.muted }}>{c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          );
+        })()}
         <Card T={T} borderColor={th.blue + "44"}>
           <SecLabel text="Compare to your catch" T={T} />
           {["Right number of fins and tail shape?","Color pattern matches this species?","Size fits typical range for local water?"].map(function(q, i) {
@@ -2520,27 +2555,56 @@ function SpeciesTab({ T, profile, setTab }) {
     );
   }
 
+  var caughtNames = new Set(catches.map(function(c) { return c.species; }));
+  var filteredSpecies = SPECIES.filter(function(sp) {
+    if (speciesFilter === "caught") return caughtNames.has(sp.name);
+    if (speciesFilter === "not") return !caughtNames.has(sp.name);
+    return true;
+  });
+
   return (
     <div>
-      <SecLabel text="Tap a Fish for Full Details" T={T} />
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
-        {SPECIES.slice().sort(function(a, b) {
-          if (!profile || profile.level !== "Beginner") return 0;
-          var ab = (a.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
-          var bb = (b.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
-          return ab - bb;
-        }).map(function(sp) {
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, gap:8, flexWrap:"wrap" }}>
+        <SecLabel text="Tap a Fish for Full Details" T={T} />
+        <div style={{ fontSize:11, color:th.muted }}>{caughtNames.size} of {SPECIES.length} caught</div>
+      </div>
+      <div style={{ display:"flex", gap:5, marginBottom:12, flexWrap:"wrap" }}>
+        {[{ k:"all", label:"All" }, { k:"caught", label:"Caught" }, { k:"not", label:"Not Yet" }].map(function(f) {
           return (
-            <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
-              <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
-              <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
-              <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
-              {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
+            <button key={f.k} onClick={function() { setSpeciesFilter(f.k); }} style={{ background:speciesFilter===f.k ? th.green + "33" : "transparent", border:"1px solid " + (speciesFilter===f.k ? th.green : th.border), borderRadius:7, color:speciesFilter===f.k ? th.green : th.muted, padding:"6px 10px", cursor:"pointer", fontSize:11, fontFamily:"monospace" }}>
+              {f.label.toUpperCase()}
             </button>
           );
         })}
       </div>
+      {!filteredSpecies.length ? (
+        <div style={{ textAlign:"center", padding:"28px 0 16px", fontSize:13, color:th.muted }}>
+          No species {speciesFilter === "caught" ? "caught yet — log a catch to fill this in." : "match this filter."}
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9 }}>
+          {filteredSpecies.slice().sort(function(a, b) {
+            if (!profile || profile.level !== "Beginner") return 0;
+            var ab = (a.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
+            var bb = (b.level || "").indexOf("Beginner") >= 0 ? 0 : 1;
+            return ab - bb;
+          }).map(function(sp) {
+            var caught = caughtNames.has(sp.name);
+            return (
+              <button key={sp.id} onClick={function() { setSel(sp); setSubTab("rigs"); }} style={{ position:"relative", background:th.card, border:"1px solid " + sp.color + "44", borderLeft:"3px solid " + sp.color, borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left", color:th.white }}>
+                {caught ? (
+                  <span title="Caught" style={{ position:"absolute", top:8, right:8, width:18, height:18, borderRadius:"50%", background:th.green, color:"#000", fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>✓</span>
+                ) : null}
+                <div style={{ fontSize:24, marginBottom:4 }}>{sp.emoji}</div>
+                <div style={{ fontWeight:700, fontSize:13, color:th.white }}>{sp.name}</div>
+                <div style={{ fontSize:10, color:sp.color, marginTop:2 }}>{sp.season}</div>
+                <div style={{ fontSize:10, color:th.muted, marginTop:1 }}>{sp.level}</div>
+                {sp.alert ? <div style={{ fontSize:9, color:th.orange, marginTop:3 }}>⚠ See notes</div> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

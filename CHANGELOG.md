@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Species tab: Caught / Not Yet filter + per-species catch history.** The field guide grid
+  now has an All/Caught/Not Yet filter and a green checkmark badge on any species the member
+  has logged a catch for (matched against the local-first catch cache, same exact-name match
+  `TrophyScreen` already used for personal-best detection). A species' detail page now shows a
+  "My catches" card (thumbnail, length, date, shared tag) listing the member's own catches of
+  that species, when there are any — nothing shown otherwise, no placeholder/fabricated entries.
 - **Real club logo** (`public/rfc-logo.png`, provided by the user from their own Google Drive)
   now appears in the app header (next to "RFC Fishing") and prominently on the signed-out
   welcome/sign-in screen. It's black line art on a transparent PNG, so both placements wrap it
