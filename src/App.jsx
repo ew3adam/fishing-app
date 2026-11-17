@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud, CANONICAL_SIGN_IN_URL } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, loadBigFishEntries, setCatchBigFishEntry, testFirestoreConnection } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadBigFishEntries, setCatchBigFishEntry, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl, resolveCatchPhotoUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
@@ -1827,8 +1827,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, o
       return (list && list[0]) || null; // submitCatch prepends, so [0] is the newest
     } catch (e) { return null; }
   });
-  const [topClubCatch, setTopClubCatch] = useState(null);
-  const [topClubCatchLoading, setTopClubCatchLoading] = useState(false);
   // Lake Michigan buoy shore report -- fixed set of 5 buoys, not GPS-dependent, so it loads
   // independently of the location-based weather fetch below.
   const [buoyReport, setBuoyReport] = useState(null);
@@ -1846,22 +1844,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, o
     });
     return function() { cancelled = true; };
   }, []);
-  useEffect(function() {
-    if (!authMember) { setTopClubCatch(null); return; }
-    var cancelled = false;
-    setTopClubCatchLoading(true);
-    loadClubFeedCatches().then(function(rows) {
-      if (cancelled) return;
-      var withLength = (rows || []).filter(function(c) { return c && c.length && !isNaN(parseFloat(c.length)); });
-      withLength.sort(function(a, b) { return parseFloat(b.length) - parseFloat(a.length); });
-      setTopClubCatch(withLength[0] || null);
-    }).catch(function() {
-      if (!cancelled) setTopClubCatch(null);
-    }).finally(function() {
-      if (!cancelled) setTopClubCatchLoading(false);
-    });
-    return function() { cancelled = true; };
-  }, [authMember ? authMember.id : null]);
 
   const load = useCallback(function() {
     setLoading(true); setShowRefresh(false);
@@ -1984,6 +1966,22 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, o
           </div>
         </div>
       )}
+
+      {/* Club Feed leads Home, not the weather/forecast dashboard below it -- per direct
+          feedback that the front page after signing in should read like the social feed other
+          fishing/social apps open on, not a utility dashboard the feed happens to be stacked
+          under. Big Fish Award (also feed-like, not a dashboard widget) follows right after it;
+          Forecast/species/bait/articles content below is still the same content, just no longer
+          what a member sees first. */}
+      <div ref={feedSectionRef}>
+        <SecLabel text="Club Feed" T={T} />
+        <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
+      </div>
+
+      <div ref={bigFishSectionRef} style={{ marginTop:20, marginBottom:20 }}>
+        <SecLabel text="Big Fish Award" T={T} />
+        <BigFishBoard T={T} authMember={authMember} />
+      </div>
 
       {/* Current-conditions card — mirrors the shared "home-screen" mockup's weather card,
           using the app's own theme tokens rather than the mockup's hardcoded palette so it
@@ -2140,35 +2138,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, o
               </div>
               <div style={{ fontSize:10, color:th.muted, marginTop:2 }}>{[myRecentCatch.spotDisplayName, myRecentCatch.date].filter(Boolean).join(" · ")}</div>
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Top Catch (Club Feed) — the single longest club/public catch currently in the feed,
-          across all members. Labeled "Top Catch" rather than "Monthly Leaderboard": this reads
-          the whole feed, not just this calendar month (catch dates are free-typed strings, not
-          a reliably sortable field), so "monthly" would overclaim precision the data doesn't have. */}
-      {authMember ? (
-        <div style={{ marginBottom:12 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-            <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Top Catch — Club Feed</div>
-            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { onJumpToSection && onJumpToSection("feed"); }}>View All</span>
-          </div>
-          <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:12 }}>
-            {topClubCatchLoading ? (
-              <div style={{ fontSize:12, color:th.muted }}>Loading…</div>
-            ) : topClubCatch ? (
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <div style={{ fontSize:20 }}>🏆</div>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:12, color:th.white, fontWeight:700 }}>{topClubCatch.memberName}</div>
-                  <div style={{ fontSize:11, color:th.muted, marginTop:1 }}>{topClubCatch.species}</div>
-                </div>
-                <div style={{ fontSize:14, color:th.gold, fontWeight:800 }}>{topClubCatch.length} in</div>
-              </div>
-            ) : (
-              <div style={{ fontSize:12, color:th.muted }}>No club-shared catches yet.</div>
-            )}
           </div>
         </div>
       ) : null}
@@ -2441,16 +2410,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, o
           );
         })}
       </Card>
-
-      <div ref={feedSectionRef} style={{ marginTop:20 }}>
-        <SecLabel text="Club Feed" T={T} />
-        <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
-      </div>
-
-      <div ref={bigFishSectionRef} style={{ marginTop:20 }}>
-        <SecLabel text="Big Fish Award" T={T} />
-        <BigFishBoard T={T} authMember={authMember} />
-      </div>
 
       <FishingAssistant T={T} authMember={authMember} contextSummary={assistantContext} />
     </div>
