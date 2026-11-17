@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Added (2026-11-17)
+- **Real club logo** (`public/rfc-logo.png`, provided by the user from their own Google Drive)
+  now appears in the app header (next to "RFC Fishing") and prominently on the signed-out
+  welcome/sign-in screen. It's black line art on a transparent PNG, so both placements wrap it
+  in a fixed white chip/card rather than putting it directly on a theme-colored background —
+  the dark/bluesteel themes' header nav is dark, which would make the black art invisible
+  otherwise (same lesson as the earlier Section 508 contrast fixes). The welcome screen's old
+  abstract fish-silhouette SVG decoration was replaced by the real logo.
+
 ### Added
 - **Passwordless email link sign-in** (primary flow): member types their club email →
   taps "Send me a sign-in link" → Firebase emails a magic link → tap opens app and
@@ -457,4 +466,4 @@ _Commits: `524b219` → `7b4ce5a`_
 - **GitHub Pages**: https://ew3adam.github.io/fishing-app/
 - **Cloudflare Pages**: https://fishing-app-4lg.pages.dev
 
-_Last updated: 2026-11-11_
+_Last updated: 2026-11-17_

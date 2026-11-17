@@ -101,6 +101,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `src/components/ScoutResultsMap.jsx` | Read-only Leaflet overview map for Scout results (red pins) — visual sanity-check, not a picker |
 | `src/utils/feedSpotPrivacy.js` | Strips private spot details before sharing to feed (see Architecture above) |
 | `src/data/scoutSpots.js` | Static list of known scout spots |
+| `public/rfc-logo.png` | Real club logo (black line art, transparent PNG) — referenced via `RFC_LOGO_SRC`, always on a fixed white chip/card since it's invisible directly on a dark theme's background |
 | `data/seeds/club-roster-v1.json` | Seed data for the local roster import |
 | `src/config/authProviders.js` | OAuth provider runtime config (committed; no real secrets, only client IDs) |
 | `firebase/firestore.rules`, `firebase/storage.rules` | Security rules; deploy per `docs/FIREBASE-DEPLOY.md` |
