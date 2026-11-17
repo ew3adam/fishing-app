@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Home now leads with Club Feed, Facebook-style.** Direct feedback: signing in should land on
+  the social feed, not a weather dashboard with the feed buried below it. Reordered Home to
+  Club Feed → Big Fish Award → Forecast (was Forecast → Club Feed → Big Fish Award) — same
+  three sections, same always-visible/no-tap-required stacking from earlier today, just in the
+  order a member actually sees them. Removed the "Top Catch — Club Feed" mini-preview that used
+  to live inside Forecast (and its backing data fetch) since it duplicated what's now the real
+  feed sitting right above it.
 - **Club Feed: comments, plus rod/equipment shown on each post.** Direct feedback that the feed
   needed to feel more like other fishing/social apps — a post with a picture, what you caught
   it on, what rod you used, and comments, not just likes. Each post now shows a 🎣 rod line
