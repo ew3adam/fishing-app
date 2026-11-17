@@ -18,6 +18,15 @@ service cloud.firestore {
       return resource.data.visibility == 'club' || resource.data.visibility == 'public_feed';
     }
 
+    // For rules on a comment doc, `resource`/`request.resource` are the comment, not the catch
+    // it belongs to -- this fetches the parent catch to check its visibility instead.
+    function parentCatchData(memberId, catchId) {
+      return get(/databases/$(database)/documents/members/$(memberId)/fishingCatches/$(catchId)).data;
+    }
+    function isClubVisibleCatchData(data) {
+      return data.visibility == 'club' || data.visibility == 'public_feed';
+    }
+
     // CRM roster — active members readable when signed in
     match /members/{memberId} {
       allow read: if isSignedIn() && resource.data.isActive == true;
@@ -50,7 +59,22 @@ service cloud.firestore {
       allow create, delete: if isOwner(memberId);
       allow update: if isOwner(memberId)
         || (isSignedIn() && isClubVisibleCatch()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount', 'commentCount']));
+
+      // Club-feed comments on a catch. Readable by anyone who could read the catch itself
+      // (owner, or anyone when it's club-visible) -- not readable at all on a private catch,
+      // matching the catch doc's own privacy. A comment can only be created with authorId set
+      // to the actual signed-in member (isOwner(...) reused against that claimed id, same check
+      // the catch doc itself uses against memberId) -- stops spoofing someone else's comment.
+      // Deletable by its own author or by the catch owner (light moderation on their own post).
+      match /comments/{commentId} {
+        allow read: if isSignedIn()
+          && (isOwner(memberId) || isClubVisibleCatchData(parentCatchData(memberId, catchId)));
+        allow create: if isSignedIn()
+          && (isOwner(memberId) || isClubVisibleCatchData(parentCatchData(memberId, catchId)))
+          && isOwner(request.resource.data.authorId);
+        allow delete: if isSignedIn() && (isOwner(memberId) || isOwner(resource.data.authorId));
+      }
     }
   }
 }

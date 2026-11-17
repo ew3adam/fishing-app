@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Club Feed: comments, plus rod/equipment shown on each post.** Direct feedback that the feed
+  needed to feel more like other fishing/social apps — a post with a picture, what you caught
+  it on, what rod you used, and comments, not just likes. Each post now shows a 🎣 rod line
+  (when the member picked one logging the catch) alongside the existing 🪱 bait line, and a
+  "💬 N comments" button that expands into a real comment thread (post, see others', delete
+  your own). New Firestore subcollection `fishingCatches/{catchId}/comments/{commentId}` and a
+  `commentCount` field on the catch doc (maintained the same way `likeCount` already was).
+  **Needs a Firestore rules deploy to actually work for anyone but you** — the new rule ships
+  in this PR but rules deploy separately from the app (`firebase deploy --only
+  firestore:rules,storage --project rfc-management`, see `docs/FIREBASE-DEPLOY.md`); until
+  that's run, comments fail for everyone, including the catch's own owner, with a
+  permission-denied error shown inline.
 - **Home: Club Feed and Big Fish Award always visible, no more tapping to reveal them.**
   Home was a Forecast/Club Feed/Big Fish toggle — only one showed at a time. Now all three
   stack on one scrollable page: Forecast, then Club Feed, then Big Fish Award. Links elsewhere
