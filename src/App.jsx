@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import exifr from "exifr";
 import { subscribeAuthState, signInMemberEmail, sendSignInLink, isSignInLink, completeSignInWithLink, completeSignInWithLinkAndEmail, signOutMember, sendMemberPasswordReset, pullCloudProfile, syncLocalProfileToCloud, CANONICAL_SIGN_IN_URL } from "./services/authService.js";
 import { listActiveMembers } from "./services/memberService.js";
-import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, testFirestoreConnection } from "./services/fishingSyncService.js";
+import { mergeLocalCatchesToCloud, loadCatchesFromCloud, saveCatchToCloud, loadClubSharedSpots, loadClubFeedCatches, loadBigFishEntries, setCatchBigFishEntry, testFirestoreConnection } from "./services/fishingSyncService.js";
 import { isDataUrlImage, compressDataUrl, resolveCatchPhotoUrl } from "./services/catchPhotoStorage.js";
 import { checkRosterHealth } from "./services/rosterHealthService.js";
 import ClubFeedList from "./components/ClubFeedList.jsx";
@@ -1942,10 +1942,13 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
       <div style={{ display:"flex", gap:8, margin:"12px 0 10px" }}>
         <OBtn label="Forecast" onClick={function() { setHomeSection && setHomeSection("forecast"); }} color={section === "forecast" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
         <OBtn label="Club Feed" onClick={function() { setHomeSection && setHomeSection("feed"); }} color={section === "feed" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
+        <OBtn label="Big Fish" onClick={function() { setHomeSection && setHomeSection("bigfish"); }} color={section === "bigfish" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
       </div>
 
       {section === "feed" ? (
         <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
+      ) : section === "bigfish" ? (
+        <BigFishBoard T={T} authMember={authMember} />
       ) : (
       <>
       {displayName !== "Angler" && !loading && (
@@ -2417,6 +2420,98 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
       </>
       )}
       <FishingAssistant T={T} authMember={authMember} contextSummary={assistantContext} />
+    </div>
+  );
+}
+
+// ─── BIG FISH AWARD BOARD ──────────────────────────────────────────────────────
+/**
+ * Unofficial standings for the club's real monthly Big Fish Award contest. The app never
+ * declares winners -- a club officer confirms those outside the app (see CatchTab's "Enter Big
+ * Fish Award" button and setCatchBigFishEntry in fishingSyncService.js for how a catch gets
+ * flagged). In-app only by design: no email send here, per direct feedback that an earlier
+ * email-based flow elsewhere in the app had delivery problems that went unnoticed.
+ */
+function BigFishBoard({ T, authMember }) {
+  const th = THEMES[T];
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(function() {
+    if (!authMember) { setEntries([]); return; }
+    setLoading(true);
+    setErr("");
+    loadBigFishEntries().then(function(rows) {
+      setEntries(rows || []);
+    }).catch(function(e) {
+      setErr((e && e.message) || "Couldn't load Big Fish Award entries.");
+    }).finally(function() {
+      setLoading(false);
+    });
+  }, [authMember ? authMember.id : null]);
+
+  if (!authMember) {
+    return (
+      <div style={{ textAlign:"center", padding:"28px 0 16px" }}>
+        <div style={{ fontSize:13, color:th.muted }}>Sign in to see this month's Big Fish Award entries.</div>
+      </div>
+    );
+  }
+
+  function entryDate(e) {
+    var d = new Date(e.date);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function entryLength(e) {
+    var n = parseFloat(e.length);
+    return isNaN(n) ? 0 : n;
+  }
+
+  var now = new Date();
+  var thisMonth = entries.filter(function(e) {
+    var d = entryDate(e);
+    return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).sort(function(a, b) { return entryLength(b) - entryLength(a); });
+  var thisYear = entries.filter(function(e) {
+    var d = entryDate(e);
+    return d && d.getFullYear() === now.getFullYear();
+  }).sort(function(a, b) { return entryLength(b) - entryLength(a); });
+  var yearLeader = thisYear[0];
+  var monthLabel = now.toLocaleDateString(undefined, { month:"long", year:"numeric" });
+  var medals = ["🥇 ", "🥈 ", "🥉 "];
+
+  return (
+    <div>
+      <div style={{ background:th.gold + "14", border:"1px solid " + th.gold + "44", borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:11, color:th.muted, lineHeight:1.45 }}>
+        🏆 Unofficial standings from what members enter on the Catch tab — the club confirms official monthly and year-end winners outside the app.
+      </div>
+      {yearLeader ? (
+        <Card T={T} borderColor={th.gold + "44"} style={{ marginBottom:12 }}>
+          <SecLabel text={"Biggest Fish This Year — " + now.getFullYear()} T={T} />
+          <div style={{ fontWeight:700, color:th.white, fontSize:14 }}>{yearLeader.memberName} · {yearLeader.species}</div>
+          <div style={{ fontSize:12, color:th.gold, fontWeight:700 }}>{yearLeader.length}</div>
+        </Card>
+      ) : null}
+      <SecLabel text={monthLabel + " Entries"} T={T} />
+      {loading ? <div style={{ textAlign:"center", color:th.muted, padding:"16px 0" }}>Loading…</div> : null}
+      {err ? <div style={{ fontSize:12, color:th.red, marginBottom:10 }}>{err}</div> : null}
+      {!loading && !err && !thisMonth.length ? (
+        <div style={{ textAlign:"center", padding:"20px 0", fontSize:13, color:th.muted }}>No entries yet this month — be the first from the Catch tab.</div>
+      ) : null}
+      {thisMonth.map(function(e, i) {
+        return (
+          <Card key={e.memberId + "_" + e.id} T={T} style={{ marginBottom:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{medals[i] || ""}{e.memberName}</div>
+                <div style={{ fontSize:11, color:th.muted }}>{e.species} · {e.date}</div>
+              </div>
+              <div style={{ fontWeight:700, color:th.gold, fontSize:14, flexShrink:0 }}>{e.length}</div>
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -3618,8 +3713,9 @@ function CatalogueTab({ T }) {
 }
 
 // ─── TROPHY SCREEN ────────────────────────────────────────────────────────────
-function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches, onOpenClubFeed, rfcLink, onReset }) {
+function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches, onOpenClubFeed, rfcLink, onReset, catchId, onToggleBigFish }) {
   const th = THEMES[T];
+  var loggedCatch = catches.find(function(c) { return String(c.id) === String(catchId); });
   var isPersonalBest = false;
   if (form.species && form.length) {
     var myInches = parseFloat(form.length);
@@ -3663,6 +3759,19 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
           See it on the club feed →
         </button>
       ) : null}
+      {loggedCatch && onToggleBigFish ? (
+        <div style={{ background:th.gold + "14", border:"1px solid " + th.gold + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
+          <div style={{ fontSize:13, color:th.gold, fontWeight:700, marginBottom:4 }}>🏆 Big Fish Award</div>
+          <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
+            {loggedCatch.bigFish
+              ? "Entered in this month's Big Fish Award — unofficial standings on Home, official winners confirmed by the club."
+              : "Enter this catch in this month's Big Fish Award. Entries are shared with the club so everyone (and the judge) can see them."}
+          </div>
+          <button type="button" onClick={function() { onToggleBigFish(loggedCatch.id, !loggedCatch.bigFish); }} style={{ width:"100%", background:loggedCatch.bigFish ? "transparent" : th.gold, border:"1px solid " + th.gold, color:loggedCatch.bigFish ? th.gold : "#000", borderRadius:8, padding:"10px 0", cursor:"pointer", fontWeight:700, fontSize:13 }}>
+            {loggedCatch.bigFish ? "Remove entry" : "Enter Big Fish Award"}
+          </button>
+        </div>
+      ) : null}
       {rfcLink ? (
         <div style={{ background:th.green + "14", border:"1px solid " + th.green + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
           <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:4 }}>Email RFC members?</div>
@@ -3690,6 +3799,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
     try { var s = JSON.parse(localStorage.getItem("rfc_catches_v1") || "[]"); if (s.length) return s; } catch(e) {}
     return [];
   });
+  const [lastLoggedCatchId, setLastLoggedCatchId] = useState(null);
   const [step, setStep] = useState(0);
   const [photo, setPhoto] = useState(null);
   const [referencePhotos, setReferencePhotos] = useState([]);
@@ -3984,6 +4094,7 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       likeCount:0,
     };
     setCatches(function(c) { return [entry].concat(c); });
+    setLastLoggedCatchId(entry.id);
     var subj = encodeURIComponent("RFC Catch Report — " + form.species + " · " + form.length + " · " + ((profile && profile.name) || "Angler"));
     var body = encodeURIComponent("RFC Catch Report\n\nAngler: " + ((profile && profile.name) || "Angler") + "\nEmail: " + ((profile && profile.email) || "not provided") + "\nDate: " + form.date + "\n\nFish: " + form.species + "\nLength: " + form.length + "\nBait: " + form.bait + "\nRod: " + form.rod + "\nSpot: " + form.spot + "\nNotes: " + form.notes);
     setRfcLink("mailto:RiversideFishingClubil@gmail.com?subject=" + subj + "&body=" + body);
@@ -4020,6 +4131,26 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
       finishStep("Saved on this device only. Sign in to back up to RFC cloud.", "info");
       setSubmitting(false);
       submittingRef.current = false;
+    }
+  }
+
+  /**
+   * Big Fish Award (the club's real monthly contest, judged by a club officer outside the app --
+   * see BigFishBoard) is in-app only, deliberately: no email send here. This just flags the
+   * catch locally and in Firestore (setCatchBigFishEntry forces club visibility on the way in,
+   * so the rest of the club can actually see the entry).
+   */
+  function toggleBigFish(catchId, nextValue) {
+    setCatches(function(list) {
+      return list.map(function(c) {
+        if (String(c.id) !== String(catchId)) return c;
+        var updated = Object.assign({}, c, { bigFish: nextValue });
+        if (nextValue) updated.visibility = "club";
+        return updated;
+      });
+    });
+    if (authMember && authMember.id) {
+      setCatchBigFishEntry(authMember.id, catchId, nextValue).catch(function() {});
     }
   }
 
@@ -4083,9 +4214,14 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
           </button>
           {showMyLogs ? catches.slice(0, 8).map(function(c, i) {
             return (
-              <div key={i} style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8 }}>
-                <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
-                <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+              <div key={i} style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
+                  <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+                </div>
+                <button type="button" onClick={function() { toggleBigFish(c.id, !c.bigFish); }} style={{ flexShrink:0, background:c.bigFish ? th.gold + "22" : "transparent", border:"1px solid " + (c.bigFish ? th.gold : th.border), borderRadius:7, color:c.bigFish ? th.gold : th.muted, padding:"5px 8px", cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+                  {c.bigFish ? "🏆 Entered" : "Enter Big Fish"}
+                </button>
               </div>
             );
           }) : null}
@@ -4548,6 +4684,8 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
               estWeightLabel={estWeightLabel}
               catchVisibility={catchVisibility}
               catches={catches}
+              catchId={lastLoggedCatchId}
+              onToggleBigFish={toggleBigFish}
               onOpenClubFeed={onOpenClubFeed}
               rfcLink={rfcLink}
               onReset={function() {

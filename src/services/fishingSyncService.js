@@ -135,6 +135,22 @@ export async function updateCatchLike(catchOwnerId, catchId, delta) {
   await updateDoc(ref, { likeCount: increment(delta) });
 }
 
+/**
+ * Flags/unflags a catch as a Big Fish Award submission (the club's real monthly contest, run
+ * by a member outside the app -- this is an unofficial in-app standings board only, see
+ * BigFishBoard in App.jsx). setDoc+merge rather than updateDoc so this still works even if the
+ * initial saveCatchToCloud() write is still in flight. Submitting always forces club visibility
+ * -- otherwise Firestore rules would block other members from reading the entry at all, which
+ * would silently vanish it from the board instead of showing it.
+ */
+export async function setCatchBigFishEntry(memberId, catchId, bigFish) {
+  if (!memberId || !catchId) return;
+  var ref = doc(catchesCol(memberId), String(catchId));
+  var data = { bigFish: !!bigFish, updatedAt: new Date().toISOString() };
+  if (bigFish) data.visibility = "club";
+  await setDoc(ref, data, { merge: true });
+}
+
 /** Club-wide feed — catches with visibility club or public_feed from all active members. */
 export async function loadClubFeedCatches() {
   var members = await listActiveMembers(120);
@@ -163,6 +179,33 @@ export async function loadClubFeedCatches() {
   return feed.sort(function(a, b) {
     return String(b.date || b.id || "").localeCompare(String(a.date || a.id || ""));
   });
+}
+
+/** Big Fish Award entries across the whole club (see setCatchBigFishEntry above for what
+ * flags a catch as one) -- same N-reads-in-parallel-with-per-member-failure-skip pattern as
+ * loadClubFeedCatches. Caller (BigFishBoard in App.jsx) does the monthly/yearly filtering and
+ * sorting -- this just returns every flagged entry, club-wide. */
+export async function loadBigFishEntries() {
+  var members = await listActiveMembers(120);
+  var perMember = await Promise.all(members.map(async function(m) {
+    try {
+      var snap = await getDocs(catchesCol(m.id));
+      return snap.docs.reduce(function(acc, d) {
+        var data = d.data() || {};
+        if (data.bigFish) {
+          acc.push(Object.assign({}, data, {
+            id: d.id,
+            memberId: m.id,
+            memberName: m.displayName || m.id,
+          }));
+        }
+        return acc;
+      }, []);
+    } catch (e) {
+      return []; // skip member if rules block
+    }
+  }));
+  return [].concat.apply([], perMember);
 }
 
 /** All members' spots flagged shareClub — for club map. Reads the club-visible subset

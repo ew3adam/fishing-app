@@ -8,6 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Big Fish Award — unofficial in-app standings.** RFC's real monthly Big Fish Award contest
+  (members submit a fish, top 3 get raffle tickets, year's biggest honored every November) is
+  still judged by a club officer outside the app — this just gives members an "Enter Big Fish
+  Award" button (on the just-logged catch screen and on any entry in Catch's "My catches" list)
+  and a new "Big Fish" section on Home showing this month's entries sorted by length plus the
+  year's biggest so far. Always labeled "Unofficial" — the app never declares a winner.
+  Entering force-shares the catch with the club (otherwise other members couldn't see it at
+  all) and is in-app only by design, no email send, per a recent report that a different
+  email-based flow in the app had gone unsent/lost.
 - **Species tab: Caught / Not Yet filter + per-species catch history.** The field guide grid
   now has an All/Caught/Not Yet filter and a green checkmark badge on any species the member
   has logged a catch for (matched against the local-first catch cache, same exact-name match
