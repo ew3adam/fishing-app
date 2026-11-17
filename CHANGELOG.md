@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Big Fish Award now requires a photo to enter.** Direct instruction: official entries need a
+  ruler visible in the photo. Both entry points (the just-logged catch screen and "My catches")
+  now simply don't offer an Enter control on a catch with no photo — a "Log Only" catch can't
+  be entered at all, since there's no way to add a photo after the fact. The app can't verify a
+  ruler is actually in the shot (no image analysis anywhere in this app, by design), so that
+  part stays an honor-system reminder in the UI copy — same self-reported nature as the rest of
+  Big Fish Award, where the club officer still confirms official winners by eye.
 - **Home now leads with Club Feed, Facebook-style.** Direct feedback: signing in should land on
   the social feed, not a weather dashboard with the feed buried below it. Reordered Home to
   Club Feed → Big Fish Award → Forecast (was Forecast → Club Feed → Big Fish Award) — same
