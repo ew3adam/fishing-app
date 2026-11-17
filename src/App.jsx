@@ -1765,7 +1765,7 @@ function WelcomeSplash({ authError, onSignIn, onSendLink, onCompleteLink, pendin
 // ─── HOME TAB (BassForecast-style bite intel) ─────────────────────────────────
 var HOME_SPECIES_PICKS = ["All Species", "Bass (Largemouth)", "Crappie", "Channel Catfish", "Coho Salmon", "Walleye", "Yellow Perch"];
 
-function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }) {
+function HomeTab({ profile, T, setTab, authMember, homeSection, homeJumpToken, onJumpToSection }) {
   const th = THEMES[T];
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
@@ -1785,15 +1785,27 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   // Club Feed and Big Fish used to be exclusive toggled views (tap to reveal) -- per direct
   // feedback they should be visible without tapping, Home now stacks Forecast/Club Feed/Big
   // Fish on one scrollable page instead. homeSection is kept only as a "jump to this section"
-  // signal from elsewhere in the app (e.g. TrophyScreen's "See it on the club feed" button,
-  // via the openClubFeed callback in App) -- these refs are what that scrolls to.
+  // signal from elsewhere in the app (e.g. TrophyScreen's "See it on the club feed" button, via
+  // the openClubFeed callback in App, or the bottom nav's Home icon resetting to "forecast") --
+  // these refs are what that scrolls to.
   const feedSectionRef = useRef(null);
   const bigFishSectionRef = useRef(null);
   useEffect(function() {
-    if (homeSection !== "feed" && homeSection !== "bigfish") return;
-    var targetRef = homeSection === "feed" ? feedSectionRef : bigFishSectionRef;
+    // Depend on homeJumpToken, not homeSection's own value -- React skips an effect re-run
+    // when a primitive dependency is set to what it already was, so a second tap on "View All"
+    // or the Home nav icon while homeSection hadn't changed in between would otherwise silently
+    // do nothing (flagged by review on PR #64). homeJumpToken bumps on every jump request, even
+    // repeats of the same target, so this always fires; homeSection (read fresh here, not in
+    // the dependency list) still says which target to scroll to.
+    if (!homeJumpToken) return; // skip the initial mount -- token starts at 0, only real jump requests increment it
     function scrollToTarget() {
-      if (targetRef.current) targetRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
+      if (homeSection === "feed" && feedSectionRef.current) {
+        feedSectionRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
+      } else if (homeSection === "bigfish" && bigFishSectionRef.current) {
+        bigFishSectionRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
+      } else if (homeSection === "forecast") {
+        window.scrollTo({ top:0, behavior:"smooth" });
+      }
     }
     scrollToTarget();
     // The Forecast content above this point is still loading (weather, buoy report, nearby
@@ -1806,7 +1818,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
       clearTimeout(retry1);
       clearTimeout(retry2);
     };
-  }, [homeSection]);
+  }, [homeJumpToken]);
 
   // Home dashboard redesign (per shared mockup) — real data only, no fabricated stats.
   const [myRecentCatch] = useState(function() {
@@ -2140,7 +2152,7 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
         <div style={{ marginBottom:12 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
             <div style={{ fontSize:13, color:th.white, fontWeight:700 }}>Top Catch — Club Feed</div>
-            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { setHomeSection && setHomeSection("feed"); }}>View All</span>
+            <span style={{ fontSize:11, color:th.blue, cursor:"pointer", fontWeight:700 }} onClick={function() { onJumpToSection && onJumpToSection("feed"); }}>View All</span>
           </div>
           <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:12 }}>
             {topClubCatchLoading ? (
@@ -5690,6 +5702,16 @@ var NAV = [
 export default function App() {
   const [tab, setTab] = useState("home");
   const [homeSection, setHomeSection] = useState("forecast");
+  // Bumped on every "jump to this Home section" request, even repeats of the same section --
+  // HomeTab's scrollIntoView effect depends on this (not on homeSection's own value), since
+  // React skips an effect re-run when a primitive state value is set to what it already was
+  // (e.g. tapping "View All" twice in a row without homeSection changing in between, or
+  // re-tapping the Home nav icon while already on "forecast") -- flagged by review on PR #64.
+  const [homeJumpToken, setHomeJumpToken] = useState(0);
+  var jumpHomeSection = useCallback(function(section) {
+    setHomeSection(section);
+    setHomeJumpToken(function(t) { return t + 1; });
+  }, []);
   const [theme, setTheme] = useState("beige");
   const [textScale, setTextScaleState] = useState(function() {
     try { return localStorage.getItem(TEXT_SCALE_KEY) || "medium"; } catch (e) { return "medium"; }
@@ -5730,9 +5752,9 @@ export default function App() {
   var clearSpotsOpenSection = useCallback(function() { setSpotsOpenSection(null); }, []);
   var goMyPrivateSpots = useCallback(function() { setTab("spots"); setSpotsOpenSection("my_spots"); }, []);
   var openClubFeed = useCallback(function() {
-    setHomeSection("feed");
+    jumpHomeSection("feed");
     setTab("home");
-  }, []);
+  }, [jumpHomeSection]);
 
   useEffect(function() {
     return subscribeAuthState(function(user, member, errMsg) {
@@ -5961,7 +5983,7 @@ export default function App() {
         </button>
       </div>
       <div key={tab} className="tab-content" style={{ padding:"0 14px" }}>
-        {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} setHomeSection={setHomeSection} />}
+        {tab==="home"      && <HomeTab profile={profile} T={theme} setTab={setTab} authMember={authMember} homeSection={homeSection} homeJumpToken={homeJumpToken} onJumpToSection={jumpHomeSection} />}
         {tab==="fish"      && <SpeciesTab T={theme} profile={profile} setTab={setTab} />}
         {tab==="spots"     && <SpotsTab profile={profile} setProfile={setProfile} T={theme} spotsOpenSection={spotsOpenSection} clearSpotsOpenSection={clearSpotsOpenSection} clubRoster={sharingRoster} authMember={authMember} onMarkClubSpotsSeen={handleMarkClubSpotsSeen} />}
         {tab==="catalogue" && <CatalogueTab T={theme} />}
@@ -5974,7 +5996,7 @@ export default function App() {
         {NAV.map(function(n) {
           var badge = n.id === "spots" && clubSpotsNewCount > 0;
           return (
-            <button key={n.id} onClick={function() { if (n.id === "home") setHomeSection("forecast"); setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
+            <button key={n.id} onClick={function() { if (n.id === "home") jumpHomeSection("forecast"); setTab(n.id); }} style={{ flex:1, padding:"9px 0 6px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1, borderTop: tab===n.id ? "2px solid " + th.green : "2px solid transparent" }}>
               <div style={{ position:"relative", display:"inline-flex" }}>
                 <span style={{ fontSize:16 }}>{n.emoji}</span>
                 {badge ? <span style={{ position:"absolute", top:-4, right:-7, background:th.red, borderRadius:"50%", minWidth:14, height:14, fontSize:8, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, padding:"0 2px", boxSizing:"border-box" }}>{clubSpotsNewCount > 9 ? "9+" : clubSpotsNewCount}</span> : null}

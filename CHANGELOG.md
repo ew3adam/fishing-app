@@ -22,6 +22,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   there's no photo) plus a line of species habitat info. Confirmed: a catch shared to the club
   feed was already staying in this personal list too (sharing never removes it from your own
   history) — this redesign makes that list itself much more useful to look at.
+
+### Fixed (2026-11-17)
+- **Home: repeated "jump to section" taps could silently do nothing.** Caught by code review
+  on the Home-stacking change above. Tapping "View All" a second time without `homeSection`
+  changing in between (e.g. after scrolling back up manually), or tapping the bottom nav's Home
+  icon while already scrolled away from the top, didn't scroll anywhere — the effect driving it
+  depended on `homeSection`'s own value, and React skips an effect re-run when a primitive
+  dependency is set to what it already was. Fixed with a separate `homeJumpToken` counter in
+  `App` that bumps on every jump request, even repeats of the same target; the Home icon now
+  also scrolls back to the top of Forecast instead of only resetting which section a future
+  jump would target.
+
 - **Big Fish Award — unofficial in-app standings.** RFC's real monthly Big Fish Award contest
   (members submit a fish, top 3 get raffle tickets, year's biggest honored every November) is
   still judged by a club officer outside the app — this just gives members an "Enter Big Fish
