@@ -50,6 +50,7 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 ### Tabs (`NAV` array in `App.jsx`, ~line 4528)
 `Home` → `Scout` → `Species` → `Spots` → `Tackle` (`catalogue`) → `Catch` → `Learn`, plus `Profile` reached via a header avatar button (not in `NAV`). Each tab is its own top-level function component inside `App.jsx` (e.g. `HomeTab`, `SpotsTab`, `CatchTab`, `ProfileTab`, `ScoutTab`) — search for `function XxxTab(` to jump to one.
 - **Home**: toggles between Forecast (weather + species/bait tips, optionally overridden by a pinned spot) and the Club Feed.
+- **Species**: field guide grid with an All/Caught/Not Yet filter and a caught checkmark badge per card (derived by matching `catch.species` against `SPECIES[].name` — exact string match, same as the personal-best check in `TrophyScreen`), reading the local-first catch cache via `loadLocalCatches()`. A species' detail page shows a "My catches" card (thumbnail via `resolveCatchPhotoUrl`, length, date, shared tag) when the member has logged one, skipped entirely otherwise — no fabricated/placeholder entries.
 - **Catch**: log a new catch (photo upload, EXIF GPS, species, size via ruler overlay, weight, gear).
 - **Spots**: private + club-shared fishing spots, Leaflet map picker.
 - **Scout**: browse/search known spots, club-shared spots, and live OSM/Overpass water + businesses; results also plot as red pins on a `ScoutResultsMap` overview map (blue dot = your position) so a bad/mislabeled entry is visible before you drive there — see spot-data-quality gotcha below.
