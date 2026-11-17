@@ -149,6 +149,18 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
         </div>
       )}
 
+      {/* Explicit refresh button, not just the pull gesture above -- Home now stacks this feed
+          below the Forecast content (it's no longer the sole/top scrollable view), so "pull
+          down from the very top of the page" is an awkward, easy-to-miss way to reach this
+          feed's own refresh. */}
+      {!refreshing && (
+        <div style={{ textAlign:"right", marginBottom:6 }}>
+          <button type="button" onClick={function() { setRefreshing(true); doLoad().finally(function() { setRefreshing(false); }); }} style={{ background:"transparent", border:"none", color:th.green, cursor:"pointer", fontSize:11, fontWeight:700, padding:0 }}>
+            🔄 Refresh
+          </button>
+        </div>
+      )}
+
       {(loading && !refreshing) && (
         <div style={{ fontSize:13, color:th.muted, padding:"20px 0", textAlign:"center" }}>Loading club feed…</div>
       )}

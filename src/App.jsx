@@ -1767,7 +1767,6 @@ var HOME_SPECIES_PICKS = ["All Species", "Bass (Largemouth)", "Crappie", "Channe
 
 function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }) {
   const th = THEMES[T];
-  const section = homeSection || "forecast";
   const [wx, setWx] = useState(null);
   const [tip, setTip] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1783,6 +1782,31 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
   // North Riverside default instead of where the member actually is — must be surfaced, not silent.
   const [usedDefaultLocation, setUsedDefaultLocation] = useState(false);
   const favSp = (profile && profile.favSpecies) || [];
+  // Club Feed and Big Fish used to be exclusive toggled views (tap to reveal) -- per direct
+  // feedback they should be visible without tapping, Home now stacks Forecast/Club Feed/Big
+  // Fish on one scrollable page instead. homeSection is kept only as a "jump to this section"
+  // signal from elsewhere in the app (e.g. TrophyScreen's "See it on the club feed" button,
+  // via the openClubFeed callback in App) -- these refs are what that scrolls to.
+  const feedSectionRef = useRef(null);
+  const bigFishSectionRef = useRef(null);
+  useEffect(function() {
+    if (homeSection !== "feed" && homeSection !== "bigfish") return;
+    var targetRef = homeSection === "feed" ? feedSectionRef : bigFishSectionRef;
+    function scrollToTarget() {
+      if (targetRef.current) targetRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
+    }
+    scrollToTarget();
+    // The Forecast content above this point is still loading (weather, buoy report, nearby
+    // water, geolocation) when this effect can first run -- it keeps growing the page for a
+    // moment after this fires, which silently pushes the target back out of view. A couple of
+    // delayed re-scrolls land on the settled position without tracking every loading flag.
+    var retry1 = setTimeout(scrollToTarget, 400);
+    var retry2 = setTimeout(scrollToTarget, 1000);
+    return function() {
+      clearTimeout(retry1);
+      clearTimeout(retry2);
+    };
+  }, [homeSection]);
 
   // Home dashboard redesign (per shared mockup) — real data only, no fabricated stats.
   const [myRecentCatch] = useState(function() {
@@ -1939,18 +1963,6 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
 
   return (
     <div style={{ paddingBottom:8 }}>
-      <div style={{ display:"flex", gap:8, margin:"12px 0 10px" }}>
-        <OBtn label="Forecast" onClick={function() { setHomeSection && setHomeSection("forecast"); }} color={section === "forecast" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
-        <OBtn label="Club Feed" onClick={function() { setHomeSection && setHomeSection("feed"); }} color={section === "feed" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
-        <OBtn label="Big Fish" onClick={function() { setHomeSection && setHomeSection("bigfish"); }} color={section === "bigfish" ? th.green : th.muted} style={{ flex:1, textAlign:"center" }} />
-      </div>
-
-      {section === "feed" ? (
-        <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
-      ) : section === "bigfish" ? (
-        <BigFishBoard T={T} authMember={authMember} />
-      ) : (
-      <>
       {displayName !== "Angler" && !loading && (
         <div style={{ background:th.card, border:"1px solid " + th.border, borderRadius:12, padding:"12px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:12, animation:"fadeInUp 0.25s ease-out both" }}>
           <div style={{ fontSize:26, lineHeight:1 }}>{hour < 12 ? "🌅" : hour < 17 ? "☀️" : "🌙"}</div>
@@ -2417,8 +2429,17 @@ function HomeTab({ profile, T, setTab, authMember, homeSection, setHomeSection }
           );
         })}
       </Card>
-      </>
-      )}
+
+      <div ref={feedSectionRef} style={{ marginTop:20 }}>
+        <SecLabel text="Club Feed" T={T} />
+        <ClubFeedList authMember={authMember} T={T} setTab={setTab} onSignInClick={function() { setTab("me"); }} />
+      </div>
+
+      <div ref={bigFishSectionRef} style={{ marginTop:20 }}>
+        <SecLabel text="Big Fish Award" T={T} />
+        <BigFishBoard T={T} authMember={authMember} />
+      </div>
+
       <FishingAssistant T={T} authMember={authMember} contextSummary={assistantContext} />
     </div>
   );
