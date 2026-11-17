@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Home: Club Feed and Big Fish Award always visible, no more tapping to reveal them.**
+  Home was a Forecast/Club Feed/Big Fish toggle — only one showed at a time. Now all three
+  stack on one scrollable page: Forecast, then Club Feed, then Big Fish Award. Links elsewhere
+  that used to jump straight to the club feed (e.g. "See it on the club feed" after logging a
+  shared catch) now scroll down to it instead. `ClubFeedList` also gained an explicit
+  "🔄 Refresh" button, since its pull-to-refresh gesture only worked at the very top of the
+  page — true when the feed was the only content, no longer true now that it can sit below
+  Forecast.
 - **Catch tab: "My catches" always expanded, with photos.** Was a collapsed "▸ My catches (N)"
   toggle showing text only; now always shown (no tap needed), scrollable in its own box so
   "Log a Catch" stays reachable, and each row shows the catch photo (or the species' emoji when
