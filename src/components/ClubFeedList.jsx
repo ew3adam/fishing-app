@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { loadClubFeedCatches, updateCatchLike } from "../services/fishingSyncService.js";
+import { loadClubFeedCatches, updateCatchLike, loadCatchComments, addCatchComment, deleteCatchComment } from "../services/fishingSyncService.js";
 import { resolveCatchPhotoUrl } from "../services/catchPhotoStorage.js";
 import { formatFeedSpotName } from "../utils/feedSpotPrivacy.js";
 
@@ -41,6 +41,92 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
   // in quick succession still both go through. Same root cause as the double-submit bug fixed in
   // CatchTab.submitCatch (BUG-1, see docs/BUG-TRIAGE-AND-FEATURE-ROADMAP.md).
   var likeInFlightRef = useRef({});
+
+  // Comments -- loaded lazily per post (only once a member expands that post's thread, not
+  // eagerly for the whole feed) since each post's comments live in their own Firestore
+  // subcollection read. commentCount on the post itself (bumped server-side by
+  // addCatchComment/deleteCatchComment, same increment() pattern as likeCount) is what drives
+  // the "N comments" badge before a thread is ever opened.
+  var [commentsOpen, setCommentsOpen] = useState({});
+  var [commentsByPost, setCommentsByPost] = useState({});
+  var [commentsLoading, setCommentsLoading] = useState({});
+  var [commentDraft, setCommentDraft] = useState({});
+  var [commentSubmitting, setCommentSubmitting] = useState({});
+  var [commentError, setCommentError] = useState("");
+
+  function toggleComments(post) {
+    var postId = String(post.id || post.memberId + "_" + post.date);
+    var opening = !commentsOpen[postId];
+    setCommentsOpen(function(prev) { return Object.assign({}, prev, { [postId]: opening }); });
+    if (opening && !commentsByPost[postId]) {
+      setCommentsLoading(function(prev) { return Object.assign({}, prev, { [postId]: true }); });
+      loadCatchComments(post.memberId, post.id).then(function(rows) {
+        setCommentsByPost(function(prev) { return Object.assign({}, prev, { [postId]: rows || [] }); });
+      }).catch(function() {
+        setCommentError("Couldn't load comments — deploy firebase rules for club-wide comments (see CLAUDE.md).");
+        setCommentsByPost(function(prev) { return Object.assign({}, prev, { [postId]: [] }); });
+      }).finally(function() {
+        setCommentsLoading(function(prev) { return Object.assign({}, prev, { [postId]: false }); });
+      });
+    }
+  }
+
+  function submitComment(post) {
+    var postId = String(post.id || post.memberId + "_" + post.date);
+    var text = (commentDraft[postId] || "").trim();
+    if (!text || commentSubmitting[postId] || !authMember) return;
+    setCommentSubmitting(function(prev) { return Object.assign({}, prev, { [postId]: true }); });
+    setCommentError("");
+    var optimistic = { id: "local_" + Date.now(), authorId: authMember.id, authorName: authMember.name, text: text, createdAt: new Date().toISOString(), pending: true };
+    setCommentsByPost(function(prev) {
+      var existing = prev[postId] || [];
+      return Object.assign({}, prev, { [postId]: existing.concat([optimistic]) });
+    });
+    setCommentDraft(function(prev) { return Object.assign({}, prev, { [postId]: "" }); });
+    setPosts(function(prev) {
+      return prev.map(function(p) {
+        var pid = String(p.id || p.memberId + "_" + p.date);
+        return pid === postId ? Object.assign({}, p, { commentCount: (p.commentCount || 0) + 1 }) : p;
+      });
+    });
+    addCatchComment(post.memberId, post.id, authMember.id, authMember.name, text).then(function(saved) {
+      setCommentsByPost(function(prev) {
+        var existing = prev[postId] || [];
+        return Object.assign({}, prev, { [postId]: existing.map(function(c) { return c.id === optimistic.id ? saved : c; }) });
+      });
+    }).catch(function() {
+      setCommentError("Comment didn't save — deploy firebase rules for club-wide comments (see CLAUDE.md).");
+      setCommentsByPost(function(prev) {
+        var existing = prev[postId] || [];
+        return Object.assign({}, prev, { [postId]: existing.filter(function(c) { return c.id !== optimistic.id; }) });
+      });
+      setPosts(function(prev) {
+        return prev.map(function(p) {
+          var pid = String(p.id || p.memberId + "_" + p.date);
+          return pid === postId ? Object.assign({}, p, { commentCount: Math.max(0, (p.commentCount || 0) - 1) }) : p;
+        });
+      });
+    }).finally(function() {
+      setCommentSubmitting(function(prev) { return Object.assign({}, prev, { [postId]: false }); });
+    });
+  }
+
+  function removeComment(post, comment) {
+    var postId = String(post.id || post.memberId + "_" + post.date);
+    setCommentsByPost(function(prev) {
+      var existing = prev[postId] || [];
+      return Object.assign({}, prev, { [postId]: existing.filter(function(c) { return c.id !== comment.id; }) });
+    });
+    setPosts(function(prev) {
+      return prev.map(function(p) {
+        var pid = String(p.id || p.memberId + "_" + p.date);
+        return pid === postId ? Object.assign({}, p, { commentCount: Math.max(0, (p.commentCount || 0) - 1) }) : p;
+      });
+    });
+    deleteCatchComment(post.memberId, post.id, comment.id).catch(function() {
+      setCommentError("Couldn't delete that comment — try again.");
+    });
+  }
 
   function doLoad() {
     return loadClubFeedCatches()
@@ -174,6 +260,9 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
       {likeError ? (
         <div style={{ fontSize:11, color:"#e09030", marginBottom:10, lineHeight:1.45 }}>{likeError}</div>
       ) : null}
+      {commentError ? (
+        <div style={{ fontSize:11, color:"#e09030", marginBottom:10, lineHeight:1.45 }}>{commentError}</div>
+      ) : null}
 
       {posts.map(function(c) {
         var postId = String(c.id || c.memberId + "_" + c.date);
@@ -181,6 +270,9 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
         var likeCount = c.likeCount || 0;
         var animating = !!likeAnim[postId];
         var spotLabel = formatFeedSpotName(c.spot, c.spotDisplayName);
+        var commentCount = c.commentCount || 0;
+        var threadOpen = !!commentsOpen[postId];
+        var threadComments = commentsByPost[postId] || [];
         return (
           <article
             key={postId}
@@ -221,15 +313,66 @@ export default function ClubFeedList({ authMember, T, setTab, onSignInClick }) {
                   <span>{liked ? "Nice fish ✓" : "Nice fish"}</span>
                   {likeCount > 0 && <span style={{ fontSize:11, opacity:0.8 }}>({likeCount})</span>}
                 </button>
+                <button
+                  type="button"
+                  onClick={function() { toggleComments(c); }}
+                  style={{ background:threadOpen ? th.green + "22" : "transparent", border:"1px solid " + (threadOpen ? th.green : th.border), borderRadius:16, padding:"5px 12px", color:threadOpen ? th.green : th.muted, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                >
+                  💬 {commentCount > 0 ? commentCount + (commentCount === 1 ? " comment" : " comments") : "Comment"}
+                </button>
               </div>
               <div style={{ fontSize:14, color:th.white, fontWeight:700, marginBottom:4 }}>
                 {c.species}
                 {c.length ? <span style={{ color:th.green, fontWeight:600 }}> · {c.length}</span> : null}
               </div>
-              {c.bait ? <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>{c.bait}</div> : null}
+              {c.bait ? <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>🪱 {c.bait}</div> : null}
+              {c.rod ? <div style={{ fontSize:12, color:th.muted, marginBottom:4 }}>🎣 {c.rod}</div> : null}
               <div style={{ fontSize:12, color:th.gold }}>{spotLabel}</div>
               {c.notes ? <div style={{ fontSize:12, color:th.white, marginTop:6, fontStyle:"italic", lineHeight:1.45 }}>{c.notes}</div> : null}
             </div>
+            {threadOpen ? (
+              <div style={{ borderTop:"1px solid " + th.border, padding:"10px 12px 12px" }}>
+                {commentsLoading[postId] ? (
+                  <div style={{ fontSize:12, color:th.muted, padding:"6px 0" }}>Loading comments…</div>
+                ) : null}
+                {!commentsLoading[postId] && threadComments.length === 0 ? (
+                  <div style={{ fontSize:12, color:th.muted, padding:"4px 0 8px" }}>No comments yet — be the first.</div>
+                ) : null}
+                {threadComments.map(function(cm) {
+                  var isMine = authMember && cm.authorId === authMember.id;
+                  return (
+                    <div key={cm.id} style={{ marginBottom:8, opacity:cm.pending ? 0.6 : 1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8 }}>
+                        <span style={{ fontSize:12, color:th.white, fontWeight:700 }}>{memberFirstName(cm.authorName)}</span>
+                        {isMine ? (
+                          <button type="button" onClick={function() { removeComment(c, cm); }} style={{ background:"transparent", border:"none", color:th.muted, cursor:"pointer", fontSize:10, padding:0 }}>Delete</button>
+                        ) : null}
+                      </div>
+                      <div style={{ fontSize:13, color:th.white, lineHeight:1.4 }}>{cm.text}</div>
+                    </div>
+                  );
+                })}
+                {authMember ? (
+                  <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                    <input
+                      value={commentDraft[postId] || ""}
+                      onChange={function(e) { var v = e.target.value; setCommentDraft(function(prev) { return Object.assign({}, prev, { [postId]: v }); }); }}
+                      onKeyDown={function(e) { if (e.key === "Enter") submitComment(c); }}
+                      placeholder="Write a comment…"
+                      style={{ flex:1, background:th.card, border:"1px solid " + th.border, borderRadius:16, padding:"7px 12px", color:th.white, fontSize:13, outline:"none" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={function() { submitComment(c); }}
+                      disabled={!((commentDraft[postId] || "").trim()) || commentSubmitting[postId]}
+                      style={{ background:th.green, color:"#000", border:"none", borderRadius:16, padding:"0 16px", cursor:"pointer", fontSize:12, fontWeight:700, opacity:(commentDraft[postId] || "").trim() ? 1 : 0.5 }}
+                    >
+                      Post
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </article>
         );
       })}

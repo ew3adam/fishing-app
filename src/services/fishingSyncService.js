@@ -5,7 +5,7 @@
  *         see clubShareRef below; `main` itself is owner-read-only, privateSpots included)
  *       members/{memberId}/fishingCatches/{catchId}
  */
-import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment, deleteDoc, query, orderBy } from "firebase/firestore";
 import { getFirebaseDb } from "../lib/firebase.js";
 import { listActiveMembers } from "./memberService.js";
 import { uploadCatchPhoto, stripPhotoForFirestore, isDataUrlImage } from "./catchPhotoStorage.js";
@@ -29,6 +29,10 @@ function clubShareRef(memberId) {
 
 function catchesCol(memberId) {
   return collection(getFirebaseDb(), "members", memberId, "fishingCatches");
+}
+
+function commentsCol(catchOwnerId, catchId) {
+  return collection(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId), "comments");
 }
 
 /** Fields synced to cloud (excludes huge blobs). */
@@ -133,6 +137,38 @@ export async function updateCatchLike(catchOwnerId, catchId, delta) {
   if (!catchOwnerId || !catchId || delta === 0) return;
   var ref = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
   await updateDoc(ref, { likeCount: increment(delta) });
+}
+
+/**
+ * Comments on a club-feed catch -- requires the firestore.rules comments-subcollection rule
+ * (see that file) to actually have been deployed (`firebase deploy --only firestore:rules,storage
+ * --project rfc-management`, per docs/FIREBASE-DEPLOY.md) -- rules ship in this repo but deploy
+ * is a separate manual step, same caveat as every other rules change in this file's history.
+ * Until that's run, these calls will fail with permission-denied for anyone but the catch owner.
+ */
+export async function loadCatchComments(catchOwnerId, catchId) {
+  if (!catchOwnerId || !catchId) return [];
+  var snap = await getDocs(query(commentsCol(catchOwnerId, catchId), orderBy("createdAt", "asc")));
+  return snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+}
+
+/** Adds a comment and bumps the catch's commentCount in the same shape updateCatchLike uses. */
+export async function addCatchComment(catchOwnerId, catchId, authorId, authorName, text) {
+  if (!catchOwnerId || !catchId || !authorId || !text) return null;
+  var ref = doc(commentsCol(catchOwnerId, catchId));
+  var data = { authorId: authorId, authorName: authorName || "Member", text: String(text).trim(), createdAt: new Date().toISOString() };
+  await setDoc(ref, data);
+  var catchRef = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
+  await updateDoc(catchRef, { commentCount: increment(1) });
+  return Object.assign({ id: ref.id }, data);
+}
+
+/** Deletable by the comment's own author, or by the catch owner (rules enforce both cases). */
+export async function deleteCatchComment(catchOwnerId, catchId, commentId) {
+  if (!catchOwnerId || !catchId || !commentId) return;
+  await deleteDoc(doc(commentsCol(catchOwnerId, catchId), String(commentId)));
+  var catchRef = doc(getFirebaseDb(), "members", catchOwnerId, "fishingCatches", String(catchId));
+  await updateDoc(catchRef, { commentCount: increment(-1) });
 }
 
 /**
