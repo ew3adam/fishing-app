@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased] — In Progress
 
 ### Added (2026-11-17)
+- **Catch tab: "My catches" always expanded, with photos.** Was a collapsed "▸ My catches (N)"
+  toggle showing text only; now always shown (no tap needed), scrollable in its own box so
+  "Log a Catch" stays reachable, and each row shows the catch photo (or the species' emoji when
+  there's no photo) plus a line of species habitat info. Confirmed: a catch shared to the club
+  feed was already staying in this personal list too (sharing never removes it from your own
+  history) — this redesign makes that list itself much more useful to look at.
 - **Big Fish Award — unofficial in-app standings.** RFC's real monthly Big Fish Award contest
   (members submit a fish, top 3 get raffle tickets, year's biggest honored every November) is
   still judged by a club officer outside the app — this just gives members an "Enter Big Fish
