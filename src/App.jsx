@@ -54,6 +54,12 @@ function mapsUrl(lat, lng) {
   };
 }
 
+// Real club logo (public/rfc-logo.png) -- black line art on a transparent background, so it only
+// ever renders on a fixed white chip/badge, never directly against a theme-colored background
+// (the header nav and the WelcomeSplash hero are both sometimes dark, where black-on-transparent
+// would be invisible -- same lesson as the Section 508 contrast fixes elsewhere in this file).
+var RFC_LOGO_SRC = import.meta.env.BASE_URL + "rfc-logo.png";
+
 // Westcott 20-inch ruler PNG — full image width = 20 inches on the overlay scale.
 var RULER_REF_INCHES = 20;
 var RULER_REF_SRC = import.meta.env.BASE_URL + "ruler-20-inches.svg";
@@ -1727,17 +1733,16 @@ function SignInGateCard({ authError, onSignIn, onSendLink, onCompleteLink, pendi
 function WelcomeSplash({ authError, onSignIn, onSendLink, onCompleteLink, pendingLinkHref }) {
   return (
     <div style={{ position:"fixed", inset:0, overflowY:"auto", background:"linear-gradient(165deg, #17282c 0%, #060b0c 100%)", display:"flex", flexDirection:"column", zIndex:200 }}>
-      <div style={{ position:"relative", height:220, flexShrink:0 }}>
+      <div style={{ position:"relative", height:220, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
         <svg viewBox="0 0 300 220" preserveAspectRatio="xMidYMid slice" style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
           <path d="M0 175 Q 40 163 80 175 T 160 175 T 240 175 T 300 175" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.16" strokeWidth="2" />
-          <path d="M170 40 C 130 52 95 85 82 120" fill="none" stroke={WELCOME_ACCENT} strokeOpacity="0.55" strokeWidth="3" strokeLinecap="round" />
-          <g transform="translate(112 132) scale(0.75)" fill={WELCOME_ACCENT} fillOpacity="0.16" stroke={WELCOME_ACCENT} strokeOpacity="0.6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
-            <path d="M-70 0 C -70 -30 -20 -45 40 -20 C 70 -8 70 8 40 20 C -20 45 -70 30 -70 0 Z" />
-            <path d="M40 -20 L 75 -35 L 60 0 L 75 35 L 40 20" fill="none" />
-            <circle cx="-40" cy="-6" r="4" fill={WELCOME_ACCENT} fillOpacity="0.85" stroke="none" />
-          </g>
         </svg>
         <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg, transparent 45%, #060b0c 95%)" }} />
+        {/* Real club logo -- black line art on transparent PNG, so it sits on its own white card
+            rather than directly on this hero's dark gradient (where it would be invisible). */}
+        <div style={{ position:"relative", background:"#fff", borderRadius:14, padding:"10px 18px", boxShadow:"0 8px 24px rgba(0,0,0,0.35)" }}>
+          <img src={RFC_LOGO_SRC} alt="Riverside Fishing Club (RFC)" style={{ width:200, height:"auto", display:"block" }} />
+        </div>
       </div>
       <div style={{ position:"relative", padding:"0 24px 40px", textAlign:"center" }}>
         <div style={{ fontSize:28, fontWeight:800, color:"#fff", marginBottom:8 }}>Welcome to the RFC app</div>
@@ -5708,7 +5713,12 @@ export default function App() {
       <SaveToast toast={toast} />
       <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:th.nav, borderBottom:"1px solid " + th.border, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", height:48, zIndex:100, backdropFilter:"blur(12px)", boxSizing:"border-box" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:22 }}>🎣</span>
+          {/* White chip behind the logo regardless of theme -- it's black line art on a
+              transparent PNG, invisible on the dark/bluesteel themes' dark nav background
+              otherwise (th.nav is light in beige/light, dark in dark/bluesteel). */}
+          <div style={{ background:"#fff", borderRadius:6, padding:"2px 4px", display:"flex", alignItems:"center", flexShrink:0 }}>
+            <img src={RFC_LOGO_SRC} alt="RFC" style={{ height:22, width:"auto", display:"block" }} />
+          </div>
           <span style={{ fontSize:15, fontWeight:700, color:th.white, letterSpacing:0.3 }}>RFC Fishing</span>
         </div>
         <button onClick={function() { setTab("me"); }} style={{ background:"transparent", border:"none", cursor:"pointer", padding:"6px 8px", borderRadius:20 }}>
