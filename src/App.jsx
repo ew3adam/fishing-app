@@ -3788,7 +3788,6 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
 // ─── CATCH TAB ────────────────────────────────────────────────────────────────
 function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
   const th = THEMES[T];
-  const [showMyLogs, setShowMyLogs] = useState(false);
   const fileRef = useRef();
   const multiFileRef = useRef();
   const refFileRef = useRef();
@@ -4208,23 +4207,36 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
         ) : null}
       </div>
       {catches.length > 0 ? (
-        <Card T={T} borderColor={th.blue + "33"} style={{ marginBottom:10 }}>
-          <button type="button" onClick={function() { setShowMyLogs(function(v) { return !v; }); }} style={{ width:"100%", background:"transparent", border:"none", color:th.white, cursor:"pointer", textAlign:"left", fontSize:13, fontWeight:700, padding:0 }}>
-            My catches ({catches.length}) {showMyLogs ? "▾" : "▸"}
-          </button>
-          {showMyLogs ? catches.slice(0, 8).map(function(c, i) {
-            return (
-              <div key={i} style={{ borderTop:"1px solid " + th.border, paddingTop:8, marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                <div style={{ minWidth:0 }}>
-                  <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
-                  <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+        <Card T={T} borderColor={th.blue + "33"} style={{ marginBottom:10, paddingBottom:4 }}>
+          <div style={{ fontSize:13, fontWeight:700, color:th.white, marginBottom:8 }}>My catches ({catches.length})</div>
+          {/* Always expanded, not a collapsed toggle -- a club-shared catch stays in this list
+              too (it's still your catch, sharing just also puts it on the club feed), so this
+              is the full personal history, private + shared alike. Scrollable in its own box
+              (rather than just letting the page run long) so "Log a Catch" below stays within
+              reach once a member has more than a handful of catches. */}
+          <div style={{ maxHeight:380, overflowY:"auto", marginRight:-4, paddingRight:4 }}>
+            {catches.map(function(c, i) {
+              var photoUrl = resolveCatchPhotoUrl(c);
+              var sp = SPECIES.find(function(s) { return s.name === c.species; });
+              return (
+                <div key={i} style={{ borderTop:i ? "1px solid " + th.border : "none", paddingTop:i ? 10 : 0, marginTop:i ? 10 : 0, display:"flex", gap:10, alignItems:"center" }}>
+                  {photoUrl ? (
+                    <img src={photoUrl} alt={c.species} style={{ width:56, height:56, borderRadius:9, objectFit:"cover", flexShrink:0, background:th.card, border:"1px solid " + th.border }} />
+                  ) : (
+                    <div style={{ width:56, height:56, borderRadius:9, flexShrink:0, background:th.card, border:"1px solid " + (sp ? sp.color + "44" : th.border), display:"flex", alignItems:"center", justifyContent:"center", fontSize:26 }}>{(sp && sp.emoji) || "🐟"}</div>
+                  )}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:700, color:th.white, fontSize:13 }}>{c.species}</div>
+                    <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
+                    {sp ? <div style={{ fontSize:10, color:sp.color, marginTop:1 }}>{sp.habitat}</div> : null}
+                  </div>
+                  <button type="button" onClick={function() { toggleBigFish(c.id, !c.bigFish); }} style={{ flexShrink:0, background:c.bigFish ? th.gold + "22" : "transparent", border:"1px solid " + (c.bigFish ? th.gold : th.border), borderRadius:7, color:c.bigFish ? th.gold : th.muted, padding:"5px 8px", cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+                    {c.bigFish ? "🏆 Entered" : "Enter Big Fish"}
+                  </button>
                 </div>
-                <button type="button" onClick={function() { toggleBigFish(c.id, !c.bigFish); }} style={{ flexShrink:0, background:c.bigFish ? th.gold + "22" : "transparent", border:"1px solid " + (c.bigFish ? th.gold : th.border), borderRadius:7, color:c.bigFish ? th.gold : th.muted, padding:"5px 8px", cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
-                  {c.bigFish ? "🏆 Entered" : "Enter Big Fish"}
-                </button>
-              </div>
-            );
-          }) : null}
+              );
+            })}
+          </div>
         </Card>
       ) : (
         <div style={{ textAlign:"center", padding:"28px 0 16px", animation:"fadeInUp 0.25s ease-out both" }}>
