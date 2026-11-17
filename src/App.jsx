@@ -3792,19 +3792,41 @@ function TrophyScreen({ T, form, photo, estWeightLabel, catchVisibility, catches
           See it on the club feed →
         </button>
       ) : null}
-      {loggedCatch && onToggleBigFish ? (
-        <div style={{ background:th.gold + "14", border:"1px solid " + th.gold + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
-          <div style={{ fontSize:13, color:th.gold, fontWeight:700, marginBottom:4 }}>🏆 Big Fish Award</div>
-          <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
-            {loggedCatch.bigFish
-              ? "Entered in this month's Big Fish Award — unofficial standings on Home, official winners confirmed by the club."
-              : "Enter this catch in this month's Big Fish Award. Entries are shared with the club so everyone (and the judge) can see them."}
+      {loggedCatch && onToggleBigFish ? (function() {
+        // A picture with the ruler visible is required to be considered an official entry
+        // (Jim checks for it by eye when picking winners, same as the rest of Big Fish Award's
+        // unofficial/self-reported nature -- the app has no way to verify a ruler is actually
+        // in frame, only that *a* photo exists at all, so that's the one part it can enforce).
+        var hasPhoto = !!resolveCatchPhotoUrl(loggedCatch);
+        return (
+          <div style={{ background:th.gold + "14", border:"1px solid " + th.gold + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
+            <div style={{ fontSize:13, color:th.gold, fontWeight:700, marginBottom:4 }}>🏆 Big Fish Award</div>
+            {loggedCatch.bigFish ? (
+              <>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
+                  Entered in this month's Big Fish Award — unofficial standings on Home, official winners confirmed by the club.
+                </div>
+                <button type="button" onClick={function() { onToggleBigFish(loggedCatch.id, false); }} style={{ width:"100%", background:"transparent", border:"1px solid " + th.gold, color:th.gold, borderRadius:8, padding:"10px 0", cursor:"pointer", fontWeight:700, fontSize:13 }}>
+                  Remove entry
+                </button>
+              </>
+            ) : hasPhoto ? (
+              <>
+                <div style={{ fontSize:11, color:th.muted, marginBottom:8, lineHeight:1.45 }}>
+                  📏 Make sure your ruler is visible in the photo — entries need one to be considered official. Entering shares this catch with the club so everyone (and the judge) can see it.
+                </div>
+                <button type="button" onClick={function() { onToggleBigFish(loggedCatch.id, true); }} style={{ width:"100%", background:th.gold, border:"1px solid " + th.gold, color:"#000", borderRadius:8, padding:"10px 0", cursor:"pointer", fontWeight:700, fontSize:13 }}>
+                  Enter Big Fish Award
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize:11, color:th.muted, lineHeight:1.45 }}>
+                📏 A photo with your ruler visible is required to enter — this catch was logged without a photo. Log a new catch with a ruler photo to enter.
+              </div>
+            )}
           </div>
-          <button type="button" onClick={function() { onToggleBigFish(loggedCatch.id, !loggedCatch.bigFish); }} style={{ width:"100%", background:loggedCatch.bigFish ? "transparent" : th.gold, border:"1px solid " + th.gold, color:loggedCatch.bigFish ? th.gold : "#000", borderRadius:8, padding:"10px 0", cursor:"pointer", fontWeight:700, fontSize:13 }}>
-            {loggedCatch.bigFish ? "Remove entry" : "Enter Big Fish Award"}
-          </button>
-        </div>
-      ) : null}
+        );
+      })() : null}
       {rfcLink ? (
         <div style={{ background:th.green + "14", border:"1px solid " + th.green + "44", borderRadius:10, padding:14, marginBottom:14, textAlign:"left" }}>
           <div style={{ fontSize:13, color:th.green, fontWeight:700, marginBottom:4 }}>Email RFC members?</div>
@@ -4263,9 +4285,16 @@ function CatchTab({ profile, authMember, T, onOpenClubFeed, onSaveToast }) {
                     <div style={{ fontSize:11, color:th.muted }}>{c.length} · {c.date}{c.visibility === "club" ? " · shared" : ""}</div>
                     {sp ? <div style={{ fontSize:10, color:sp.color, marginTop:1 }}>{sp.habitat}</div> : null}
                   </div>
-                  <button type="button" onClick={function() { toggleBigFish(c.id, !c.bigFish); }} style={{ flexShrink:0, background:c.bigFish ? th.gold + "22" : "transparent", border:"1px solid " + (c.bigFish ? th.gold : th.border), borderRadius:7, color:c.bigFish ? th.gold : th.muted, padding:"5px 8px", cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
-                    {c.bigFish ? "🏆 Entered" : "Enter Big Fish"}
-                  </button>
+                  {c.bigFish || photoUrl ? (
+                    <button type="button" onClick={function() { toggleBigFish(c.id, !c.bigFish); }} style={{ flexShrink:0, background:c.bigFish ? th.gold + "22" : "transparent", border:"1px solid " + (c.bigFish ? th.gold : th.border), borderRadius:7, color:c.bigFish ? th.gold : th.muted, padding:"5px 8px", cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+                      {c.bigFish ? "🏆 Entered" : "Enter Big Fish"}
+                    </button>
+                  ) : (
+                    // No photo on this catch -- Big Fish Award entries need a ruler-visible
+                    // photo to be considered official (the app can't verify the ruler itself,
+                    // only that a photo exists at all), so there's nothing tappable here.
+                    <span title="Needs a photo with a ruler visible to enter" style={{ flexShrink:0, color:th.muted, fontSize:9, whiteSpace:"nowrap" }}>📏 Needs photo</span>
+                  )}
                 </div>
               );
             })}
