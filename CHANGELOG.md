@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Fixed (2026-11-18)
+- **Scout: live water lookup now has a fallback mirror + a Retry button.** A member reported
+  Scout finding nothing near the Des Plaines River — a real, obviously-mapped waterway, not a
+  data gap. Root cause: the free `overpass-api.de` server (the only one this app used) sometimes
+  returns an error under load without CORS headers, which a browser reports as an opaque network
+  failure rather than a clean HTTP status to retry smartly on. `loadNearbyWater`/
+  `loadNearbyFishingBusinesses` now try a second independent mirror (`overpass.kumi.systems`)
+  before giving up, and the water-lookup error message now has a tappable "Retry" for when both
+  are down at once.
+
 ### Added (2026-11-17)
 - **Big Fish Award now requires a photo to enter.** Direct instruction: official entries need a
   ruler visible in the photo. Both entry points (the just-logged catch screen and "My catches")
