@@ -5,7 +5,6 @@
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   query,
   where,
@@ -81,16 +80,6 @@ export async function findMemberByEmail(email) {
   var members = await listActiveMembers(200);
   var match = members.find(function(m) { return m.email === normalized; });
   return match || null;
-}
-
-/** Load member by Firestore document id. */
-export async function getMemberById(memberId) {
-  var id = String(memberId || "").trim();
-  if (!id) return null;
-  var ref = doc(getFirebaseDb(), "members", id);
-  var snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  return mapMemberDoc(snap.id, snap.data());
 }
 
 /** Link Firebase Auth uid to CRM member record after roster-approved sign-in. */

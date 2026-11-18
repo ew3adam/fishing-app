@@ -15,7 +15,6 @@ import ScoutResultsMap from "./components/ScoutResultsMap.jsx";
 import { SCOUT_SPOTS } from "./data/scoutSpots.js";
 import { BAIT_SHOPS } from "./data/baitShops.js";
 import { getInitialRoster, loadSeedRoster, importRosterFromCsvText, rosterForSharingPicker } from "./services/rosterImport.js";
-import { getOAuthPlaceholderButtons } from "./config/authProviders.js";
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -86,14 +85,6 @@ var SPECIES_ALIASES = {
   "brown line": "Brown Trout",
   musky: "Muskellunge",
   muskie: "Muskellunge",
-};
-
-var GLOSSARY = {
-  "slip float": "A float that slides on the line so you can cast far and set exact depth.",
-  "spawn sac": "Mesh bag of salmon eggs — top bait for pier coho.",
-  "texas rig": "Worm on a hook with a bullet weight — weedless for bass.",
-  "ned rig": "Tiny mushroom jig + short stick bait — great when fish are picky.",
-  "hair rig": "Carp rig where bait hangs below the hook on a hair loop.",
 };
 
 var SCOUT_HISTORY_KEY = "rfc_scout_history_v1";
@@ -499,10 +490,6 @@ function sharingRosterFromSources(cloudMembers, localRoster, selfId) {
   return rosterForSharingPicker(localRoster).filter(function(m) { return m.id !== selfId; });
 }
 
-var MOCK_CLUB_SHARED_SPOTS = [
-  { id:"club_demo_busse", name:"Busse Lake — south cove", lat:42.018, lng:-88.045, credit:"Jim K.", species_present:["Largemouth Bass","Crappie"], isDemo:true },
-];
-
 function sanitizeStr(s, maxLen) {
   var m = maxLen != null ? maxLen : 4000;
   if (typeof s !== "string") return "";
@@ -723,22 +710,6 @@ function savePrivateSpotFull(setProfile, draft, editId) {
     return Object.assign({}, base, { privateSpots:list });
   });
   return { ok:true };
-}
-
-function memberCreditFromProfile(profile) {
-  var n = (profile && profile.name && profile.name.trim()) || "Member";
-  var parts = n.split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return parts[0] || "Member";
-  return parts[0] + " " + parts[parts.length - 1].charAt(0).toUpperCase() + ".";
-}
-
-function formatShortDate(iso) {
-  try {
-    var d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month:"short", day:"numeric", year:"numeric" });
-  } catch (e) {
-    return "";
-  }
 }
 
 function formatLongShareDate(iso) {

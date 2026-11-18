@@ -44,7 +44,7 @@ npm run scan:pii:staged # staged-files-only (used by the pre-commit hook)
 ## Architecture
 
 ### Entry point and the monolith
-`src/main.jsx` renders `src/App.jsx` — that's the entire app. `App.jsx` (~4300 lines) owns all tabs, all state, and all UI as one file; keep changes there unless the user explicitly asks to split it (see `docs/refactoring-policy.md` for the "leave it cleaner than you found it" rule that otherwise applies).
+`src/main.jsx` renders `src/App.jsx` — that's the entire app. `App.jsx` (~6000 lines) owns all tabs, all state, and all UI as one file; keep changes there unless the user explicitly asks to split it (see `docs/refactoring-policy.md` for the "leave it cleaner than you found it" rule that otherwise applies).
 
 
 ### Tabs (`NAV` array in `App.jsx`, ~line 4528)

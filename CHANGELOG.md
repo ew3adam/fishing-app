@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Removed (2026-11-18)
+- **Dead code cleanup** — dedicated refactoring pass per `docs/refactoring-policy.md`. No
+  behavior change; verified via a clean production build and a browser smoke test. Removed:
+  `GLOSSARY` and `MOCK_CLUB_SHARED_SPOTS` (unused data, `src/App.jsx`), `memberCreditFromProfile`
+  and `formatShortDate` (unused helpers, `src/App.jsx` — `formatLongShareDate` is the one actually
+  in use), `getMemberById` (unused export, `src/services/memberService.js`, plus its now-unused
+  `getDoc` import).
+
 ### Added (2026-11-18)
 - **Scout's search box now shows where the app thinks you are.** Direct feedback: "I don't trust
   that it's pulling the location I'm at." Using your current GPS position now reverse-geocodes
