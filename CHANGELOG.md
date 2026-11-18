@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Fixed (2026-11-18) (2)
+- **Scout's "use my location" box could end up blank with no confirmation at all.** Real-world
+  report: standing on a bridge over the Des Plaines River, the search box stayed on its empty
+  placeholder after tapping "Use my location" — indistinguishable from the feature not existing.
+  Root cause: `reverseGeocodePlace` had nothing to return for a GPS fix with no city/town/village/
+  hamlet/suburb/county match (an exact point over water, not inside any named place's boundary),
+  and a Nominatim request failure hit the same dead end. Both cases now fall back to showing the
+  raw coordinates in the box instead of leaving it untouched, so there's always some visual
+  confirmation of the fix being used.
+
 ### Removed (2026-11-18)
 - **Dead code cleanup** — dedicated refactoring pass per `docs/refactoring-policy.md`. No
   behavior change; verified via a clean production build and a browser smoke test. Removed:
