@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Added (2026-11-18) (2)
+- **`docs/SCALING-WATCHLIST.md`** — a single place listing every free-tier/no-key external
+  dependency this app relies on (Nominatim, Overpass, Open-Meteo, NOAA buoy proxy, direct-browser
+  Anthropic calls, the Fishing Assistant Worker, Firebase, GitHub/Cloudflare Pages) with what to
+  watch for and what the upgrade path looks like if club usage grows enough to matter. No code
+  change — documentation only, written so this gets checked periodically instead of discovered by
+  hitting a limit.
+
 ### Removed (2026-11-18)
 - **Dead code cleanup** — dedicated refactoring pass per `docs/refactoring-policy.md`. No
   behavior change; verified via a clean production build and a browser smoke test. Removed:
