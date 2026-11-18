@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Added (2026-11-18) (3)
+- **`docs/FUTURE-NATIVE-IOS-WEATHER-STACK.md`** — not current architecture, explicitly speculative.
+  Saves a WeatherKit-based native-iOS weather stack pitch for later reference, in case this app
+  ever becomes a native iOS build; the current web app keeps using Open-Meteo as-is. Docs only.
+
 ### Added (2026-11-18) (2)
 - **`docs/SCALING-WATCHLIST.md`** — a single place listing every free-tier/no-key external
   dependency this app relies on (Nominatim, Overpass, Open-Meteo, NOAA buoy proxy, direct-browser
