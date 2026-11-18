@@ -123,6 +123,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `firebase/firestore.rules`, `firebase/storage.rules` | Security rules; deploy per `docs/FIREBASE-DEPLOY.md` |
 | `scripts/scan-pii.js` | PII/secrets scanner (pre-commit + pre-deploy) |
 | `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
+| `docs/SCALING-WATCHLIST.md` | Free-tier/no-key external dependencies (Nominatim, Overpass, Firebase, Anthropic, Cloudflare) and what to watch as the app/club grows |
 | `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
 | `CHANGELOG.md` | User-facing + notable internal changes, Keep a Changelog format under `[Unreleased]` — keep current per "Keeping docs current" above |
 
