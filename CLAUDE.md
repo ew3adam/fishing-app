@@ -124,6 +124,7 @@ Several features (weather-estimate fallback, one-line fishing tips, tackle image
 | `scripts/scan-pii.js` | PII/secrets scanner (pre-commit + pre-deploy) |
 | `docs/RFC-PLATFORM-PRD.md` | Platform PRD — CRM + Fishing App on shared Firebase (`rfc-management`) |
 | `docs/SCALING-WATCHLIST.md` | Free-tier/no-key external dependencies (Nominatim, Overpass, Firebase, Anthropic, Cloudflare) and what to watch as the app/club grows |
+| `docs/FUTURE-NATIVE-IOS-WEATHER-STACK.md` | Speculative — not current architecture. Weather-stack notes (WeatherKit, native proxy/caching) to revisit only if this app ever becomes a native iOS build |
 | `docs/dev-session-log.md` | Short **where we left off** / **next** — say **save state** to update |
 | `CHANGELOG.md` | User-facing + notable internal changes, Keep a Changelog format under `[Unreleased]` — keep current per "Keeping docs current" above |
 
