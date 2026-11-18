@@ -1455,6 +1455,39 @@ function overpassElementLatLng(el) {
   return null;
 }
 
+// Public Overpass instances to try in order -- overpass-api.de (the default most apps use) is
+// shared/rate-limited and, under load, sometimes returns an error response without CORS
+// headers; a browser then reports that as an opaque network failure (a plain fetch rejection,
+// not a clean non-ok status), which this app's catch blocks could only ever read as "the live
+// lookup failed," no more specific than that. A member reported a real-world case of this near
+// the Des Plaines River -- a major, certainly-OSM-tagged waterway -- returning nothing, which
+// isn't explained by the query being wrong. A second, independently-run mirror means one
+// provider's bad moment doesn't fully block results.
+var OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
+
+/** POSTs an Overpass QL query, trying each endpoint in OVERPASS_ENDPOINTS in turn; only throws
+ * once all of them have failed. */
+async function fetchOverpass(query) {
+  var lastErr = null;
+  for (var i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    try {
+      var r = await fetchWithTimeout(OVERPASS_ENDPOINTS[i], {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(query),
+      }, 12000);
+      if (!r.ok) throw new Error("Overpass query failed (" + r.status + ")");
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Overpass query failed");
+}
+
 /** Named/typed water features from OpenStreetMap within radiusMi of lat/lng. No API key; capped result count. */
 async function loadNearbyWater(lat, lng, radiusMi) {
   var radiusM = Math.round(Math.max(1, radiusMi) * 1609.34);
@@ -1465,13 +1498,7 @@ async function loadNearbyWater(lat, lng, radiusMi) {
     "node[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     "way[\"water\"~\"^(lake|pond)$\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     ");out center tags 80;";
-  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(q),
-  }, 20000);
-  if (!r.ok) throw new Error("Overpass water query failed");
-  var data = await r.json();
+  var data = await fetchOverpass(q);
   var seen = {};
   return (data.elements || []).map(function(el) {
     var pos = overpassElementLatLng(el);
@@ -1496,13 +1523,7 @@ async function loadNearbyFishingBusinesses(lat, lng, radiusMi) {
     "way[\"leisure\"=\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     "node[\"tourism\"][\"fishing\"](around:" + radiusM + "," + lat + "," + lng + ");" +
     ");out center tags 40;";
-  var r = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "data=" + encodeURIComponent(q),
-  }, 20000);
-  if (!r.ok) throw new Error("Overpass business query failed");
-  var data = await r.json();
+  var data = await fetchOverpass(q);
   return (data.elements || []).map(function(el) {
     var pos = overpassElementLatLng(el);
     if (!pos) return null;
@@ -5246,6 +5267,9 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   var [waterResults, setWaterResults] = useState([]);
   var [waterLoading, setWaterLoading] = useState(false);
   var [waterError, setWaterError] = useState("");
+  // Bumped by the Retry button below -- included in the fetch effect's deps so a retry re-runs
+  // it even when position/radius haven't changed (those alone wouldn't re-trigger the effect).
+  var [waterRetryToken, setWaterRetryToken] = useState(0);
   var [bizResults, setBizResults] = useState([]);
   var [bizLoading, setBizLoading] = useState(false);
   var [clubSpots, setClubSpots] = useState([]);
@@ -5313,7 +5337,7 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
       });
     }, 500);
     return function() { cancelled = true; clearTimeout(t); };
-  }, [activePos.lat, activePos.lng, radiusMi, gpsLoading, manualPos]);
+  }, [activePos.lat, activePos.lng, radiusMi, gpsLoading, manualPos, waterRetryToken]);
 
   useEffect(function() {
     if (waterLoading || bizLoading) {
@@ -5533,7 +5557,12 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
           </Card>
 
           {waterLoading || bizLoading ? <div style={{ fontSize:11, color:th.muted, textAlign:"center", margin:"6px 0" }}>Searching OpenStreetMap for more water…</div> : null}
-          {waterError ? <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>⚠️ {waterError} (known spots below still work; this only affects live OpenStreetMap results)</div> : null}
+          {waterError && !waterLoading ? (
+            <div style={{ fontSize:11, color:th.orange, textAlign:"center", margin:"6px 0" }}>
+              ⚠️ {waterError} (known spots below still work; this only affects live OpenStreetMap results){" "}
+              <span onClick={function() { setWaterRetryToken(function(t) { return t + 1; }); }} style={{ color:th.blue, cursor:"pointer", fontWeight:700, textDecoration:"underline" }}>Retry</span>
+            </div>
+          ) : null}
 
           <Card T={T} borderColor={th.gold + "55"}>
             <div style={{ fontSize:13, color:th.gold, fontWeight:800, marginBottom:6 }}>🌾 Private land open by permission — IRAP</div>
