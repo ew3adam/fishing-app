@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Added (2026-11-18)
+- **Scout's search box now shows where the app thinks you are.** Direct feedback: "I don't trust
+  that it's pulling the location I'm at." Using your current GPS position now reverse-geocodes
+  to a short place name (town, or county if there's no town) and fills the search box with it —
+  a visual confirmation alongside the existing "Using your current location" label, not
+  something any actual distance/water lookup depends on (those still use the raw coordinates).
+
 ### Fixed (2026-11-18)
 - **Scout: live water lookup now has a fallback mirror + a Retry button.** A member reported
   Scout finding nothing near the Des Plaines River — a real, obviously-mapped waterway, not a

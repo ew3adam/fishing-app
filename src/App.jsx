@@ -1553,6 +1553,22 @@ async function geocodePlaceName(query) {
   return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), label: results[0].display_name };
 }
 
+/**
+ * Reverse-geocodes a GPS fix to a short, readable place name (town, falling back to county when
+ * there's no town) via OSM Nominatim. Purely so a member can visually confirm the fix the app is
+ * actually using -- per direct feedback ("I don't trust that it's pulling the location I'm at")
+ * -- not something any search/distance logic depends on; those all still use the raw lat/lng.
+ */
+async function reverseGeocodePlace(lat, lng) {
+  var r = await fetchWithTimeout("https://nominatim.openstreetmap.org/reverse?format=json&zoom=12&addressdetails=1&lat=" + lat + "&lon=" + lng, {}, 15000);
+  if (!r.ok) throw new Error("Reverse geocode failed");
+  var data = await r.json();
+  var a = (data && data.address) || {};
+  var place = a.city || a.town || a.village || a.hamlet || a.suburb || a.county || null;
+  if (!place) return null;
+  return a.state ? (place + ", " + a.state) : place;
+}
+
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function Card({ children, style, borderColor, T }) {
   const th = THEMES[T || "dark"];
@@ -5296,6 +5312,23 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
     );
   }
   useEffect(function() { requestGps(); }, []);
+
+  // Populate the search box with a readable place name for whatever GPS fix is actually in use
+  // (town, or county if Nominatim has no town for this spot) -- purely a visual "yes, this is
+  // where the app thinks you are" confirmation, per direct feedback that a raw "Using your
+  // current location" label wasn't trustworthy enough on its own. Skipped while manualPos is
+  // set (searchText already holds what the member typed/searched, not their GPS fix) and while
+  // gpsLoading (no fix yet to resolve). Silently leaves searchText alone on failure -- this is
+  // a nicety, not something any actual water/spot lookup depends on (those always use the raw
+  // lat/lng regardless of whether this label resolves).
+  useEffect(function() {
+    if (manualPos || gpsLoading) return;
+    var cancelled = false;
+    reverseGeocodePlace(userPos.lat, userPos.lng).then(function(place) {
+      if (!cancelled && place) setSearchText(place);
+    }).catch(function() {});
+    return function() { cancelled = true; };
+  }, [userPos.lat, userPos.lng, gpsLoading, manualPos]);
 
   // Club-shared spots — loaded once, filtered client-side alongside SCOUT_SPOTS below.
   useEffect(function() {
