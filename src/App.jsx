@@ -5289,15 +5289,21 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   // where the app thinks you are" confirmation, per direct feedback that a raw "Using your
   // current location" label wasn't trustworthy enough on its own. Skipped while manualPos is
   // set (searchText already holds what the member typed/searched, not their GPS fix) and while
-  // gpsLoading (no fix yet to resolve). Silently leaves searchText alone on failure -- this is
-  // a nicety, not something any actual water/spot lookup depends on (those always use the raw
-  // lat/lng regardless of whether this label resolves).
+  // gpsLoading (no fix yet to resolve). Falls back to raw coordinates when Nominatim has no
+  // city/town/county for this exact point (e.g. standing on a bridge over water) or the request
+  // fails -- a blank box looked identical to "this feature doesn't exist," which defeated the
+  // whole point of a trust-confirmation display. This is still a nicety, not something any
+  // actual water/spot lookup depends on (those always use the raw lat/lng either way).
   useEffect(function() {
     if (manualPos || gpsLoading) return;
     var cancelled = false;
-    reverseGeocodePlace(userPos.lat, userPos.lng).then(function(place) {
-      if (!cancelled && place) setSearchText(place);
-    }).catch(function() {});
+    var lat = userPos.lat, lng = userPos.lng;
+    var coordsFallback = lat.toFixed(4) + ", " + lng.toFixed(4);
+    reverseGeocodePlace(lat, lng).then(function(place) {
+      if (!cancelled) setSearchText(place || coordsFallback);
+    }).catch(function() {
+      if (!cancelled) setSearchText(coordsFallback);
+    });
     return function() { cancelled = true; };
   }, [userPos.lat, userPos.lng, gpsLoading, manualPos]);
 
