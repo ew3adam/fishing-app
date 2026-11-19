@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Fixed (2026-11-19) (2)
+- **"DPR — Riverside Lagoon" sent members to a house, not the lagoon.** Its Google/Apple Maps
+  directions buttons used a coordinate ~0.6mi off from the actual spot — a known issue already
+  noted in `CLAUDE.md` but never actually corrected in `src/data/scoutSpots.js`. Fixed with real
+  coordinates from the club president (a dropped pin at the actual lagoon): `41.826, -87.8197`.
+
 ### Fixed (2026-11-19)
 - **Scout's "use my location" box could still sit blank for several seconds after tapping it.**
   Real-device report: the box stayed empty even after the water search itself had already finished.
