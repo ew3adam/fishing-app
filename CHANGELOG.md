@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Fixed (2026-11-19)
+- **Scout's "use my location" box could still sit blank for several seconds after tapping it.**
+  Real-device report: the box stayed empty even after the water search itself had already finished.
+  The previous fix only wrote a value into the box once the Nominatim reverse-geocode call settled
+  (success, no-match, or failure) — but that's a network round trip that can take several seconds
+  (up to this app's own 15s timeout), so there was a real, visible gap with no confirmation at all.
+  The box now fills with the raw coordinates immediately, synchronously, the moment the GPS fix
+  lands, then upgrades to a friendly place name if/when Nominatim resolves one shortly after.
+
 ### Added (2026-11-18) (3)
 - **`docs/FUTURE-NATIVE-IOS-WEATHER-STACK.md`** — not current architecture, explicitly speculative.
   Saves a WeatherKit-based native-iOS weather stack pitch for later reference, in case this app
