@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Added (2026-11-19)
+- **New Scout spot: "DPR — Miller Meadow."** Des Plaines River at Cermak Rd, a club president
+  favorite (2-3x/week). Park at the FPDCC Miller Meadow lot on the east side, cross the Cermak Rd
+  bridge, fish the west bank. Largemouth/smallmouth bass, Northern Pike, Sauger — sauger on
+  spinners/rattle traps, bass on Ned rigs/swimbaits/topwater.
+
 ### Fixed (2026-11-19) (3)
 - **"DPR — Lyons / 47th St Bridge" sent members to a house, not the bridge.** Second confirmed-bad
   `SCOUT_SPOTS` coordinate found right after the Riverside Lagoon one — its Google/Apple Maps
