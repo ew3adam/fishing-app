@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased] — In Progress
 
+### Fixed (2026-11-19) (3)
+- **"DPR — Lyons / 47th St Bridge" sent members to a house, not the bridge.** Second confirmed-bad
+  `SCOUT_SPOTS` coordinate found right after the Riverside Lagoon one — its Google/Apple Maps
+  directions buttons sent members to 4337 Prescott Ave, a residential address ~0.6mi from the
+  actual spot. Fixed with real coordinates from the club president: `41.80639, -87.81062`.
+
 ### Fixed (2026-11-19) (2)
 - **"DPR — Riverside Lagoon" sent members to a house, not the lagoon.** Its Google/Apple Maps
   directions buttons used a coordinate ~0.6mi off from the actual spot — a known issue already
