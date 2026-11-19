@@ -5289,21 +5289,25 @@ function ScoutTab({ T, profile, setProfile, goMyPrivateSpots }) {
   // where the app thinks you are" confirmation, per direct feedback that a raw "Using your
   // current location" label wasn't trustworthy enough on its own. Skipped while manualPos is
   // set (searchText already holds what the member typed/searched, not their GPS fix) and while
-  // gpsLoading (no fix yet to resolve). Falls back to raw coordinates when Nominatim has no
-  // city/town/county for this exact point (e.g. standing on a bridge over water) or the request
-  // fails -- a blank box looked identical to "this feature doesn't exist," which defeated the
-  // whole point of a trust-confirmation display. This is still a nicety, not something any
-  // actual water/spot lookup depends on (those always use the raw lat/lng either way).
+  // gpsLoading (no fix yet to resolve). Writes the raw coordinates into the box IMMEDIATELY/
+  // synchronously the moment a GPS fix lands -- not after waiting on reverseGeocodePlace's
+  // network round trip -- then upgrades that to a friendly place name if/when Nominatim resolves
+  // one. A real-device report showed the box still sitting blank right after tapping "Use my
+  // location" even though the water search itself had already finished, because the previous
+  // version only ever wrote to searchText once the Nominatim call settled (success, no-match, OR
+  // failure) -- Nominatim can take several seconds (up to this app's own 15s timeout) to respond,
+  // so there was a real, visible gap where nothing confirmed the fix was in use yet. This is
+  // still a nicety, not something any actual water/spot lookup depends on (those always use the
+  // raw lat/lng either way, resolved or not).
   useEffect(function() {
     if (manualPos || gpsLoading) return;
     var cancelled = false;
     var lat = userPos.lat, lng = userPos.lng;
     var coordsFallback = lat.toFixed(4) + ", " + lng.toFixed(4);
+    setSearchText(coordsFallback);
     reverseGeocodePlace(lat, lng).then(function(place) {
-      if (!cancelled) setSearchText(place || coordsFallback);
-    }).catch(function() {
-      if (!cancelled) setSearchText(coordsFallback);
-    });
+      if (!cancelled && place) setSearchText(place);
+    }).catch(function() {});
     return function() { cancelled = true; };
   }, [userPos.lat, userPos.lng, gpsLoading, manualPos]);
 
